@@ -3,10 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## 1.5.1
 
-**Internal: Rename repo directory `ha_opencode/` to `opencode/`**
+**Fix: Restore add-on logo in Home Assistant update notifications**
 
-- Renamed all non-breaking internal references (repo directory, s6 service name, CI paths, scripts)
-- Add-on slug and Docker image path unchanged — no impact on existing installs
+- Reverted directory rename (`opencode/` back to `ha_opencode/`) — HA Supervisor requires the directory name to match the add-on slug for icon/logo discovery
 
 ## 1.5.0
 

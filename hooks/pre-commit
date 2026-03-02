@@ -2,7 +2,7 @@
 # Pre-commit hook to automatically update version shield when config.yaml version changes
 
 # Check if config.yaml was modified
-if git diff --cached --name-only | grep -q "opencode/config.yaml"; then
+if git diff --cached --name-only | grep -q "ha_opencode/config.yaml"; then
     echo "config.yaml changed - updating version shield in README.md..."
     ./scripts/update-version-shield.sh
     

@@ -279,8 +279,8 @@ This is free and unencumbered software released into the public domain - see the
 </div>
 
 <!-- Links -->
-[docs]: ./opencode/DOCS.md
-[changelog]: ./opencode/CHANGELOG.md
+[docs]: ./ha_opencode/DOCS.md
+[changelog]: ./ha_opencode/CHANGELOG.md
 [issues]: https://github.com/magnusoverli/ha_opencode/issues
 [license]: UNLICENSE
 [github]: https://github.com/magnusoverli/ha_opencode
