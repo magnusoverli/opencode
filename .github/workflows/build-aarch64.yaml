@@ -69,7 +69,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |
-            org.opencontainers.image.title=HA OpenCode
+            org.opencontainers.image.title=OpenCode
             org.opencontainers.image.description=AI coding agent for Home Assistant
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}

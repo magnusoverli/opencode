@@ -1,11 +1,11 @@
 #!/command/with-contenv bashio
 # ==============================================================================
-# HA OpenCode - Terminal Service (ttyd)
+# OpenCode - Terminal Service (ttyd)
 # Provides web-based terminal with OpenCode via Home Assistant ingress
 # ==============================================================================
 
 bashio::log.info "=============================================="
-bashio::log.info "  HA OpenCode Terminal (ttyd + ingress)"
+bashio::log.info "  OpenCode Terminal (ttyd + ingress)"
 bashio::log.info "=============================================="
 
 # Set home to persistent data directory

@@ -10,7 +10,7 @@
     "homeassistant": {
       "type": "local",
       "command": ["node", "/opt/ha-mcp-server/index.js"],
-      "enabled": false,
+      "enabled": true,
       "timeout": 10000,
       "environment": {
         "SUPERVISOR_TOKEN": "{env:SUPERVISOR_TOKEN}"

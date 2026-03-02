@@ -69,7 +69,7 @@ fi
 show_banner() {
     clear
     echo ""
-    echo -e "${BLUE}${BOLD}HA OpenCode${NC} ${GRAY}v${ADDON_VERSION}${NC}${CPU_INFO}"
+    echo -e "${BLUE}${BOLD}OpenCode${NC} ${GRAY}v${ADDON_VERSION}${NC}${CPU_INFO}"
     echo -e "${GRAY}AI-powered coding agent for Home Assistant${NC}"
     echo ""
     echo -e "${GRAY}────────────────────────────────────────────────────────────${NC}"

@@ -25,6 +25,6 @@
     "vscode-languageserver-textdocument": "^1.0.12",
     "yaml": "^2.4.5"
   },
-  "author": "HA OpenCode App",
+  "author": "OpenCode App",
   "license": "Unlicense"
 }

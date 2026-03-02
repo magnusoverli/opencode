@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚀 HA OpenCode
+# 🚀 OpenCode
 
 ### *AI-Powered Configuration Assistant for Home Assistant*
 
@@ -22,7 +22,7 @@
 
 ## ✨ About
 
-**HA OpenCode** brings the revolutionary [OpenCode](https://opencode.ai) AI coding agent directly into your Home Assistant instance. Experience intelligent configuration editing through natural language, advanced YAML assistance, and deep integration via the Model Context Protocol (MCP).
+**OpenCode** brings the revolutionary [OpenCode](https://opencode.ai) AI coding agent directly into your Home Assistant instance. Experience intelligent configuration editing through natural language, advanced YAML assistance, and deep integration via the Model Context Protocol (MCP).
 
 
 ### 🎯 Key Features
@@ -73,7 +73,7 @@ Think of it as your personal expert developer who:
 
 ## 🎭 Supported AI Providers
 
-HA OpenCode works with **75+ AI providers**. Choose the one that fits your needs:
+OpenCode works with **75+ AI providers**. Choose the one that fits your needs:
 
 <details>
 <summary><b>🔥 Popular Providers (Click to expand)</b></summary>
@@ -98,7 +98,7 @@ HA OpenCode works with **75+ AI providers**. Choose the one that fits your needs
 
 ### 🎁 **Free Tier - OpenCode Zen**
 
-Start immediately with **OpenCode Zen** - no API keys or subscriptions required! Get access to curated models optimized for coding tasks, perfect for trying HA OpenCode or for users who prefer not to manage their own API keys.
+Start immediately with **OpenCode Zen** - no API keys or subscriptions required! Get access to curated models optimized for coding tasks, perfect for trying OpenCode or for users who prefer not to manage their own API keys.
 
 Simply run `/connect` and select **OpenCode Zen** to get started for free.
 
@@ -121,7 +121,7 @@ Simply run `/connect` and select **OpenCode Zen** to get started for free.
    </details>
 
 2. **Install the add-on:**
-   - Find **"HA OpenCode"** in the add-on store
+   - Find **"OpenCode"** in the add-on store
    - Click **Install**
 
 3. **Start using it:**
@@ -135,7 +135,7 @@ Simply run `/connect` and select **OpenCode Zen** to get started for free.
 
 > **This add-on has read/write access to your Home Assistant configuration directory.**
 
-HA OpenCode includes a multi-layered validation pipeline designed to prevent AI-written configuration from causing your Home Assistant to fail to start:
+OpenCode includes a multi-layered validation pipeline designed to prevent AI-written configuration from causing your Home Assistant to fail to start:
 
 - 🔍 **Automatic config validation** — every config write is validated through HA Core's own check before committing
 - ↩️ **Automatic backup/restore** — if validation fails, the original file is instantly restored
@@ -267,7 +267,7 @@ This is free and unencumbered software released into the public domain - see the
 
 <div align="center">
 
-### ⭐ If you find HA OpenCode helpful, please star this repository!
+### ⭐ If you find OpenCode helpful, please star this repository!
 
 **Made with ❤️ for the Home Assistant community**
 

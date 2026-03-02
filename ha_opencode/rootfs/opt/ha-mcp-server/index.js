@@ -2094,7 +2094,7 @@ const TOOLS = [
   {
     name: "update_component",
     title: "Update Component",
-    description: "Initiate an update for a Home Assistant component (Core, OS, Supervisor) or an app. Returns a job_id for progress monitoring. NOTE: Cannot update HA OpenCode itself from within - use Home Assistant UI for self-updates.",
+    description: "Initiate an update for a Home Assistant component (Core, OS, Supervisor) or an app. Returns a job_id for progress monitoring. NOTE: Cannot update OpenCode itself from within - use Home Assistant UI for self-updates.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3542,7 +3542,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         // Prevent self-update
         if (component === "addon" && addon_slug === "local_ha_opencode") {
-          throw new Error("Cannot update HA OpenCode from within itself. The container will be stopped during update. Please use the Home Assistant UI to update this app.");
+          throw new Error("Cannot update OpenCode from within itself. The container will be stopped during update. Please use the Home Assistant UI to update this app.");
         }
         
         let endpoint;

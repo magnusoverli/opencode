@@ -41,7 +41,7 @@ You MUST follow these rules strictly:
 
 ## Environment Context
 
-- You are running inside the HA OpenCode app
+- You are running inside the OpenCode app
 - The current directory (`/homeassistant`) contains the live Home Assistant configuration
 - Changes to YAML files here directly affect the Home Assistant instance
 - You may have access to MCP tools for interacting with Home Assistant (check with the user)

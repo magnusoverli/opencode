@@ -1,5 +1,5 @@
 ---
-name: "HA OpenCode"
+name: "OpenCode"
 description: "AI coding agent for editing Home Assistant configuration with deep MCP integration and LSP support"
 version: "1.4.4"
 slug: "ha_opencode"
@@ -16,7 +16,7 @@ ingress: true
 ingress_port: 8099
 ingress_stream: true
 panel_icon: mdi:robot
-panel_title: HA OpenCode
+panel_title: OpenCode
 
 # File access - Home Assistant config directory
 map:
@@ -36,7 +36,7 @@ apparmor: true
 # User-configurable options
 options:
   # Feature toggles
-  mcp_enabled: false
+  mcp_enabled: true
   lsp_enabled: true
   
   # CPU mode: auto (detect), baseline (for older CPUs), regular (force AVX2)

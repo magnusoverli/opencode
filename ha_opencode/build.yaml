@@ -10,7 +10,7 @@ args:
   OPENCODE_VERSION: "latest"
   TTYD_VERSION: "1.7.7"
 labels:
-  org.opencontainers.image.title: "HA OpenCode"
+  org.opencontainers.image.title: "OpenCode"
   org.opencontainers.image.description: "AI coding agent for Home Assistant"
   org.opencontainers.image.source: "https://github.com/magnusoverli/ha_opencode"
   org.opencontainers.image.licenses: "Unlicense"

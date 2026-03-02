@@ -1,10 +1,10 @@
 #!/command/with-contenv bashio
 # ==============================================================================
-# HA OpenCode - Initialization Service (oneshot)
+# OpenCode - Initialization Service (oneshot)
 # Runs once at container startup to prepare the environment
 # ==============================================================================
 
-bashio::log.info "Initializing HA OpenCode..."
+bashio::log.info "Initializing OpenCode..."
 
 # Save addon version for the terminal banner
 bashio::addon.version > /data/.addon_version
@@ -302,4 +302,4 @@ if [ -f "${OPTIONS_FILE}" ]; then
     fi
 fi
 
-bashio::log.info "HA OpenCode initialization complete"
+bashio::log.info "OpenCode initialization complete"

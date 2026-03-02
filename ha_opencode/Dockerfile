@@ -70,7 +70,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Labels for Home Assistant
 LABEL \
-    io.hass.name="HA OpenCode" \
+    io.hass.name="OpenCode" \
     io.hass.description="AI coding agent for editing Home Assistant configuration" \
     io.hass.type="addon" \
     io.hass.version="${BUILD_VERSION}"

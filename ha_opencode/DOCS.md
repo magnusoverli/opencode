@@ -1,6 +1,6 @@
-# HA OpenCode
+# OpenCode
 
-HA OpenCode is an AI-powered coding agent that helps you edit and manage your Home Assistant configuration directly from your browser.
+OpenCode is an AI-powered coding agent that helps you edit and manage your Home Assistant configuration directly from your browser.
 
 ## Features
 
@@ -20,7 +20,7 @@ Configure the app from the **Configuration** tab in the app page.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| **Enable MCP Home Assistant Integration** | `false` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 32 tools, 13 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
+| **Enable MCP Home Assistant Integration** | `true` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 32 tools, 13 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
 | **Enable LSP Home Assistant Integration** | `true` | Enable the Language Server Protocol (LSP) server for intelligent YAML editing. Provides entity/service autocomplete, hover documentation, diagnostics for unknown entities, and go-to-definition for !include tags. |
 
 ### Terminal Appearance
@@ -70,7 +70,7 @@ After saving and restarting the add-on, these variables will be available in the
 
 ### 1. Open the App
 
-Click on **HA OpenCode** in the Home Assistant sidebar to open the terminal.
+Click on **OpenCode** in the Home Assistant sidebar to open the terminal.
 
 ### 2. Configure Your AI Provider
 
@@ -487,7 +487,7 @@ LSP (Language Server Protocol) is a standard that enables smart editor features 
 - Go-to-definition
 - Error diagnostics
 
-The HA OpenCode LSP server connects to your Home Assistant instance and provides context-aware assistance while you edit YAML files.
+The OpenCode LSP server connects to your Home Assistant instance and provides context-aware assistance while you edit YAML files.
 
 ### LSP Features
 
@@ -805,7 +805,7 @@ Your OpenCode sessions and API credentials are stored in `/data/` within the app
 - This app can view system logs (Core, Supervisor, Host)
 - When MCP is enabled, OpenCode can query entities and call services
 - Access is protected by Home Assistant authentication via ingress
-- Only users with access to the HA OpenCode panel can use this app
+- Only users with access to the OpenCode panel can use this app
 
 ## Troubleshooting
 
