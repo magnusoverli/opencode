@@ -1,6 +1,23 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 1.5.0
+
+**Renamed to OpenCode + hab CLI Integration**
+
+Based on feedback from [@balloob](https://github.com/balloob):
+
+- **Renamed from "HA OpenCode" to "OpenCode"** across all user-facing surfaces (sidebar panel, add-on store, logs, banner, docs, build labels)
+- **MCP enabled by default** — the Home Assistant MCP integration is now on out of the box, no manual toggle needed
+- **Integrated [hab CLI](https://github.com/balloob/home-assistant-build-cli)** (Home Assistant Builder v1.4.0) — a CLI by balloob designed for AI agents to manage HA via REST and WebSocket APIs
+  - Installed as a pre-authenticated binary (amd64 + aarch64)
+  - Exposed as a native MCP tool (`hab_run`) so the AI discovers it alongside existing tools — no bash guesswork needed
+  - Covers dashboard CRUD, area/floor/zone/label management, helper creation, automation management via API, script management, backup/restore, blueprints, calendar, device management, groups, and search
+  - Security: uses `execFile` (no shell injection), blocks auth/self-update commands
+- **AGENTS.md auto-update** — on add-on update, AGENTS.md is refreshed with the latest AI instructions unless the user has customized it
+- Available in the shell help after exiting OpenCode (`hab <cmd>`)
+- MCP tool count: 32 → 33
+
 ## 1.4.4
 
 **Fix: write_config_safe now blocks writes when HA config check is unavailable**
