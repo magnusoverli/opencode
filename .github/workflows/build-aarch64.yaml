@@ -55,8 +55,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ha_opencode
-          file: ha_opencode/Dockerfile
+          context: opencode
+          file: opencode/Dockerfile
           platforms: linux/arm64
           push: true
           tags: |

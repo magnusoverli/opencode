@@ -5,7 +5,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG_FILE="$REPO_ROOT/ha_opencode/config.yaml"
+CONFIG_FILE="$REPO_ROOT/opencode/config.yaml"
 README_FILE="$REPO_ROOT/README.md"
 
 # Extract version from config.yaml

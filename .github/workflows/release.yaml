@@ -30,16 +30,16 @@ jobs:
       - name: Update version in config.yaml
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          sed -i "s/^version: .*/version: \"${VERSION}\"/" ha_opencode/config.yaml
+          sed -i "s/^version: .*/version: \"${VERSION}\"/" opencode/config.yaml
 
           # Check if version was updated
-          grep "version:" ha_opencode/config.yaml
+          grep "version:" opencode/config.yaml
 
       - name: Commit version update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ha_opencode/config.yaml
+          git add opencode/config.yaml
           git commit -m "chore: bump version to ${{ steps.version.outputs.version }}" || echo "No changes to commit"
           git push origin main
 
@@ -53,7 +53,7 @@ jobs:
             /^## ${VERSION}$/ { found=1; next }
             found && /^## / { exit }
             found { print }
-          " ha_opencode/CHANGELOG.md)
+          " opencode/CHANGELOG.md)
 
           echo "content<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
