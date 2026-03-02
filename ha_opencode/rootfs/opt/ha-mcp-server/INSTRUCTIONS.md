@@ -166,6 +166,57 @@ Use these prompts for complex tasks:
 7. **Verify syntax is current**: Use `get_integration_docs` before writing configuration
 8. **Check for deprecations**: The LSP and `write_config_safe` catch these automatically, but `check_config_syntax` is available for quick ad-hoc checks
 
+## hab CLI (Home Assistant Builder)
+
+In addition to MCP tools, you have access to the `hab` CLI tool for managing Home Assistant. It is pre-authenticated and outputs JSON by default.
+
+### When to Use hab vs MCP
+
+- **Use MCP** for: safe config writing, anomaly detection, entity diagnostics, firmware updates, template rendering, history queries
+- **Use hab** for: dashboard management, area/floor/zone CRUD, helper creation, backups, blueprints, bulk entity listing, script CRUD
+
+### Common hab Commands
+
+```bash
+# List entities (JSON output)
+hab entity list
+hab entity list --domain light
+hab entity get light.living_room
+
+# Call actions
+hab action call light.turn_on --entity light.living_room --data '{"brightness": 200}'
+
+# Manage automations
+hab automation list
+hab automation get my-automation
+hab automation create my-automation -f automation.yaml
+
+# Manage dashboards
+hab dashboard list
+hab dashboard view create my-dashboard -f view.yaml
+
+# Manage areas
+hab area list
+hab area create "Kitchen"
+
+# Manage helpers
+hab helper list
+hab helper create input_boolean --name "Guest Mode"
+
+# Backups
+hab backup list
+hab backup create
+
+# System info
+hab system info
+hab system health
+
+# Human-readable output
+hab entity list --text
+```
+
+Run `hab --help` or `hab <command> --help` for full usage.
+
 ## Example Patterns
 
 ### Turn on a light

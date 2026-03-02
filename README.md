@@ -52,6 +52,9 @@ Smart YAML editing with entity autocomplete, live hover information, deprecation
 #### 🛡️ **Safe Config Writing**
 Validated config pipeline with automatic backup/restore. Multi-layered checks are designed to prevent AI-written config from breaking your HA instance.
 
+#### 🏗️ **hab CLI Integration**
+Includes [Home Assistant Builder CLI](https://github.com/balloob/home-assistant-build-cli) for full admin capabilities: dashboards, automations, areas, helpers, backups, and more.
+
 </td>
 </tr>
 </table>

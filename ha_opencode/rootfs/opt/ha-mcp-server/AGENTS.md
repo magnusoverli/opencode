@@ -48,7 +48,7 @@ You MUST follow these rules strictly:
 
 ## Home Assistant Interaction Model
 
-There are two primary, safe ways to interact with Home Assistant:
+There are three primary, safe ways to interact with Home Assistant:
 
 ### 1. Configuration Files (YAML)
 The standard way to define and customize Home Assistant behavior:
@@ -66,10 +66,30 @@ Real-time interaction with the running Home Assistant instance:
 - Validate configurations
 - Diagnose issues and detect anomalies
 
-**Use configuration files when:** defining behavior, creating automations, setting up integrations
-**Use MCP tools when:** checking current state, controlling devices, troubleshooting, validating changes
+### 3. hab CLI (Home Assistant Builder)
+A CLI tool designed for AI agents to manage Home Assistant. Run `hab` commands via the terminal:
+- **Entity management**: `hab entity list`, `hab entity get light.living_room`
+- **Service calls**: `hab action call light.turn_on --entity light.living_room --data '{"brightness": 200}'`
+- **Automation CRUD**: `hab automation list`, `hab automation create`, `hab automation delete`
+- **Dashboard management**: `hab dashboard list`, `hab dashboard view create`
+- **Area/floor/zone/label**: `hab area list`, `hab area create "Kitchen"`
+- **Helpers**: `hab helper list`, `hab helper create`
+- **Scripts**: `hab script list`, `hab script create`
+- **Blueprints**: `hab blueprint list`
+- **Backups**: `hab backup list`, `hab backup create`
+- **System**: `hab system info`, `hab system health`
+- **Devices**: `hab device list`
+- **Search**: `hab search related`
 
-### 3. Internal Directories (OFF-LIMITS)
+`hab` outputs JSON by default (ideal for parsing). Use `--text` for human-readable output.
+`hab` is pre-authenticated via the Supervisor token - no login required.
+Run `hab --help` or `hab <command> --help` for full usage details.
+
+**Use configuration files when:** defining behavior, creating automations, setting up integrations
+**Use MCP tools when:** checking current state, safe config writing, anomaly detection, entity diagnostics
+**Use hab CLI when:** managing dashboards, areas, helpers, backups, blueprints, and bulk admin operations
+
+### 4. Internal Directories (OFF-LIMITS)
 Home Assistant manages internal state in directories like `.storage/`. These are:
 - Not designed for direct access
 - Subject to change without notice
@@ -463,19 +483,24 @@ Query and interact with the running Home Assistant instance:
 
 ### Choosing the Right Approach
 
-| Task | Configuration Files | MCP Tools |
-|------|---------------------|-----------|
-| Create/edit automations | Primary | **Write with `write_config_safe`** |
-| Understand automation logic | Read YAML | Check state with `get_states` |
-| Check current device state | Reference only | Primary |
-| Control devices | N/A | `call_service` |
-| Add new integrations | Primary | N/A |
-| Troubleshoot issues | Review configs | `diagnose_entity`, `get_error_log` |
-| Find entities | Grep YAML files | `search_entities` |
-| View history | N/A | `get_history` |
-| **Update firmware** | N/A | **`watch_firmware_update`** |
-| **Check for updates** | N/A | `get_available_updates` |
-| **Update HA Core/OS** | N/A | `update_component` |
+| Task | Configuration Files | MCP Tools | hab CLI |
+|------|---------------------|-----------|---------|
+| Create/edit automations | Primary | **Write with `write_config_safe`** | `hab automation create` |
+| Understand automation logic | Read YAML | Check state with `get_states` | `hab automation get` |
+| Check current device state | Reference only | Primary | `hab entity get` |
+| Control devices | N/A | `call_service` | `hab action call` |
+| Add new integrations | Primary | N/A | N/A |
+| Troubleshoot issues | Review configs | `diagnose_entity`, `get_error_log` | `hab system health` |
+| Find entities | Grep YAML files | `search_entities` | `hab entity list --domain` |
+| View history | N/A | `get_history` | N/A |
+| **Manage dashboards** | Edit YAML | N/A | **`hab dashboard` (primary)** |
+| **Manage areas/floors** | N/A | `get_areas` (read-only) | **`hab area/floor` (CRUD)** |
+| **Manage helpers** | N/A | N/A | **`hab helper` (primary)** |
+| **Backups** | N/A | N/A | **`hab backup` (primary)** |
+| **Blueprints** | N/A | N/A | **`hab blueprint` (primary)** |
+| **Update firmware** | N/A | **`watch_firmware_update`** | N/A |
+| **Check for updates** | N/A | `get_available_updates` | N/A |
+| **Update HA Core/OS** | N/A | `update_component` | N/A |
 
 ### Update Management (IMPORTANT)
 

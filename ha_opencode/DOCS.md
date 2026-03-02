@@ -124,6 +124,90 @@ The app includes helper commands:
 | `ha-mcp disable` | Disable Home Assistant MCP integration |
 | `ha-mcp status` | Check MCP integration status |
 | `ha-mcp test` | Test MCP server connection |
+| `hab --help` | Show hab CLI help (Home Assistant Builder) |
+| `hab entity list` | List all entities via hab CLI |
+| `hab area list` | List all areas via hab CLI |
+
+## Home Assistant Builder CLI (hab)
+
+The app includes [hab](https://github.com/balloob/home-assistant-build-cli) (Home Assistant Builder), a CLI utility designed for AI agents to manage Home Assistant configurations. It is pre-authenticated via the Supervisor token and outputs JSON by default.
+
+### What hab Provides
+
+`hab` covers the full admin area of Home Assistant via REST and WebSocket APIs:
+
+| Command Group | Description |
+|---------------|-------------|
+| `hab entity` | List entities, get entity state |
+| `hab action` | Call Home Assistant actions/services |
+| `hab automation` | Create, list, get, update, delete automations |
+| `hab script` | Create, list, get, update, delete scripts |
+| `hab dashboard` | Manage dashboards, views, sections, cards |
+| `hab area` | Create, list, delete areas |
+| `hab floor` | Manage floors |
+| `hab zone` | Manage zones |
+| `hab label` | Manage labels |
+| `hab helper` | Create and manage helper entities (input_boolean, counter, timer, etc.) |
+| `hab backup` | Create and restore backups |
+| `hab calendar` | Manage calendar events |
+| `hab blueprint` | Manage blueprints |
+| `hab system` | System info, health checks |
+| `hab device` | Device management |
+| `hab group` | Manage entity groups |
+| `hab search` | Search for items and relationships |
+
+### How hab Complements MCP
+
+Both tools are available and each has strengths:
+
+| Feature | MCP Server | hab CLI |
+|---------|------------|---------|
+| **Safe config writing** | Primary (validated pipeline) | N/A |
+| **Anomaly detection** | Primary | N/A |
+| **Entity diagnostics** | Primary | N/A |
+| **Firmware updates** | Primary (real-time monitoring) | N/A |
+| **Dashboard CRUD** | N/A | Primary |
+| **Area/floor/zone CRUD** | Read-only | Full CRUD |
+| **Helper management** | N/A | Primary |
+| **Backup/restore** | N/A | Primary |
+| **Blueprint management** | N/A | Primary |
+| **Automation CRUD** | Via config files | Via API |
+
+### Usage Examples
+
+```bash
+# List all light entities
+hab entity list --domain light
+
+# Get a specific entity state
+hab entity get sensor.living_room_temperature
+
+# Call an action
+hab action call light.turn_on --entity light.living_room --data '{"brightness": 200}'
+
+# Create an automation from a YAML file
+hab automation create my-automation -f automation.yaml
+
+# Create an automation with inline YAML
+hab automation create my-automation <<'EOF'
+alias: Motion Light
+trigger:
+  - platform: state
+    entity_id: binary_sensor.motion
+    to: "on"
+action:
+  - service: light.turn_on
+    target:
+      entity_id: light.living_room
+EOF
+
+# Human-readable output
+hab entity list --text
+```
+
+Run `hab --help` or `hab <command> --help` for complete documentation.
+
+---
 
 ## Home Assistant MCP Integration
 
