@@ -1,6 +1,12 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+<!-- NEXT RELEASE NOTES (do not tag yet):
+- Users who experienced missing icons/logo after the repo rename to magnusoverli/opencode
+  need to uninstall and reinstall the add-on once to restore them. A standard update is
+  not sufficient — the Supervisor does not refresh icon cache on update alone.
+-->
+
 ## 1.5.2
 
 **Rename: GitHub repository `ha_opencode` -> `opencode`**
