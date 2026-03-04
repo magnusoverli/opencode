@@ -9,7 +9,7 @@ args:
   # Pin versions for reproducible builds (use 'latest' for auto-updates)
   OPENCODE_VERSION: "latest"
   TTYD_VERSION: "1.7.7"
-  HAB_VERSION: "1.4.0"
+  # hab CLI is built from source (main branch) in a multi-stage Docker build
 labels:
   org.opencontainers.image.title: "OpenCode"
   org.opencontainers.image.description: "AI coding agent for Home Assistant"

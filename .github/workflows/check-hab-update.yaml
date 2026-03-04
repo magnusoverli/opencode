@@ -8,69 +8,33 @@ on:
 
 jobs:
   check-hab-update:
-    name: Check for hab CLI updates
+    name: Check for hab CLI updates on main
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Get latest hab release
+      - name: Get latest commit on main
         id: latest
         run: |
-          LATEST=$(curl -fsSL "https://api.github.com/repos/balloob/home-assistant-build-cli/releases/latest" \
+          COMMIT=$(curl -fsSL "https://api.github.com/repos/balloob/home-assistant-build-cli/commits/main" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            | jq -r '.tag_name' | sed 's/^v//')
-          echo "version=${LATEST}" >> $GITHUB_OUTPUT
-          echo "Latest hab version: ${LATEST}"
+            | jq -r '.sha' | head -c 12)
+          DATE=$(curl -fsSL "https://api.github.com/repos/balloob/home-assistant-build-cli/commits/main" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            | jq -r '.commit.committer.date')
+          echo "commit=${COMMIT}" >> $GITHUB_OUTPUT
+          echo "date=${DATE}" >> $GITHUB_OUTPUT
+          echo "Latest hab CLI commit on main: ${COMMIT} (${DATE})"
 
-      - name: Get current pinned version
-        id: current
+      - name: Summary
         run: |
-          CURRENT=$(grep 'HAB_VERSION:' ha_opencode/build.yaml | grep -oP '[\d.]+')
-          echo "version=${CURRENT}" >> $GITHUB_OUTPUT
-          echo "Current hab version: ${CURRENT}"
-
-      - name: Check if update is needed
-        id: check
-        run: |
-          if [ "${{ steps.latest.outputs.version }}" != "${{ steps.current.outputs.version }}" ]; then
-            echo "needed=true" >> $GITHUB_OUTPUT
-            echo "Update available: ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
-          else
-            echo "needed=false" >> $GITHUB_OUTPUT
-            echo "hab CLI is already at the latest version (${{ steps.current.outputs.version }})"
-          fi
-
-      - name: Update version pins
-        if: steps.check.outputs.needed == 'true'
-        run: |
-          LATEST="${{ steps.latest.outputs.version }}"
-          # Update canonical version pin in build.yaml
-          sed -i "s/HAB_VERSION: \"[^\"]*\"/HAB_VERSION: \"${LATEST}\"/" ha_opencode/build.yaml
-          # Keep Dockerfile default ARG in sync (overridden by build.yaml, but kept consistent)
-          sed -i "s/^ARG HAB_VERSION=.*/ARG HAB_VERSION=${LATEST}/" ha_opencode/Dockerfile
-
-      - name: Create Pull Request
-        if: steps.check.outputs.needed == 'true'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: bump hab CLI from ${{ steps.current.outputs.version }} to ${{ steps.latest.outputs.version }}"
-          branch: "update/hab-${{ steps.latest.outputs.version }}"
-          title: "chore: bump hab CLI to v${{ steps.latest.outputs.version }}"
-          body: |
-            Automated dependency update: hab CLI `${{ steps.current.outputs.version }}` → `${{ steps.latest.outputs.version }}`
-
-            **Release notes:** https://github.com/balloob/home-assistant-build-cli/releases/tag/v${{ steps.latest.outputs.version }}
-
-            **Review checklist before merging:**
-            - [ ] Check release notes for new subcommands or breaking changes
-            - [ ] If new `hab` commands were added, they will be exposed automatically via dynamic help injection at runtime (no AGENTS.md edit needed)
-            - [ ] If commands were removed or renamed, update the static examples in `AGENTS.md`
-            - [ ] Tag a new addon release after merging if the update warrants it
-
-            *This PR was created automatically by the hab update check workflow.*
+          echo "## hab CLI (main branch) status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Latest commit | \`${{ steps.latest.outputs.commit }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit date | ${{ steps.latest.outputs.date }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "hab CLI is built from source (main branch) at each add-on release." >> $GITHUB_STEP_SUMMARY
+          echo "To pick up the latest changes, tag a new add-on release." >> $GITHUB_STEP_SUMMARY
