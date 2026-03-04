@@ -1,13 +1,19 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## 1.5.3
+## 1.6.0
 
 **hab CLI from Source + Debian Trixie Base Image**
 
+- **Upgraded base image to Debian Trixie** — migrated from `bookworm` (Debian 12) to `trixie` (Debian 13), bringing Node.js 18 → 20, git 2.39 → 2.47, glibc 2.36 → 2.41, and newer versions of jq, curl, and tmux
 - **hab CLI built from source** — hab is now compiled from the [main branch](https://github.com/balloob/home-assistant-build-cli) at each add-on release via a multi-stage Docker build, replacing the previous pinned release binary. This ensures the latest features and fixes are always included without waiting for upstream releases
 - **Removed daily/weekly release-tracking workflows** — the automated version-bump PRs (`update-hab-cli.yaml`, `check-hab-update.yaml`) have been replaced with a lightweight weekly status check that reports the latest commit on main
-- **Upgraded base image to Debian Trixie** — migrated from `bookworm` (Debian 12) to `trixie` (Debian 13), bringing Node.js 18 → 20, git 2.39 → 2.47, glibc 2.36 → 2.41, and newer versions of jq, curl, and tmux
+
+## 1.5.3
+
+**hab CLI: Automated Update Tracking + Live Command Discovery**
+
+- **Automated hab update detection** — new weekly GitHub Actions workflow checks for new [hab CLI](https://github.com/balloob/home-assistant-build-cli) releases every Monday and opens a pull request automatically, keeping the version pins in `build.yaml` and `Dockerfile` in sync. Can also be triggered manually from the Actions tab.
 - **Dynamic hab help injection** — at container startup, `hab --help` output is injected live into `AGENTS.md` between sentinel markers, so the AI always sees the exact commands available in the installed hab version — no manual documentation update needed when hab gains new features
 - **Note for users who saw missing icons after the 1.5.2 repo rename**: a standard update is not sufficient to restore them — uninstall and reinstall the add-on once to refresh the Supervisor icon cache
 
@@ -34,8 +40,8 @@ Based on feedback from [@balloob](https://github.com/balloob):
 
 - **Renamed from "HA OpenCode" to "OpenCode"** across all user-facing surfaces (sidebar panel, add-on store, logs, banner, docs, build labels)
 - **MCP enabled by default** — the Home Assistant MCP integration is now on out of the box, no manual toggle needed
-- **Integrated [hab CLI](https://github.com/balloob/home-assistant-build-cli)** — a CLI by balloob designed for AI agents to manage HA via REST and WebSocket APIs
-  - Built from source and pre-authenticated (amd64 + aarch64)
+- **Integrated [hab CLI](https://github.com/balloob/home-assistant-build-cli)** (Home Assistant Builder v1.4.0) — a CLI by balloob designed for AI agents to manage HA via REST and WebSocket APIs
+  - Installed as a pre-authenticated binary (amd64 + aarch64)
   - Exposed as a native MCP tool (`hab_run`) so the AI discovers it alongside existing tools — no bash guesswork needed
   - Covers dashboard CRUD, area/floor/zone/label management, helper creation, automation management via API, script management, backup/restore, blueprints, calendar, device management, groups, and search
   - Security: uses `execFile` (no shell injection), blocks auth/self-update commands
