@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.1b3
+
+- Bypass Supervisor proxy entirely for ESPHome ingress
+  - Route directly to HA Core at `http://homeassistant:8123` (Docker internal hostname)
+  - Session: `POST http://homeassistant:8123/api/hassio/ingress/session`
+  - Requests: `http://homeassistant:8123/api/hassio_ingress/{entry}/...`
+  - Matches the code path that works from outside HA with a long-lived token
+
 ## 1.6.1b2
 
 - Fix ESPHome ingress session creation (was returning 403)

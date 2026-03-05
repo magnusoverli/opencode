@@ -202,10 +202,10 @@ async function callSupervisor(endpoint, method = "GET", body = null) {
  * The dashboard binds to a Unix socket, fronted by nginx with IP-based access
  * rules that block requests from other addon containers.
  *
- * By routing through the Supervisor's ingress proxy (http://supervisor/ingress/{entry}/...)
- * the TCP connection to ESPHome's nginx originates from the Supervisor's IP,
- * which is in the nginx allow list.  This is the same path the browser-based
- * HA frontend uses for ingress panels.
+ * By routing directly through HA Core (http://homeassistant:8123/api/hassio_ingress/{entry}/...)
+ * the request passes through HA Core's ingress proxy to the Supervisor, which connects
+ * to ESPHome from its own IP (allowed by nginx).  This bypasses the Supervisor proxy
+ * entirely, matching the code path that works from the CLI outside HA.
  *
  * Returns null if ESPHome is not installed or not running.
  */
@@ -229,11 +229,32 @@ async function discoverESPHome() {
       return null;
     }
     
-    // Create an ingress session through HA Core's hassio API proxy.
-    // Addons cannot call POST /ingress/session on the Supervisor directly
-    // (returns 403).  HA Core has the required privileges and exposes the
-    // Supervisor API at /api/hassio/..., so we route through it.
-    const sessionResponse = await callHA("/hassio/ingress/session", "POST");
+    // Bypass the Supervisor entirely and talk directly to HA Core.
+    // From inside an addon container, HA Core is reachable at
+    // http://homeassistant:8123 (Docker internal hostname).
+    // The SUPERVISOR_TOKEN works as a Bearer token when the addon
+    // has homeassistant_api: true in config.yaml.
+    //
+    // Previous attempts routing through the Supervisor proxy
+    // (http://supervisor/ingress/session and
+    //  http://supervisor/core/api/hassio/ingress/session)
+    // both returned 403.  Going directly to HA Core matches the
+    // code path that works from the CLI outside HA.
+    const HA_CORE_URL = "http://homeassistant:8123";
+    
+    const sessionRes = await fetch(`${HA_CORE_URL}/api/hassio/ingress/session`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SUPERVISOR_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!sessionRes.ok) {
+      const text = await sessionRes.text();
+      sendLog("error", "esphome", { action: "discover", result: "session_failed", status: sessionRes.status, error: text });
+      return null;
+    }
+    const sessionResponse = await sessionRes.json();
     // HA Core forwards the Supervisor response as-is: {result, data:{session}}
     const ingressSession = sessionResponse?.data?.session;
     if (!ingressSession) {
@@ -241,11 +262,9 @@ async function discoverESPHome() {
       return null;
     }
     
-    // Route requests through HA Core's ingress proxy.  The path is:
-    //   addon → Supervisor → HA Core → Supervisor ingress → ESPHome nginx
-    // HA Core's proxy validates the session cookie and forwards to the
-    // Supervisor, which connects to ESPHome from its own IP (allowed by nginx).
-    const url = `http://supervisor/core/api/hassio_ingress/${ingressEntry}`;
+    // Route requests directly through HA Core's ingress proxy:
+    //   addon → HA Core → Supervisor ingress → ESPHome nginx
+    const url = `${HA_CORE_URL}/api/hassio_ingress/${ingressEntry}`;
     
     const result = {
       slug: esphome.slug,
@@ -2086,6 +2105,10 @@ const TOOLS = [
           type: "boolean",
           description: "If true (default), extract and validate Jinja2 templates through HA's template engine.",
         },
+        allow_fewer_entries: {
+          type: "boolean",
+          description: "If true, allow writing fewer top-level list entries than the existing file (e.g. when intentionally deleting automations). Default: false. Without this flag, writes to automations.yaml, scripts.yaml, or scenes.yaml that would reduce the number of entries are blocked to prevent accidental data loss.",
+        },
       },
       required: ["file_path", "content"],
     },
@@ -3135,7 +3158,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // === SAFE CONFIG WRITER ===
       case "write_config_safe": {
-        const { file_path, content, dry_run = false, validate_templates = true } = args;
+        const { file_path, content, dry_run = false, validate_templates = true, allow_fewer_entries = false } = args;
         sendLog("info", "config", { action: "write_config_safe", file_path, dry_run });
         
         // Step 1: Validate and resolve the file path
@@ -3206,8 +3229,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const templateErrors = templateResults.filter(r => r.status === "error");
         const structuralErrors = structuralIssues.filter(i => i.severity === "error");
         
-        // Step 6: Check for pre-write blocking errors (template errors + structural errors)
-        const hasBlockingErrors = templateErrors.length > 0 || structuralErrors.length > 0;
+        // Step 6b: Check if writing would reduce entries in list-based config files
+        // (automations.yaml, scripts.yaml, scenes.yaml are YAML lists where accidental
+        // overwrites destroy existing entries — block unless explicitly allowed)
+        const LIST_CONFIG_FILES = ["automations.yaml", "scripts.yaml", "scenes.yaml"];
+        const isListConfig = LIST_CONFIG_FILES.some(f => resolvedPath.endsWith("/" + f));
+        let entryReductionError = null;
+
+        if (isListConfig && !allow_fewer_entries && existsSync(resolvedPath)) {
+          try {
+            const existingContent = readFileSync(resolvedPath, "utf-8");
+            const existingCount = (existingContent.match(/^- /gm) || []).length;
+            const newCount = (content.match(/^- /gm) || []).length;
+            if (existingCount > 0 && newCount < existingCount) {
+              entryReductionError = { existingCount, newCount, removed: existingCount - newCount };
+            }
+          } catch (_) { /* best effort — don't block if we can't read the existing file */ }
+        }
+
+        // Step 6c: Check for pre-write blocking errors (template errors + structural errors + entry reduction)
+        const hasBlockingErrors = templateErrors.length > 0 || structuralErrors.length > 0 || entryReductionError !== null;
         
         // If dry_run, report results without touching disk
         if (dry_run) {
@@ -3222,6 +3263,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             for (const si of structuralErrors) {
               responseText += `- **Structural Error:** ${si.message}\n`;
+            }
+            if (entryReductionError) {
+              responseText += `- **Entry Reduction Blocked:** The existing file has ${entryReductionError.existingCount} top-level entries but the new content only has ${entryReductionError.newCount} (${entryReductionError.removed} would be lost).\n`;
+              responseText += `  **Action:** Read the existing \`${file_path}\` first, then include ALL existing entries plus your new entry in the content you write.\n`;
+              responseText += `  If you intentionally want to remove entries, pass \`allow_fewer_entries: true\`.\n`;
             }
             responseText += `\n`;
           }
@@ -3290,7 +3336,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           for (const si of structuralErrors) {
             responseText += `- **Structural Error:** ${si.message}\n`;
           }
-          responseText += `\n**Action:** Fix the errors above and retry. Use \`dry_run: true\` to validate before writing.\n`;
+          if (entryReductionError) {
+            responseText += `- **Entry Reduction Blocked:** The existing file has ${entryReductionError.existingCount} top-level entries but the new content only has ${entryReductionError.newCount} (${entryReductionError.removed} would be permanently lost).\n`;
+            responseText += `\n**Action:** Read the existing \`${file_path}\` first, then include ALL existing entries plus your new entry in the content you write. If you intentionally want to remove entries, pass \`allow_fewer_entries: true\`.\n`;
+          } else {
+            responseText += `\n**Action:** Fix the errors above and retry. Use \`dry_run: true\` to validate before writing.\n`;
+          }
           
           return makeCompatibleResponse({
             content: [createTextContent(responseText, { audience: ["assistant"], priority: 1.0 })],
@@ -4460,14 +4511,16 @@ Focus on practical solutions I can implement.`,
 
 **Goal:** ${goal}
 
-Please help me create this automation by:
-1. First, use \`search_entities\` to find relevant entities for this automation
-2. Identify the best trigger(s) for this use case
-3. Suggest any conditions that might be needed
-4. Define the action(s) to take
-5. Provide the complete automation YAML code
+Please help me create this automation by following these steps in order:
+1. **Read the existing automations file** using \`read_file\` on \`automations.yaml\` (or wherever automations are stored). You MUST include ALL existing automations in the final write — never overwrite them.
+2. Use \`search_entities\` to find relevant entities for this automation
+3. Check if similar automations already exist using \`get_states\` with domain "automation"
+4. Identify the best trigger(s) for this use case
+5. Suggest any conditions that might be needed
+6. Define the action(s) to take
+7. Provide the complete YAML that contains ALL existing automations PLUS the new one
 
-Also check if similar automations already exist using \`get_states\` with domain "automation".
+**CRITICAL:** When writing to \`automations.yaml\`, the content must include every automation that was already there. Writing only the new automation will permanently delete all others. \`write_config_safe\` will block the write if entries would be lost, but always verify yourself first.
 
 Consider edge cases and make the automation robust.`,
               annotations: { audience: ["assistant"], priority: 1.0 },
