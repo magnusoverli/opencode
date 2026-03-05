@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.1b10
+
+- Test with HAB CLI reverted to known working state
+  - No HAB CLI changes — using upstream as-is
+  - MCP server unchanged from b9 (network fallback + WebSocket session creation)
+  - Isolates whether the b9 500 errors were caused by HAB CLI changes
+
 ## 1.6.1b8
 
 - Simplify HAB CLI changes — revert all discovery-path code, keep only
