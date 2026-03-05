@@ -208,55 +208,106 @@ async function callSupervisor(endpoint, method = "GET", body = null) {
  * requests through HA Core's ingress proxy using a long-lived access token.
  * This is the exact same path the external CLI uses.
  *
- * Returns null if ESPHome is not installed or not running.
+ * Returns { ok: true, ...result } on success,
+ *   or { ok: false, error: "...", diagnostics: {...} } on failure.
  */
 async function discoverESPHome() {
+  const diag = {
+    steps: [],
+    addonFound: false,
+    addonSlug: null,
+    addonState: null,
+    ingressEntry: null,
+    hasAccessToken: !!HA_ACCESS_TOKEN,
+    internalUrl: null,
+    externalUrl: null,
+    haCoreUrl: null,
+    urlSource: null,
+    networkFallback: null,
+    wsSessionResult: null,
+  };
+  
+  function step(name, status, detail = null) {
+    diag.steps.push({ name, status, detail });
+    sendLog("debug", "esphome", { action: "discover_step", name, status, detail });
+  }
+
   try {
-    const addonsInfo = await callSupervisor("/addons");
-    const esphome = addonsInfo.addons.find(a => 
+    // Step 1: Find ESPHome addon
+    let addonsInfo;
+    try {
+      addonsInfo = await callSupervisor("/addons");
+      step("fetch_addons", "ok", { addonCount: addonsInfo.addons?.length });
+    } catch (e) {
+      step("fetch_addons", "error", e.message);
+      return { ok: false, error: `Failed to list addons: ${e.message}`, diagnostics: diag };
+    }
+    
+    const esphome = addonsInfo.addons?.find(a => 
       a.slug.includes("esphome") && a.installed
     );
     
     if (!esphome) {
-      sendLog("debug", "esphome", { action: "discover", result: "not_installed" });
-      return null;
+      step("find_esphome", "error", "No addon with 'esphome' in slug and installed=true");
+      // Include available slugs for debugging
+      const slugs = (addonsInfo.addons || [])
+        .filter(a => a.slug.includes("esphome"))
+        .map(a => ({ slug: a.slug, installed: a.installed, state: a.state }));
+      diag.esphomeSlugs = slugs;
+      return { ok: false, error: "ESPHome addon not found in addon list.", diagnostics: diag };
     }
     
-    const info = await callSupervisor(`/addons/${esphome.slug}/info`);
+    diag.addonFound = true;
+    diag.addonSlug = esphome.slug;
+    step("find_esphome", "ok", { slug: esphome.slug });
     
-    const ingressEntry = info.ingress_entry;
-    if (!ingressEntry) {
-      sendLog("error", "esphome", { action: "discover", result: "no_ingress_entry" });
-      return null;
+    // Step 2: Get addon info
+    let info;
+    try {
+      info = await callSupervisor(`/addons/${esphome.slug}/info`);
+      diag.addonState = info.state;
+      diag.ingressEntry = info.ingress_entry;
+      step("addon_info", "ok", { state: info.state, version: info.version, ingress_entry: info.ingress_entry });
+    } catch (e) {
+      step("addon_info", "error", e.message);
+      return { ok: false, error: `Failed to get addon info for ${esphome.slug}: ${e.message}`, diagnostics: diag };
     }
     
-    // Route through HA Core's real LAN URL — the same path the external CLI
-    // uses.  REST-based ingress session creation does NOT work (the Supervisor
-    // rejects it regardless of token type).  Only the WebSocket `supervisor/api`
-    // command creates sessions with HA Core's own credentials.
-    //
-    // Flow:  callHA("/config") → internal_url → WS connect → auth → supervisor/api
+    if (!info.ingress_entry) {
+      step("ingress_entry", "error", "ingress_entry is null/empty");
+      return { ok: false, error: "ESPHome addon has no ingress_entry configured.", diagnostics: diag };
+    }
+    step("ingress_entry", "ok", info.ingress_entry);
+    
+    // Step 3: Check access token
     if (!HA_ACCESS_TOKEN) {
-      sendLog("error", "esphome", {
-        action: "discover",
-        result: "no_access_token",
-        message: "ESPHome ingress requires a long-lived access token. " +
-          "Create one at Profile → Long-Lived Access Tokens in the HA UI, " +
-          "then paste it into the addon's 'access_token' configuration option.",
-      });
-      return null;
+      step("access_token", "error", "HA_ACCESS_TOKEN env var is not set");
+      return { ok: false, error: "ESPHome ingress requires a long-lived access token. " +
+        "Create one at Profile → Long-Lived Access Tokens in the HA UI, " +
+        "then paste it into the addon's 'access_token' configuration option.", diagnostics: diag };
+    }
+    step("access_token", "ok");
+    
+    // Step 4: Discover HA Core URL
+    let haCoreUrl;
+    let haConfig;
+    try {
+      haConfig = await callHA("/config");
+      diag.internalUrl = haConfig.internal_url || null;
+      diag.externalUrl = haConfig.external_url || null;
+      step("ha_config", "ok", { internal_url: diag.internalUrl, external_url: diag.externalUrl });
+    } catch (e) {
+      step("ha_config", "error", e.message);
+      return { ok: false, error: `Failed to get HA config: ${e.message}`, diagnostics: diag };
     }
     
-    // Discover HA Core's actual URL (e.g. http://192.168.1.100:8123).
-    // Try /api/config first (internal_url), fall back to building it from
-    // the Supervisor's network + core info when set to "automatic" (null).
-    let haCoreUrl;
-    const haConfig = await callHA("/config");
     haCoreUrl = (haConfig.internal_url || haConfig.external_url || "").replace(/\/+$/, "");
     
-    if (!haCoreUrl) {
+    if (haCoreUrl) {
+      diag.urlSource = "ha_config";
+    } else {
       // internal_url is "automatic" (null) — discover from Supervisor APIs
-      sendLog("debug", "esphome", { action: "discover", step: "fallback_network_discovery" });
+      step("url_fallback", "started", "internal_url and external_url are both null, trying network discovery");
       try {
         const [coreInfo, networkInfo] = await Promise.all([
           callSupervisor("/core/info"),
@@ -267,59 +318,88 @@ async function discoverESPHome() {
         const ssl = coreInfo.ssl || false;
         const protocol = ssl ? "https" : "http";
         
+        diag.networkFallback = { port, ssl, interfaces: [] };
+        
         // Find the primary connected interface and extract its LAN IP
         let hostIp = null;
         if (networkInfo.interfaces) {
+          for (const iface of networkInfo.interfaces) {
+            diag.networkFallback.interfaces.push({
+              name: iface.interface,
+              primary: iface.primary,
+              connected: iface.connected,
+              ipv4_addresses: iface.ipv4?.address || [],
+            });
+          }
           const primary = networkInfo.interfaces.find(i => i.primary && i.connected);
           const iface = primary || networkInfo.interfaces.find(i => i.connected);
           if (iface?.ipv4?.address?.[0]) {
-            // Address is in CIDR format: "192.168.1.100/24"
             hostIp = iface.ipv4.address[0].split("/")[0];
           }
         }
         
         if (hostIp) {
           haCoreUrl = `${protocol}://${hostIp}:${port}`;
-          sendLog("debug", "esphome", { action: "discover", step: "url_from_network", url: haCoreUrl });
+          diag.urlSource = "network_fallback";
+          step("url_fallback", "ok", { url: haCoreUrl, ip: hostIp, port, ssl });
+        } else {
+          step("url_fallback", "error", "Could not find a connected interface with an IPv4 address");
         }
       } catch (e) {
-        sendLog("warning", "esphome", { action: "discover", step: "network_discovery_failed", error: e.message });
+        step("url_fallback", "error", e.message);
       }
     }
     
+    diag.haCoreUrl = haCoreUrl;
+    
     if (!haCoreUrl) {
-      sendLog("error", "esphome", { action: "discover", result: "no_ha_url",
-        message: "Could not determine HA Core URL. Set internal_url in Settings → System → Network, " +
-          "or ensure the host has a connected network interface." });
-      return null;
+      return { ok: false, error: "Could not determine HA Core URL. " +
+        "Set internal_url in Settings → System → Network, " +
+        "or ensure the host has a connected network interface.", diagnostics: diag };
     }
-    sendLog("debug", "esphome", { action: "discover", ha_core_url: haCoreUrl });
+    step("ha_core_url", "ok", { url: haCoreUrl, source: diag.urlSource });
     
-    // Create ingress session via WebSocket — the only method that works.
-    const ingressSession = await createIngressSessionViaWebSocket(haCoreUrl, HA_ACCESS_TOKEN);
-    if (!ingressSession) {
-      sendLog("error", "esphome", { action: "discover", result: "no_ingress_session" });
-      return null;
+    // Step 5: Create ingress session via WebSocket
+    let ingressSession;
+    try {
+      ingressSession = await createIngressSessionViaWebSocket(haCoreUrl, HA_ACCESS_TOKEN);
+      if (ingressSession) {
+        diag.wsSessionResult = "ok";
+        step("ws_session", "ok");
+      } else {
+        diag.wsSessionResult = "returned_null";
+        step("ws_session", "error", "createIngressSessionViaWebSocket returned null (auth failed or no session in response)");
+        return { ok: false, error: `WebSocket ingress session creation returned null. ` +
+          `Connected to ${haCoreUrl.replace(/^http/, "ws")}/api/websocket but did not get a session token. ` +
+          `Check that the access_token is valid.`, diagnostics: diag };
+      }
+    } catch (e) {
+      diag.wsSessionResult = `error: ${e.message}`;
+      step("ws_session", "error", e.message);
+      return { ok: false, error: `WebSocket ingress session creation failed: ${e.message}. ` +
+        `Tried connecting to ${haCoreUrl.replace(/^http/, "ws")}/api/websocket`, diagnostics: diag };
     }
     
-    // Route requests through HA Core's real URL (same as external CLI):
-    //   addon → HA Core (LAN IP) → Supervisor ingress → ESPHome nginx
-    const url = `${haCoreUrl}/api/hassio_ingress/${ingressEntry}`;
+    // Step 6: Build final URL
+    const url = `${haCoreUrl}/api/hassio_ingress/${info.ingress_entry}`;
+    step("final_url", "ok", url);
     
     const result = {
+      ok: true,
       slug: esphome.slug,
       name: esphome.name,
       url,
       ingressSession,
       state: info.state,
       version: info.version,
+      diagnostics: diag,
     };
     
     sendLog("debug", "esphome", { action: "discover", result: { ...result, ingressSession: "[redacted]" } });
     return result;
   } catch (error) {
-    sendLog("error", "esphome", { action: "discover_error", error: error.message });
-    return null;
+    step("unexpected", "error", error.message);
+    return { ok: false, error: `Unexpected error in discoverESPHome: ${error.message}`, diagnostics: diag };
   }
 }
 
@@ -3945,8 +4025,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         // Discover ESPHome add-on
         const esphome = await discoverESPHome();
-        if (!esphome) {
-          throw new Error("ESPHome add-on is not installed or not accessible. Please install ESPHome from the Home Assistant Add-on Store.");
+        if (!esphome.ok) {
+          const d = esphome.diagnostics;
+          let msg = `ESPHome discovery failed: ${esphome.error}\n\n`;
+          msg += `## Discovery Steps\n`;
+          for (const s of d.steps) {
+            msg += `- **${s.name}**: ${s.status}${s.detail ? ` — ${typeof s.detail === "object" ? JSON.stringify(s.detail) : s.detail}` : ""}\n`;
+          }
+          if (d.esphomeSlugs) msg += `\nESPHome-matching slugs: ${JSON.stringify(d.esphomeSlugs)}`;
+          if (d.networkFallback) msg += `\nNetwork fallback data: ${JSON.stringify(d.networkFallback, null, 2)}`;
+          throw new Error(msg);
         }
         
         if (esphome.state !== "started") {
@@ -4003,8 +4091,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         // Discover ESPHome add-on
         const esphome = await discoverESPHome();
-        if (!esphome) {
-          throw new Error("ESPHome add-on is not installed or not accessible.");
+        if (!esphome.ok) {
+          const d = esphome.diagnostics;
+          let msg = `ESPHome discovery failed: ${esphome.error}\n\nSteps: `;
+          msg += d.steps.map(s => `${s.name}=${s.status}`).join(", ");
+          throw new Error(msg);
         }
         
         if (esphome.state !== "started") {
@@ -4068,8 +4159,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         // Discover ESPHome add-on
         const esphome = await discoverESPHome();
-        if (!esphome) {
-          throw new Error("ESPHome add-on is not installed or not accessible.");
+        if (!esphome.ok) {
+          const d = esphome.diagnostics;
+          let msg = `ESPHome discovery failed: ${esphome.error}\n\nSteps: `;
+          msg += d.steps.map(s => `${s.name}=${s.status}`).join(", ");
+          throw new Error(msg);
         }
         
         if (esphome.state !== "started") {
@@ -4278,9 +4372,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (lowerCmd.startsWith("esphome ") || lowerCmd === "esphome") {
           try {
             const esphome = await discoverESPHome();
-            if (esphome && esphome.url && esphome.ingressSession) {
+            if (esphome.ok && esphome.url && esphome.ingressSession) {
               esphomeEnv.HAB_ESPHOME_URL = esphome.url;
               esphomeEnv.HAB_ESPHOME_SESSION = esphome.ingressSession;
+            } else if (!esphome.ok) {
+              sendLog("warning", "hab", {
+                action: "esphome_prediscovery_failed",
+                error: esphome.error,
+                steps: esphome.diagnostics?.steps,
+              });
             }
           } catch (e) {
             sendLog("warning", "hab", { action: "esphome_prediscovery_failed", error: e.message });

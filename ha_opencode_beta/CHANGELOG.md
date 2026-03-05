@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.1b11
+
+- Add detailed step-by-step diagnostics to ESPHome discovery
+  - `discoverESPHome()` now returns structured diagnostics showing exactly which
+    step failed (addon lookup, addon info, access token, URL discovery, network
+    fallback, WebSocket session creation)
+  - `esphome_list_devices` tool shows full discovery step trace on failure
+  - `esphome_compile` and `esphome_upload` show step summary on failure
+  - `hab_run` logs step detail for ESPHome pre-discovery failures
+  - No more generic "not installed or not accessible" — the exact failure point
+    and all intermediate data (interfaces, URLs, slugs) are surfaced
+
 ## 1.6.1b10
 
 - Test with HAB CLI reverted to known working state
