@@ -28,6 +28,10 @@ configuration:
     name: "Blinking Cursor"
     description: "Whether the terminal cursor should blink."
   
+  access_token:
+    name: "Home Assistant Access Token"
+    description: "A long-lived access token for direct communication with Home Assistant Core. Required for ESPHome integration (device listing, log streaming, builds). Create one in the HA UI under Profile → Long-Lived Access Tokens. Leave empty if you don't use ESPHome tools."
+
   env_vars:
     name: "Environment Variables"
     description: "Define custom environment variables that are available to OpenCode and the terminal shell. Useful for provider credentials and configuration that must be set as environment variables (e.g. AZURE_RESOURCE_NAME, OPENAI_API_KEY). Each entry needs a variable name and value. Changes take effect after restarting the add-on."
