@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6.1b16
+
+- **Fix `hab esphome` commands from shell** — root cause: `HAB_ESPHOME_URL` and
+  `HAB_ESPHOME_SESSION` were never set in the shell environment. The MCP server
+  discovers these at runtime for its own `hab_run` tool, but shell users got
+  "authentication failed" because hab had no ESPHome credentials.
+- New `discover-esphome.js` startup script replicates the MCP server's 5-step
+  ESPHome discovery flow (find addon → get ingress entry → resolve HA Core URL →
+  create WebSocket ingress session → build final URL) and writes the resulting
+  `HAB_ESPHOME_URL` and `HAB_ESPHOME_SESSION` exports to `/data/.env_vars`
+- Discovery runs at addon startup (best-effort) — if ESPHome is not installed,
+  not running, or the access token is missing/invalid, it skips silently
+- Picks up latest HAB CLI from main branch (built from source at image build time)
+
 ## 1.6.1b15
 
 - **Final beta before stable release**

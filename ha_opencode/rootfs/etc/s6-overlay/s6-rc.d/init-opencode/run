@@ -83,6 +83,29 @@ else
 fi
 
 # ==============================================================================
+# Discover ESPHome ingress URL and session for hab CLI
+# hab needs HAB_ESPHOME_URL and HAB_ESPHOME_SESSION to talk to ESPHome.
+# The MCP server discovers these at runtime, but shell users need them in env.
+# This is best-effort — if ESPHome isn't running or discovery fails, we skip.
+# ==============================================================================
+
+if [ -n "${ACCESS_TOKEN}" ]; then
+    bashio::log.info "Discovering ESPHome ingress for hab CLI..."
+    # Export token so the Node.js script can read it from process.env
+    export HA_ACCESS_TOKEN="${ACCESS_TOKEN}"
+    ESPHOME_EXPORTS=$(node /usr/local/bin/discover-esphome.js 2>/dev/null || true)
+    if [ -n "${ESPHOME_EXPORTS}" ]; then
+        printf '%s\n' "${ESPHOME_EXPORTS}" >> "${ENV_VARS_FILE}"
+        chmod 600 "${ENV_VARS_FILE}"
+        bashio::log.info "ESPHome ingress discovered — hab esphome commands ready"
+    else
+        bashio::log.info "ESPHome discovery skipped (not installed, not running, or token invalid)"
+    fi
+else
+    bashio::log.info "Skipping ESPHome discovery (no access token configured)"
+fi
+
+# ==============================================================================
 # CPU Capability Detection - Select appropriate OpenCode binary
 # OpenCode provides baseline binaries for CPUs without AVX2 support
 # ==============================================================================
