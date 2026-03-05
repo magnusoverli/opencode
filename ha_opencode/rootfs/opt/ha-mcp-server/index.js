@@ -229,20 +229,23 @@ async function discoverESPHome() {
       return null;
     }
     
-    // Create an ingress session — this is a short-lived token the Supervisor
-    // validates on every proxied request (via the ingress_session cookie).
-    // If this call fails with 403, the addon's hassio_role may need to be
-    // bumped from "default" to "manager" in config.yaml.
-    const sessionData = await callSupervisor("/ingress/session", "POST");
-    const ingressSession = sessionData.session;
+    // Create an ingress session through HA Core's hassio API proxy.
+    // Addons cannot call POST /ingress/session on the Supervisor directly
+    // (returns 403).  HA Core has the required privileges and exposes the
+    // Supervisor API at /api/hassio/..., so we route through it.
+    const sessionResponse = await callHA("/hassio/ingress/session", "POST");
+    // HA Core forwards the Supervisor response as-is: {result, data:{session}}
+    const ingressSession = sessionResponse?.data?.session;
     if (!ingressSession) {
-      sendLog("error", "esphome", { action: "discover", result: "no_ingress_session" });
+      sendLog("error", "esphome", { action: "discover", result: "no_ingress_session", response: sessionResponse });
       return null;
     }
     
-    // Route through the Supervisor's ingress proxy instead of connecting
-    // directly to the ESPHome container (which rejects our IP).
-    const url = `http://supervisor/ingress/${ingressEntry}`;
+    // Route requests through HA Core's ingress proxy.  The path is:
+    //   addon → Supervisor → HA Core → Supervisor ingress → ESPHome nginx
+    // HA Core's proxy validates the session cookie and forwards to the
+    // Supervisor, which connects to ESPHome from its own IP (allowed by nginx).
+    const url = `http://supervisor/core/api/hassio_ingress/${ingressEntry}`;
     
     const result = {
       slug: esphome.slug,
