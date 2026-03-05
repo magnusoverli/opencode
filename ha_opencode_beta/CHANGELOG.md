@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.1b13
+
+- Enhanced error reporting for ESPHome device requests
+  - On failure: shows full URL, HTTP status, response body, headers sent,
+    plus all discovery steps and constructed ingress URL
+  - On success: shows ingress URL and URL source in device list output
+  - This will reveal whether the 404 is from HA Core's ingress proxy or ESPHome
+
 ## 1.6.1b12
 
 - Fix ESPHome addon detection — Supervisor `/addons` API does not set

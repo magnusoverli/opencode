@@ -588,9 +588,16 @@ async function getESPHomeDevices(esphomeUrl, ingressSession = null) {
   if (HA_ACCESS_TOKEN) {
     headers["Authorization"] = `Bearer ${HA_ACCESS_TOKEN}`;
   }
-  const response = await fetch(`${esphomeUrl}/devices`, { headers });
+  const url = `${esphomeUrl}/devices`;
+  sendLog("debug", "esphome", { action: "get_devices", url, hasSession: !!ingressSession, hasToken: !!HA_ACCESS_TOKEN });
+  const response = await fetch(url, { headers });
   if (!response.ok) {
-    throw new Error(`Failed to get ESPHome devices: ${response.status}`);
+    let body = "";
+    try { body = await response.text(); } catch (_) {}
+    const detail = `HTTP ${response.status} from ${url}` +
+      (body ? `\nResponse body: ${body.slice(0, 500)}` : "") +
+      `\nHeaders sent: Cookie=${ingressSession ? "ingress_session=<set>" : "<none>"}, Authorization=${HA_ACCESS_TOKEN ? "Bearer <set>" : "<none>"}`;
+    throw new Error(`Failed to get ESPHome devices: ${detail}`);
   }
   return await response.json();
 }
@@ -4049,7 +4056,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           
           let responseText = `# ESPHome Devices\n\n`;
           responseText += `**ESPHome Version:** ${esphome.version}\n`;
-          responseText += `**Add-on:** ${esphome.name} (${esphome.slug})\n\n`;
+          responseText += `**Add-on:** ${esphome.name} (${esphome.slug})\n`;
+          responseText += `**Ingress URL:** ${esphome.url}\n`;
+          responseText += `**URL Source:** ${esphome.diagnostics?.urlSource || "unknown"}\n\n`;
           
           const configured = devices.configured || [];
           const importable = devices.importable || [];
@@ -4084,7 +4093,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.8 })],
           });
         } catch (e) {
-          throw new Error(`Failed to get ESPHome devices: ${e.message}`);
+          const d = esphome.diagnostics;
+          let msg = `${e.message}\n\n## Discovery was OK\n`;
+          msg += `**URL:** ${esphome.url}\n`;
+          msg += `**URL Source:** ${d?.urlSource || "unknown"}\n`;
+          msg += `**HA Core URL:** ${d?.haCoreUrl || "unknown"}\n`;
+          msg += `**Ingress Entry:** ${d?.ingressEntry || "unknown"}\n`;
+          msg += `**Addon Slug:** ${d?.addonSlug || "unknown"}\n`;
+          if (d?.steps) {
+            msg += `\n## Discovery Steps\n`;
+            for (const s of d.steps) {
+              msg += `- **${s.name}**: ${s.status}${s.detail ? ` — ${typeof s.detail === "object" ? JSON.stringify(s.detail) : s.detail}` : ""}\n`;
+            }
+          }
+          if (d?.networkFallback) msg += `\nNetwork fallback: ${JSON.stringify(d.networkFallback, null, 2)}`;
+          throw new Error(msg);
         }
       }
 
