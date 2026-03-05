@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.1b8
+
+- Simplify HAB CLI changes — revert all discovery-path code, keep only
+  `GetESPHomeClient` env var handling (HA_ACCESS_TOKEN + HAB_ESPHOME_SESSION)
+  since the MCP server handles all URL/session discovery
+
 ## 1.6.1b7
 
 - Support "automatic" internal_url setting (most common HA default)
