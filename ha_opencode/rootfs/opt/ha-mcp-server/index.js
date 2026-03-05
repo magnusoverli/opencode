@@ -384,7 +384,10 @@ async function discoverESPHome() {
     }
     
     // Step 6: Build final URL
-    const url = `${haCoreUrl}/api/hassio_ingress/${info.ingress_entry}`;
+    // ingress_entry from the Supervisor already contains the full path
+    // (e.g. "/api/hassio_ingress/AbCdEf..."), so just append it to the base URL.
+    const ingressPath = info.ingress_entry.startsWith("/") ? info.ingress_entry : `/${info.ingress_entry}`;
+    const url = `${haCoreUrl}${ingressPath}`;
     step("final_url", "ok", url);
     
     const result = {

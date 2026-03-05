@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.1b14
+
+- Fix doubled ingress path in URL construction — `ingress_entry` from the
+  Supervisor already contains `/api/hassio_ingress/<token>`, so the code was
+  producing `http://host:8123/api/hassio_ingress//api/hassio_ingress/<token>/...`
+  which returned 404. Now correctly appends the entry path directly to the
+  HA Core base URL.
+
 ## 1.6.1b13
 
 - Enhanced error reporting for ESPHome device requests
