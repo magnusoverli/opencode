@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.1b5
+
+- Use HA Core's real LAN URL instead of Docker-internal hostnames
+  - Auto-discovers `internal_url` from `/api/config` (e.g. `http://192.168.1.100:8123`)
+  - Routes ingress through the same URL path the external CLI uses
+  - Docker hostnames (`homeassistant`, `supervisor`) don't work for ingress from addon containers
+
 ## 1.6.1b4
 
 - Add `access_token` config option for HA Core long-lived access token

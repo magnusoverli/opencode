@@ -72,7 +72,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SUPERVISOR_API = "http://supervisor/core/api";
-const HA_CORE_DIRECT = "http://homeassistant:8123";   // Docker-internal, bypasses Supervisor
 const HA_CONFIG_DIR = "/homeassistant";
 const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
 const HA_ACCESS_TOKEN = process.env.HA_ACCESS_TOKEN;   // Long-lived token for direct HA Core calls
@@ -204,10 +203,10 @@ async function callSupervisor(endpoint, method = "GET", body = null) {
  * The dashboard binds to a Unix socket, fronted by nginx with IP-based access
  * rules that block requests from other addon containers.
  *
- * By routing directly through HA Core (http://homeassistant:8123/api/hassio_ingress/{entry}/...)
- * the request passes through HA Core's ingress proxy to the Supervisor, which connects
- * to ESPHome from its own IP (allowed by nginx).  This bypasses the Supervisor proxy
- * entirely, matching the code path that works from the CLI outside HA.
+ * We discover HA Core's real LAN URL from /api/config (internal_url) and route
+ * requests through it using a long-lived access token — the exact same path
+ * the external CLI uses.  HA Core's ingress proxy forwards to the Supervisor,
+ * which connects to ESPHome from its own IP (allowed by nginx).
  *
  * Returns null if ESPHome is not installed or not running.
  */
@@ -231,14 +230,14 @@ async function discoverESPHome() {
       return null;
     }
     
-    // Bypass the Supervisor entirely and talk directly to HA Core.
-    // From inside an addon container, HA Core is reachable at
-    // http://homeassistant:8123 (Docker internal hostname).
+    // Route through HA Core's real LAN URL — the same path the external CLI
+    // uses.  The Supervisor's internal hostnames (supervisor, homeassistant)
+    // don't work for ingress because HA Core runs with host networking and
+    // the Supervisor blocks addon-initiated ingress session creation.
     //
-    // The SUPERVISOR_TOKEN is NOT accepted by HA Core directly (401).
-    // A long-lived access token (HA_ACCESS_TOKEN) created via the HA UI
-    // is required.  This matches the code path that works from the CLI
-    // outside HA (targeting <LAN-IP>:8123 with a long-lived token).
+    // We discover the real URL via callHA("/config") (which works through
+    // the Supervisor proxy) and then talk to HA Core directly using the
+    // long-lived access token configured in the addon options.
     if (!HA_ACCESS_TOKEN) {
       sendLog("error", "esphome", {
         action: "discover",
@@ -250,7 +249,17 @@ async function discoverESPHome() {
       return null;
     }
     
-    const sessionRes = await fetch(`${HA_CORE_DIRECT}/api/hassio/ingress/session`, {
+    // Discover HA Core's actual URL (e.g. http://192.168.1.100:8123)
+    const haConfig = await callHA("/config");
+    const haCoreUrl = (haConfig.internal_url || haConfig.external_url || "").replace(/\/+$/, "");
+    if (!haCoreUrl) {
+      sendLog("error", "esphome", { action: "discover", result: "no_ha_url",
+        message: "Could not determine HA Core URL from /api/config (no internal_url or external_url)" });
+      return null;
+    }
+    sendLog("debug", "esphome", { action: "discover", ha_core_url: haCoreUrl });
+    
+    const sessionRes = await fetch(`${haCoreUrl}/api/hassio/ingress/session`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${HA_ACCESS_TOKEN}`,
@@ -259,7 +268,7 @@ async function discoverESPHome() {
     });
     if (!sessionRes.ok) {
       const text = await sessionRes.text();
-      sendLog("error", "esphome", { action: "discover", result: "session_failed", status: sessionRes.status, error: text });
+      sendLog("error", "esphome", { action: "discover", result: "session_failed", status: sessionRes.status, error: text, url: haCoreUrl });
       return null;
     }
     const sessionResponse = await sessionRes.json();
@@ -270,9 +279,9 @@ async function discoverESPHome() {
       return null;
     }
     
-    // Route requests directly through HA Core's ingress proxy:
-    //   addon → HA Core → Supervisor ingress → ESPHome nginx
-    const url = `${HA_CORE_DIRECT}/api/hassio_ingress/${ingressEntry}`;
+    // Route requests through HA Core's real URL (same as external CLI):
+    //   addon → HA Core (LAN IP) → Supervisor ingress → ESPHome nginx
+    const url = `${haCoreUrl}/api/hassio_ingress/${ingressEntry}`;
     
     const result = {
       slug: esphome.slug,
