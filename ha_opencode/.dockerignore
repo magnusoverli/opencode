@@ -10,5 +10,10 @@
 .editorconfig
 .vscode
 
+# Test infrastructure (not needed in image)
+**/test/
+**/vitest.config.*
+**/node_modules/.vitest
+
 # Build artifacts
 *.log

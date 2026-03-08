@@ -5,12 +5,16 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.0",
     "ws": "^8.18.0",
     "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.1"
   },
   "engines": {
     "node": ">=18"

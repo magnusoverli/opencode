@@ -68,6 +68,12 @@ import { execFile } from "child_process";
 import { dirname, join, resolve, isAbsolute, normalize } from "path";
 import { fileURLToPath } from "url";
 
+// Extracted pure-function modules (testable in isolation)
+import { detectAnomaly, searchEntities, generateSuggestions, generateStateSummary } from "./lib/intelligence.js";
+import { validateYamlStructure, resolveConfigPath } from "./lib/validation.js";
+import { extractContentFromHtml, extractConfigurationSection, extractYamlExamples } from "./lib/html-parser.js";
+import { createTextContent, createResourceLink } from "./lib/helpers.js";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -885,168 +891,9 @@ const SCHEMAS = {
 };
 
 // ============================================================================
-// INTELLIGENCE LAYER - Semantic Analysis & Summaries
+// INTELLIGENCE LAYER - imported from ./lib/intelligence.js
+//   detectAnomaly, searchEntities, generateSuggestions, generateStateSummary
 // ============================================================================
-
-/**
- * Generate a human-readable summary of entity states
- */
-function generateStateSummary(states) {
-  const byDomain = {};
-  const anomalies = [];
-  const unavailable = [];
-  
-  for (const state of states) {
-    const [domain] = state.entity_id.split(".");
-    if (!byDomain[domain]) {
-      byDomain[domain] = { count: 0, on: 0, off: 0, entities: [] };
-    }
-    byDomain[domain].count++;
-    byDomain[domain].entities.push(state);
-    
-    if (state.state === "on") byDomain[domain].on++;
-    if (state.state === "off") byDomain[domain].off++;
-    if (state.state === "unavailable" || state.state === "unknown") {
-      unavailable.push(state.entity_id);
-    }
-    
-    // Detect anomalies
-    const anomaly = detectAnomaly(state);
-    if (anomaly) anomalies.push(anomaly);
-  }
-  
-  const lines = ["## Home Assistant State Summary\n"];
-  
-  // Domain overview
-  lines.push("### By Domain");
-  for (const [domain, info] of Object.entries(byDomain).sort((a, b) => b[1].count - a[1].count)) {
-    let detail = `${info.count} entities`;
-    if (info.on > 0 || info.off > 0) {
-      detail += ` (${info.on} on, ${info.off} off)`;
-    }
-    lines.push(`- **${domain}**: ${detail}`);
-  }
-  
-  // Unavailable entities
-  if (unavailable.length > 0) {
-    lines.push("\n### Unavailable/Unknown Entities");
-    for (const id of unavailable.slice(0, 10)) {
-      lines.push(`- ${id}`);
-    }
-    if (unavailable.length > 10) {
-      lines.push(`- ... and ${unavailable.length - 10} more`);
-    }
-  }
-  
-  // Anomalies
-  if (anomalies.length > 0) {
-    lines.push("\n### Potential Anomalies Detected");
-    for (const a of anomalies.slice(0, 5)) {
-      lines.push(`- **${a.entity_id}**: ${a.reason}`);
-    }
-  }
-  
-  return lines.join("\n");
-}
-
-/**
- * Detect anomalies in entity states
- */
-function detectAnomaly(state) {
-  const { entity_id, state: value, attributes } = state;
-  const [domain] = entity_id.split(".");
-  
-  // Battery low
-  if (attributes?.battery_level !== undefined && attributes.battery_level < 20) {
-    return { entity_id, reason: `Low battery (${attributes.battery_level}%)`, severity: "warning" };
-  }
-  
-  // Temperature sensors out of normal range
-  if (domain === "sensor" && attributes?.device_class === "temperature") {
-    const temp = parseFloat(value);
-    if (!isNaN(temp)) {
-      const unit = attributes.unit_of_measurement || "°C";
-      const isCelsius = unit.includes("C");
-      const normalMin = isCelsius ? -10 : 14;
-      const normalMax = isCelsius ? 50 : 122;
-      if (temp < normalMin || temp > normalMax) {
-        return { entity_id, reason: `Unusual temperature: ${value}${unit}`, severity: "warning" };
-      }
-    }
-  }
-  
-  // Humidity out of range
-  if (domain === "sensor" && attributes?.device_class === "humidity") {
-    const humidity = parseFloat(value);
-    if (!isNaN(humidity) && (humidity < 10 || humidity > 95)) {
-      return { entity_id, reason: `Unusual humidity: ${value}%`, severity: "warning" };
-    }
-  }
-  
-  // Door/window sensors open for extended period
-  if ((domain === "binary_sensor") && 
-      (attributes?.device_class === "door" || attributes?.device_class === "window") &&
-      value === "on") {
-    const lastChanged = new Date(state.last_changed);
-    const hoursOpen = (Date.now() - lastChanged.getTime()) / (1000 * 60 * 60);
-    if (hoursOpen > 4) {
-      return { entity_id, reason: `Open for ${hoursOpen.toFixed(1)} hours`, severity: "info" };
-    }
-  }
-  
-  // Lights on during day (basic heuristic)
-  if (domain === "light" && value === "on") {
-    const hour = new Date().getHours();
-    if (hour >= 10 && hour <= 16) {
-      return { entity_id, reason: "Light on during daytime", severity: "info" };
-    }
-  }
-  
-  return null;
-}
-
-/**
- * Search entities semantically
- */
-function searchEntities(states, query) {
-  const queryLower = query.toLowerCase();
-  const terms = queryLower.split(/\s+/);
-  
-  const results = states.map(state => {
-    let score = 0;
-    const searchText = [
-      state.entity_id,
-      state.attributes?.friendly_name || "",
-      state.attributes?.device_class || "",
-      state.state,
-    ].join(" ").toLowerCase();
-    
-    for (const term of terms) {
-      if (searchText.includes(term)) {
-        score += 1;
-        if ((state.attributes?.friendly_name || "").toLowerCase().includes(term)) {
-          score += 2;
-        }
-        if (state.entity_id.includes(term)) {
-          score += 1;
-        }
-      }
-    }
-    
-    return { state, score };
-  }).filter(r => r.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 20)
-    .map(r => ({
-      entity_id: r.state.entity_id,
-      state: r.state.state,
-      friendly_name: r.state.attributes?.friendly_name,
-      device_class: r.state.attributes?.device_class,
-      score: r.score,
-    }));
-  
-  return results;
-}
 
 /**
  * Get entity relationships
@@ -1088,75 +935,6 @@ async function getEntityRelationships(entityId) {
   };
 }
 
-/**
- * Generate automation suggestions
- */
-function generateSuggestions(states) {
-  const suggestions = [];
-  
-  const motionSensors = states.filter(s => 
-    s.attributes?.device_class === "motion" || 
-    s.entity_id.includes("motion")
-  );
-  const lights = states.filter(s => s.entity_id.startsWith("light."));
-  
-  for (const motion of motionSensors) {
-    const areaId = motion.attributes?.area_id;
-    if (areaId) {
-      const areaLights = lights.filter(l => l.attributes?.area_id === areaId);
-      if (areaLights.length > 0) {
-        suggestions.push({
-          type: "motion_light",
-          title: "Motion-Activated Lighting",
-          description: `Create automation: When ${motion.attributes?.friendly_name || motion.entity_id} detects motion, turn on ${areaLights.map(l => l.attributes?.friendly_name || l.entity_id).join(", ")}`,
-          trigger_entity: motion.entity_id,
-          action_entities: areaLights.map(l => l.entity_id),
-        });
-      }
-    }
-  }
-  
-  const openings = states.filter(s => 
-    s.attributes?.device_class === "door" || 
-    s.attributes?.device_class === "window"
-  );
-  if (openings.length > 0) {
-    suggestions.push({
-      type: "security_alert",
-      title: "Security Alert Automation",
-      description: `Create notification when doors/windows are left open for extended periods`,
-      entities: openings.map(o => o.entity_id).slice(0, 5),
-    });
-  }
-  
-  const thermostats = states.filter(s => s.entity_id.startsWith("climate."));
-  const tempSensors = states.filter(s => s.attributes?.device_class === "temperature");
-  if (thermostats.length > 0 && tempSensors.length > 0) {
-    suggestions.push({
-      type: "climate_optimization",
-      title: "Climate Optimization",
-      description: "Create automations to adjust thermostat based on occupancy or outdoor temperature",
-      climate_entities: thermostats.map(t => t.entity_id),
-      sensor_entities: tempSensors.map(s => s.entity_id).slice(0, 3),
-    });
-  }
-  
-  const powerSensors = states.filter(s => 
-    s.attributes?.device_class === "power" || 
-    s.attributes?.device_class === "energy"
-  );
-  if (powerSensors.length > 0) {
-    suggestions.push({
-      type: "energy_monitoring",
-      title: "Energy Usage Alerts",
-      description: "Create alerts for unusual energy consumption patterns",
-      entities: powerSensors.map(p => p.entity_id).slice(0, 5),
-    });
-  }
-  
-  return suggestions;
-}
-
 // ============================================================================
 // DOCUMENTATION FETCHING HELPERS
 // ============================================================================
@@ -1189,119 +967,8 @@ async function fetchUrl(url) {
 /**
  * Extract meaningful content from HTML (basic extraction)
  */
-function extractContentFromHtml(html) {
-  // Remove script and style tags
-  let content = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
-  content = content.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
-  content = content.replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "");
-  content = content.replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "");
-  content = content.replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "");
-  
-  // Extract title
-  const titleMatch = content.match(/<title[^>]*>([^<]+)<\/title>/i);
-  const title = titleMatch ? titleMatch[1].trim() : "";
-  
-  // Extract meta description
-  const descMatch = content.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
-  const description = descMatch ? descMatch[1].trim() : "";
-  
-  // Try to find the main content area
-  let mainContent = "";
-  
-  // Look for article or main content
-  const articleMatch = content.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
-  const mainMatch = content.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
-  const contentMatch = content.match(/<div[^>]*class="[^"]*content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-  
-  if (articleMatch) {
-    mainContent = articleMatch[1];
-  } else if (mainMatch) {
-    mainContent = mainMatch[1];
-  } else if (contentMatch) {
-    mainContent = contentMatch[1];
-  } else {
-    // Fall back to body
-    const bodyMatch = content.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    mainContent = bodyMatch ? bodyMatch[1] : content;
-  }
-  
-  // Convert common HTML to text/markdown
-  mainContent = mainContent
-    // Code blocks
-    .replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi, "\n```\n$1\n```\n")
-    .replace(/<code[^>]*>([^<]+)<\/code>/gi, "`$1`")
-    // Headings
-    .replace(/<h1[^>]*>([^<]+)<\/h1>/gi, "\n# $1\n")
-    .replace(/<h2[^>]*>([^<]+)<\/h2>/gi, "\n## $1\n")
-    .replace(/<h3[^>]*>([^<]+)<\/h3>/gi, "\n### $1\n")
-    .replace(/<h4[^>]*>([^<]+)<\/h4>/gi, "\n#### $1\n")
-    // Lists
-    .replace(/<li[^>]*>/gi, "- ")
-    .replace(/<\/li>/gi, "\n")
-    // Paragraphs and breaks
-    .replace(/<p[^>]*>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    // Links - keep the text
-    .replace(/<a[^>]*>([^<]+)<\/a>/gi, "$1")
-    // Bold/strong
-    .replace(/<strong[^>]*>([^<]+)<\/strong>/gi, "**$1**")
-    .replace(/<b[^>]*>([^<]+)<\/b>/gi, "**$1**")
-    // Italic/em
-    .replace(/<em[^>]*>([^<]+)<\/em>/gi, "*$1*")
-    .replace(/<i[^>]*>([^<]+)<\/i>/gi, "*$1*")
-    // Remove remaining tags
-    .replace(/<[^>]+>/g, "")
-    // Decode common entities
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    // Clean up whitespace
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  
-  return { title, description, content: mainContent };
-}
-
-/**
- * Extract configuration section from documentation
- */
-function extractConfigurationSection(content) {
-  // Look for configuration-related sections
-  const configPatterns = [
-    /## Configuration[\s\S]*?(?=\n## |$)/i,
-    /## YAML Configuration[\s\S]*?(?=\n## |$)/i,
-    /### Configuration Variables[\s\S]*?(?=\n### |\n## |$)/i,
-    /## Setup[\s\S]*?(?=\n## |$)/i,
-  ];
-  
-  for (const pattern of configPatterns) {
-    const match = content.match(pattern);
-    if (match) {
-      return match[0].trim();
-    }
-  }
-  
-  return null;
-}
-
-/**
- * Extract YAML examples from content
- */
-function extractYamlExamples(content) {
-  const examples = [];
-  const codeBlockRegex = /```(?:yaml|YAML)?\n([\s\S]*?)```/g;
-  
-  let match;
-  while ((match = codeBlockRegex.exec(content)) !== null) {
-    examples.push(match[1].trim());
-  }
-  
-  return examples;
-}
+// extractContentFromHtml, extractConfigurationSection, extractYamlExamples
+// imported from ./lib/html-parser.js
 
 /**
  * Load deprecation patterns from the shared JSON file (local bundled copy).
@@ -1690,148 +1357,8 @@ async function extractAndValidateTemplates(yamlContent) {
  * Checks for required keys, correct nesting, and structural issues.
  * This is a lightweight structural check, not a full schema validation.
  */
-function validateYamlStructure(yamlContent) {
-  const issues = [];
-  
-  // Check for automation structure
-  const automationBlockRegex = /^automation(?:\s+\w+)?:\s*\n([\s\S]*?)(?=^\S|\Z)/gm;
-  let autoMatch;
-  while ((autoMatch = automationBlockRegex.exec(yamlContent)) !== null) {
-    const block = autoMatch[1];
-    // Check each automation entry for required fields
-    const entries = block.split(/^\s*-\s+/m).filter(e => e.trim());
-    for (const entry of entries) {
-      const hasTrigger = /(?:^|\n)\s*(?:trigger|triggers)\s*:/m.test(entry);
-      const hasAction = /(?:^|\n)\s*(?:action|actions|sequence)\s*:/m.test(entry);
-      const hasAlias = /(?:^|\n)\s*alias\s*:/m.test(entry);
-      
-      if (hasAlias || hasTrigger || hasAction) {
-        if (!hasTrigger) {
-          issues.push({
-            severity: "error",
-            message: "Automation is missing 'trigger:' (or 'triggers:'). Every automation must define at least one trigger.",
-          });
-        }
-        if (!hasAction) {
-          issues.push({
-            severity: "error",
-            message: "Automation is missing 'action:' (or 'actions:'). Every automation must define at least one action.",
-          });
-        }
-      }
-    }
-  }
-  
-  // Check for script structure
-  const scriptBlockRegex = /^script:\s*\n([\s\S]*?)(?=^\S|\Z)/gm;
-  let scriptMatch;
-  while ((scriptMatch = scriptBlockRegex.exec(yamlContent)) !== null) {
-    const block = scriptMatch[1];
-    // Scripts need a sequence
-    const scriptNames = block.match(/^\s{2}(\w+):/gm);
-    if (scriptNames) {
-      for (const name of scriptNames) {
-        const scriptName = name.trim().replace(":", "");
-        // Get the content after this script name until the next script
-        const scriptContentRegex = new RegExp(`^\\s{2}${scriptName}:\\s*\\n([\\s\\S]*?)(?=^\\s{2}\\w+:|$)`, "m");
-        const contentMatch = scriptContentRegex.exec(block);
-        if (contentMatch) {
-          const hasSequence = /\s*(?:sequence|action|actions)\s*:/m.test(contentMatch[1]);
-          if (!hasSequence) {
-            issues.push({
-              severity: "warning",
-              message: `Script '${scriptName}' may be missing a 'sequence:' (or 'action:') key.`,
-            });
-          }
-        }
-      }
-    }
-  }
-  
-  // Check for template sensor structure
-  const templateBlockRegex = /^template:\s*\n([\s\S]*?)(?=^\S|\Z)/gm;
-  let templateMatch;
-  while ((templateMatch = templateBlockRegex.exec(yamlContent)) !== null) {
-    const block = templateMatch[1];
-    // Template sensors need either 'state:' or 'value_template:'
-    const sensorBlocks = block.split(/^\s*-\s*(?=sensor|binary_sensor)/m).filter(e => e.trim());
-    for (const sBlock of sensorBlocks) {
-      if (/^\s*(?:sensor|binary_sensor)\s*:/m.test(sBlock)) {
-        const nameMatches = sBlock.match(/name:\s*["']?([^"'\n]+)/g);
-        if (nameMatches) {
-          const hasState = /\s*(?:state|value_template)\s*:/m.test(sBlock);
-          if (!hasState) {
-            issues.push({
-              severity: "warning",
-              message: "Template sensor definition may be missing a 'state:' key.",
-            });
-          }
-        }
-      }
-    }
-  }
-  
-  return issues;
-}
-
-/**
- * Safely resolve and validate a file path within the HA config directory.
- * Returns the resolved absolute path, or null if the path is invalid/unsafe.
- */
-function resolveConfigPath(filePath) {
-  // Reject absolute paths that point outside config dir
-  if (isAbsolute(filePath) && !filePath.startsWith(HA_CONFIG_DIR)) {
-    return null;
-  }
-  
-  // Resolve relative paths against the config directory
-  const resolved = isAbsolute(filePath) ? filePath : join(HA_CONFIG_DIR, filePath);
-  const normalized = normalize(resolved);
-  
-  // Ensure the resolved path is still within the config directory
-  if (!normalized.startsWith(HA_CONFIG_DIR)) {
-    return null;
-  }
-  
-  // Block access to internal directories
-  const relativePath = normalized.substring(HA_CONFIG_DIR.length + 1);
-  const blocked = [".storage", ".cloud", "deps", "tts", "__pycache__"];
-  if (blocked.some(dir => relativePath.startsWith(dir + "/") || relativePath === dir)) {
-    return null;
-  }
-  
-  return normalized;
-}
-
-// ============================================================================
-// HELPER: Create annotated content
-// ============================================================================
-
-function createTextContent(text, options = {}) {
-  const content = { type: "text", text };
-  if (options.audience || options.priority !== undefined) {
-    content.annotations = {};
-    if (options.audience) content.annotations.audience = options.audience;
-    if (options.priority !== undefined) content.annotations.priority = options.priority;
-  }
-  return content;
-}
-
-function createResourceLink(uri, name, description, options = {}) {
-  const link = {
-    type: "resource_link",
-    uri,
-    name,
-    description,
-  };
-  if (options.mimeType) link.mimeType = options.mimeType;
-  if (options.audience || options.priority !== undefined) {
-    link.annotations = {};
-    if (options.audience) link.annotations.audience = options.audience;
-    if (options.priority !== undefined) link.annotations.priority = options.priority;
-  }
-  return link;
-}
+// validateYamlStructure, resolveConfigPath imported from ./lib/validation.js
+// createTextContent, createResourceLink imported from ./lib/helpers.js
 
 // ============================================================================
 // MCP SERVER SETUP
@@ -4345,13 +3872,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const formatTime = (date) => date.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
         
         // Get current state
-        let response = await callApi(`/states/${entity_id}`);
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Entity ${entity_id} not found: ${errorText}`);
-        }
-        
-        let entityState = await response.json();
+        let entityState = await callHA(`/states/${entity_id}`);
         const attrs = entityState.attributes || {};
         const installedVersion = attrs.installed_version || "unknown";
         const latestVersion = attrs.latest_version || "unknown";
@@ -4405,15 +3926,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           // Update is available
           if (start_update) {
             // Start the update
-            const serviceResponse = await callApi("/services/update/install", {
-              method: "POST",
-              body: JSON.stringify({ entity_id }),
-            });
-            
-            if (!serviceResponse.ok) {
-              const errorText = await serviceResponse.text();
-              throw new Error(`Failed to start update: ${errorText}`);
-            }
+            await callHA("/services/update/install", "POST", { entity_id });
             
             statusEmoji = "🚀";
             statusText = "Update Started";

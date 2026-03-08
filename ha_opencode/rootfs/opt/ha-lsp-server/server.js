@@ -43,6 +43,15 @@ const {
 
 const { parse: parseYaml } = yaml;
 
+// Extracted pure-function modules (testable in isolation)
+import { YamlContextAnalyzer } from "./lib/yaml-analyzer.js";
+import {
+  getTriggerPlatformCompletions,
+  getConditionTypeCompletions,
+  getKeyCompletions,
+  getWordRangeAtPosition,
+} from "./lib/completions.js";
+
 const __lsp_filename = fileURLToPath(import.meta.url);
 const __lsp_dirname = dirname(__lsp_filename);
 
@@ -343,227 +352,7 @@ class HomeAssistantClient {
   }
 }
 
-// ============================================================================
-// YAML CONTEXT ANALYZER
-// ============================================================================
-
-class YamlContextAnalyzer {
-  /**
-   * Analyze the YAML context at a given position
-   */
-  analyzeContext(document, position) {
-    const text = document.getText();
-    const offset = document.offsetAt(position);
-    const lines = text.split("\n");
-    const line = lines[position.line] || "";
-    const lineBeforeCursor = line.substring(0, position.character);
-    
-    // Determine what kind of value is expected
-    const context = {
-      line,
-      lineBeforeCursor,
-      offset,
-      position,
-      inKey: false,
-      inValue: false,
-      key: null,
-      parentKey: null,
-      parentKeys: [],
-      inList: false,
-      inJinja: false,
-      triggerType: null,
-      actionType: null,
-      domain: null,
-    };
-
-    // Check if we're inside Jinja template
-    const jinjaStart = lineBeforeCursor.lastIndexOf("{{");
-    const jinjaEnd = lineBeforeCursor.lastIndexOf("}}");
-    if (jinjaStart > jinjaEnd) {
-      context.inJinja = true;
-    }
-
-    // Determine if we're in a key or value position
-    const colonIndex = lineBeforeCursor.indexOf(":");
-    if (colonIndex === -1) {
-      context.inKey = true;
-    } else {
-      context.inValue = true;
-      context.key = lineBeforeCursor.substring(0, colonIndex).trim().replace(/^-\s*/, "");
-    }
-
-    // Check if we're in a list item
-    if (lineBeforeCursor.match(/^\s*-\s*/)) {
-      context.inList = true;
-    }
-
-    // Find parent keys by analyzing indentation
-    const currentIndent = lineBeforeCursor.match(/^(\s*)/)?.[1].length || 0;
-    
-    for (let i = position.line - 1; i >= 0; i--) {
-      const prevLine = lines[i];
-      const prevIndent = prevLine.match(/^(\s*)/)?.[1].length || 0;
-      const keyMatch = prevLine.match(/^(\s*)([a-z_]+)\s*:/i);
-      
-      if (keyMatch && prevIndent < currentIndent) {
-        const key = keyMatch[2];
-        context.parentKeys.unshift(key);
-        if (!context.parentKey) {
-          context.parentKey = key;
-        }
-        currentIndent === prevIndent;
-      }
-    }
-
-    // Detect specific context types
-    if (context.parentKeys.includes("trigger") || context.parentKeys.includes("triggers")) {
-      // Find trigger platform
-      for (let i = position.line; i >= 0; i--) {
-        const platformMatch = lines[i].match(/platform:\s*(\w+)/);
-        if (platformMatch) {
-          context.triggerType = platformMatch[1];
-          break;
-        }
-      }
-    }
-
-    if (context.parentKeys.includes("action") || context.parentKeys.includes("actions")) {
-      // We're in an action block
-      for (let i = position.line; i >= 0; i--) {
-        const serviceMatch = lines[i].match(/service:\s*([\w.]+)/);
-        if (serviceMatch) {
-          const [domain] = serviceMatch[1].split(".");
-          context.domain = domain;
-          break;
-        }
-      }
-    }
-
-    return context;
-  }
-
-  /**
-   * Get all entity ID references in the document for diagnostics
-   */
-  findEntityReferences(document) {
-    const text = document.getText();
-    const references = [];
-    
-    // Match entity_id: value patterns
-    const entityIdPattern = /entity_id:\s*([a-z_]+\.[a-z0-9_]+)/gi;
-    let match;
-    
-    while ((match = entityIdPattern.exec(text)) !== null) {
-      const startOffset = match.index + match[0].indexOf(match[1]);
-      const endOffset = startOffset + match[1].length;
-      references.push({
-        entityId: match[1],
-        range: {
-          start: document.positionAt(startOffset),
-          end: document.positionAt(endOffset),
-        },
-      });
-    }
-
-    // Match entity_id in lists
-    const listEntityPattern = /entity_id:\s*\n(\s+-\s+[a-z_]+\.[a-z0-9_]+\s*)+/gi;
-    while ((match = listEntityPattern.exec(text)) !== null) {
-      const listContent = match[0];
-      const itemPattern = /-\s+([a-z_]+\.[a-z0-9_]+)/gi;
-      let itemMatch;
-      while ((itemMatch = itemPattern.exec(listContent)) !== null) {
-        const absoluteOffset = match.index + itemMatch.index + itemMatch[0].indexOf(itemMatch[1]);
-        references.push({
-          entityId: itemMatch[1],
-          range: {
-            start: document.positionAt(absoluteOffset),
-            end: document.positionAt(absoluteOffset + itemMatch[1].length),
-          },
-        });
-      }
-    }
-
-    // Match states() Jinja calls
-    const statesPattern = /states\(['"]([a-z_]+\.[a-z0-9_]+)['"]\)/gi;
-    while ((match = statesPattern.exec(text)) !== null) {
-      const startOffset = match.index + match[0].indexOf(match[1]);
-      references.push({
-        entityId: match[1],
-        range: {
-          start: document.positionAt(startOffset),
-          end: document.positionAt(startOffset + match[1].length),
-        },
-        inJinja: true,
-      });
-    }
-
-    // Match is_state() Jinja calls
-    const isStatePattern = /is_state\(['"]([a-z_]+\.[a-z0-9_]+)['"]/gi;
-    while ((match = isStatePattern.exec(text)) !== null) {
-      const startOffset = match.index + match[0].indexOf(match[1]);
-      references.push({
-        entityId: match[1],
-        range: {
-          start: document.positionAt(startOffset),
-          end: document.positionAt(startOffset + match[1].length),
-        },
-        inJinja: true,
-      });
-    }
-
-    return references;
-  }
-
-  /**
-   * Find service references in document
-   */
-  findServiceReferences(document) {
-    const text = document.getText();
-    const references = [];
-    
-    // Match service: domain.action patterns
-    const servicePattern = /(?:service|action):\s*([a-z_]+\.[a-z0-9_]+)/gi;
-    let match;
-    
-    while ((match = servicePattern.exec(text)) !== null) {
-      const startOffset = match.index + match[0].indexOf(match[1]);
-      references.push({
-        service: match[1],
-        range: {
-          start: document.positionAt(startOffset),
-          end: document.positionAt(startOffset + match[1].length),
-        },
-      });
-    }
-
-    return references;
-  }
-
-  /**
-   * Find !include references
-   */
-  findIncludeReferences(document) {
-    const text = document.getText();
-    const references = [];
-    
-    const includePattern = /!include\s+([^\s\n]+)/g;
-    let match;
-    
-    while ((match = includePattern.exec(text)) !== null) {
-      const filePath = match[1];
-      const startOffset = match.index + match[0].indexOf(filePath);
-      references.push({
-        path: filePath,
-        range: {
-          start: document.positionAt(startOffset),
-          end: document.positionAt(startOffset + filePath.length),
-        },
-      });
-    }
-
-    return references;
-  }
-}
+// YamlContextAnalyzer — moved to ./lib/yaml-analyzer.js
 
 // ============================================================================
 // LSP SERVER
@@ -699,18 +488,18 @@ connection.onCompletion(async (params) => {
 
       // Platform completion for triggers
       if (key === "platform" && context.parentKeys.includes("trigger")) {
-        return getTriggerPlatformCompletions();
+        return getTriggerPlatformCompletions(CompletionItemKind);
       }
 
       // Condition type completion
       if (key === "condition") {
-        return getConditionTypeCompletions();
+        return getConditionTypeCompletions(CompletionItemKind);
       }
     }
 
     // Completing a key
     if (context.inKey) {
-      return getKeyCompletions(context);
+      return getKeyCompletions(context, CompletionItemKind);
     }
 
   } catch (error) {
@@ -917,141 +706,8 @@ async function getJinjaCompletions(context) {
   return completions;
 }
 
-function getTriggerPlatformCompletions() {
-  const platforms = [
-    { label: "state", detail: "Trigger on entity state change" },
-    { label: "numeric_state", detail: "Trigger on numeric threshold" },
-    { label: "time", detail: "Trigger at specific time" },
-    { label: "time_pattern", detail: "Trigger on time pattern" },
-    { label: "sun", detail: "Trigger at sunrise/sunset" },
-    { label: "zone", detail: "Trigger on zone enter/leave" },
-    { label: "device", detail: "Device trigger" },
-    { label: "mqtt", detail: "MQTT message trigger" },
-    { label: "webhook", detail: "Webhook trigger" },
-    { label: "event", detail: "Event trigger" },
-    { label: "homeassistant", detail: "HA start/stop trigger" },
-    { label: "template", detail: "Template trigger" },
-    { label: "calendar", detail: "Calendar event trigger" },
-    { label: "geo_location", detail: "Geo location trigger" },
-    { label: "conversation", detail: "Voice assistant trigger" },
-    { label: "persistent_notification", detail: "Notification trigger" },
-  ];
-
-  return platforms.map(p => ({
-    label: p.label,
-    kind: CompletionItemKind.EnumMember,
-    detail: p.detail,
-    insertText: p.label,
-  }));
-}
-
-function getConditionTypeCompletions() {
-  const conditions = [
-    { label: "state", detail: "Entity state condition" },
-    { label: "numeric_state", detail: "Numeric state condition" },
-    { label: "time", detail: "Time window condition" },
-    { label: "sun", detail: "Sun position condition" },
-    { label: "zone", detail: "Zone condition" },
-    { label: "template", detail: "Template condition" },
-    { label: "device", detail: "Device condition" },
-    { label: "and", detail: "All conditions must be true" },
-    { label: "or", detail: "Any condition must be true" },
-    { label: "not", detail: "Condition must be false" },
-    { label: "trigger", detail: "Check which trigger fired" },
-  ];
-
-  return conditions.map(c => ({
-    label: c.label,
-    kind: CompletionItemKind.EnumMember,
-    detail: c.detail,
-    insertText: c.label,
-  }));
-}
-
-function getKeyCompletions(context) {
-  const completions = [];
-  
-  // Automation keys
-  if (context.parentKeys.length === 0 || context.parentKeys[0] === "automation") {
-    const automationKeys = [
-      { label: "alias", detail: "Friendly name for the automation" },
-      { label: "description", detail: "Description of the automation" },
-      { label: "trigger", detail: "Trigger conditions" },
-      { label: "condition", detail: "Conditions to check" },
-      { label: "action", detail: "Actions to perform" },
-      { label: "mode", detail: "Execution mode (single, restart, queued, parallel)" },
-      { label: "max", detail: "Max concurrent runs (for queued/parallel)" },
-      { label: "max_exceeded", detail: "Action when max exceeded" },
-      { label: "variables", detail: "Variables available in automation" },
-      { label: "trace", detail: "Trace configuration" },
-    ];
-    
-    for (const key of automationKeys) {
-      completions.push({
-        label: key.label,
-        kind: CompletionItemKind.Property,
-        detail: key.detail,
-        insertText: `${key.label}: `,
-      });
-    }
-  }
-
-  // Trigger keys
-  if (context.parentKey === "trigger" || context.parentKeys.includes("trigger")) {
-    const triggerKeys = [
-      { label: "platform", detail: "Trigger platform type" },
-      { label: "entity_id", detail: "Entity to monitor" },
-      { label: "to", detail: "State to transition to" },
-      { label: "from", detail: "State to transition from" },
-      { label: "for", detail: "Duration in state" },
-      { label: "attribute", detail: "Attribute to monitor" },
-      { label: "id", detail: "Trigger identifier" },
-      { label: "variables", detail: "Trigger-local variables" },
-    ];
-    
-    for (const key of triggerKeys) {
-      completions.push({
-        label: key.label,
-        kind: CompletionItemKind.Property,
-        detail: key.detail,
-        insertText: `${key.label}: `,
-      });
-    }
-  }
-
-  // Action keys
-  if (context.parentKey === "action" || context.parentKeys.includes("action")) {
-    const actionKeys = [
-      { label: "service", detail: "Service to call" },
-      { label: "action", detail: "Action to call (alias for service)" },
-      { label: "target", detail: "Target entities/areas/devices" },
-      { label: "data", detail: "Service data" },
-      { label: "entity_id", detail: "Entity ID (in target)" },
-      { label: "delay", detail: "Delay before next action" },
-      { label: "wait_template", detail: "Wait for template to be true" },
-      { label: "wait_for_trigger", detail: "Wait for trigger" },
-      { label: "repeat", detail: "Repeat actions" },
-      { label: "choose", detail: "Conditional actions" },
-      { label: "if", detail: "If-then-else" },
-      { label: "parallel", detail: "Run actions in parallel" },
-      { label: "sequence", detail: "Sequence of actions" },
-      { label: "variables", detail: "Set variables" },
-      { label: "stop", detail: "Stop execution" },
-      { label: "event", detail: "Fire event" },
-    ];
-    
-    for (const key of actionKeys) {
-      completions.push({
-        label: key.label,
-        kind: CompletionItemKind.Property,
-        detail: key.detail,
-        insertText: `${key.label}: `,
-      });
-    }
-  }
-
-  return completions;
-}
+// getTriggerPlatformCompletions, getConditionTypeCompletions,
+// getKeyCompletions — moved to ./lib/completions.js
 
 connection.onCompletionResolve(async (item) => {
   // Resolve additional details for completion items
@@ -1265,29 +921,7 @@ async function getTemplateHover(template) {
   }
 }
 
-function getWordRangeAtPosition(document, position) {
-  const text = document.getText();
-  const offset = document.offsetAt(position);
-  
-  // Find word boundaries (include . for entity IDs and services)
-  let start = offset;
-  let end = offset;
-  
-  while (start > 0 && /[a-zA-Z0-9_.]/.test(text[start - 1])) {
-    start--;
-  }
-  
-  while (end < text.length && /[a-zA-Z0-9_.]/.test(text[end])) {
-    end++;
-  }
-  
-  if (start === end) return null;
-  
-  return {
-    start: document.positionAt(start),
-    end: document.positionAt(end),
-  };
-}
+// getWordRangeAtPosition — moved to ./lib/completions.js
 
 // ============================================================================
 // DIAGNOSTICS PROVIDER
