@@ -1,35 +1,39 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## 1.6.3
-
-- **Removed: Web UI mode** — the experimental `ui_mode: web` option has been removed. It was never promoted to stable and had unresolved ingress path rewriting issues. The terminal (TUI) mode remains the only UI. Users who had `ui_mode` set in their configuration can safely ignore it — the addon will start in TUI mode regardless
-- **Fix: clear error when ESPHome tools are used without an access token** — previously produced a cryptic 500 error; now shows step-by-step setup instructions in the MCP tools, the `hab_run` gateway, and the shell ([#16](https://github.com/magnusoverli/opencode/issues/16))
-- nginx removed from container image (reduces image size)
-
 ## 1.6.2
 
-**write_config_safe: Generalized content protection for all config files**
+### ESPHome Error Handling
 
-Addresses [#14](https://github.com/magnusoverli/opencode/issues/14) — after the earlier fix protected list-based files (automations.yaml, scripts.yaml, scenes.yaml), a user reported that `configuration.yaml` was overwritten when the AI wrote only a to-do list integration without reading the existing file. The entry-count guard only covered list files; mapping-based files like `configuration.yaml` had no protection.
+- **Clear error when ESPHome tools are used without an access token** — previously produced a cryptic 500 error; now shows step-by-step setup instructions in the MCP tools, the `hab_run` gateway, and the shell ([#16](https://github.com/magnusoverli/opencode/issues/16))
 
-### Content Protection (3 layers)
+### write_config_safe: Content Protection
 
-- **Top-level key preservation** — for mapping-based YAML files (e.g. `configuration.yaml`), `write_config_safe` now parses existing top-level keys and blocks any write that would remove them. If `configuration.yaml` has `homeassistant:`, `automation:`, `sensor:`, etc., a write containing only `todo:` is blocked with a clear error message instructing the AI to read the file first
-- **Significant size reduction guard** — for ALL config files, writes that would reduce the file by more than 50% (by line count) are blocked. This is a generic safety net that catches destructive writes regardless of file structure
-- **List-entry reduction** (existing) — the previous protection for `automations.yaml`, `scripts.yaml`, and `scenes.yaml` remains in place, now integrated into the unified content protection system
+Addresses [#14](https://github.com/magnusoverli/opencode/issues/14) — `configuration.yaml` could be overwritten when the AI wrote only a single integration without reading the existing file.
 
-All three checks can be bypassed with `confirm_deletions: true` for intentional removals.
+- **Top-level key preservation** — for mapping-based YAML files (e.g. `configuration.yaml`), `write_config_safe` now blocks any write that would remove existing top-level keys
+- **Significant size reduction guard** — writes that would reduce any config file by more than 50% (by line count) are blocked
+- **List-entry reduction** (existing) — protection for `automations.yaml`, `scripts.yaml`, and `scenes.yaml` remains, now integrated into the unified content protection system
+- All three checks can be bypassed with `confirm_deletions: true` for intentional removals
+- `.bak` files are now retained after successful writes as a recovery point
 
-### Backup Retention
+### Testing Infrastructure
 
-- `.bak` files are no longer deleted after a successful write. The backup always contains the file content from right before the last write, providing a recovery point even when a destructive write passes HA validation
+- **102 unit tests** added across MCP server (66 tests) and LSP server (36 tests) using vitest
+- Pure functions extracted into testable `lib/` modules:
+  - MCP: `intelligence.js`, `validation.js`, `html-parser.js`, `helpers.js`
+  - LSP: `yaml-analyzer.js`, `completions.js`
+- Test files excluded from Docker image via `.dockerignore`
 
-### Agent Instructions
+### Bug Fixes
 
-- All workflow examples in AGENTS.md and INSTRUCTIONS.md now include an explicit `read_file()` step before writing
-- Warnings broadened from automation-specific to all config files
-- Tool description updated to mention content protection
+- **watch_firmware_update**: `callApi()` → `callHA()` — was calling a non-existent function, causing firmware update monitoring to crash at runtime
+- **LSP YAML context analyzer**: `currentIndent === prevIndent` → `currentIndent = prevIndent` — no-op comparison fixed to assignment, restoring correct parent key detection in nested YAML
+
+### Cleanup
+
+- **Removed: Web UI mode** — the experimental `ui_mode: web` option has been removed (never promoted to stable). TUI mode remains the only UI
+- nginx removed from container image (reduces image size)
 
 ## 1.6.1
 
