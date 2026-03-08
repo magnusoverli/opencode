@@ -1,8 +1,6 @@
 #!/command/with-contenv bashio
 # ==============================================================================
-# OpenCode - Web or Terminal Service
-#   ui_mode=web: opencode web (browser UI) + nginx reverse proxy via ingress
-#   ui_mode=tui: ttyd + tmux + opencode-session.sh (terminal via ingress)
+# OpenCode - Terminal Service (ttyd + tmux via ingress)
 # ==============================================================================
 
 # Set home to persistent data directory
@@ -15,82 +13,15 @@ if [ -f /data/.env_vars ]; then
     source /data/.env_vars
 fi
 
-# ==============================================================================
-# Runtime mode selection
-# ==============================================================================
-
-UI_MODE=$(bashio::config 'ui_mode' 2>/dev/null || echo "tui")
-# Normalize empty or invalid values to tui (safe default)
-if [ -z "${UI_MODE}" ] || { [ "${UI_MODE}" != "tui" ] && [ "${UI_MODE}" != "web" ]; }; then
-    if [ -n "${UI_MODE}" ]; then
-        bashio::log.warning "Unknown ui_mode '${UI_MODE}', defaulting to 'tui'"
-    fi
-    UI_MODE="tui"
-fi
-
 bashio::log.info "=============================================="
-if [ "${UI_MODE}" = "web" ]; then
-    bashio::log.info "  OpenCode Web UI (opencode web + ingress)"
-else
-    bashio::log.info "  OpenCode Terminal (ttyd + ingress)"
-fi
+bashio::log.info "  OpenCode Terminal (ttyd + ingress)"
 bashio::log.info "=============================================="
-bashio::log.info "UI mode: ${UI_MODE}"
 
 # ==============================================================================
 # Set Node.js memory limit (hardcoded for stability)
 # ==============================================================================
 
 export NODE_OPTIONS="--max-old-space-size=512"
-
-# ==============================================================================
-# Web UI mode — launch opencode web behind nginx reverse proxy
-# ==============================================================================
-
-if [ "${UI_MODE}" = "web" ]; then
-    bashio::log.info "Starting OpenCode Web UI on port 8099 (Home Assistant ingress)..."
-
-    # Ensure all child processes are killed when this script exits.
-    # 'kill 0' sends the signal to the entire process group, which covers
-    # both the backgrounded opencode web and nginx. Without this, a failed
-    # nginx start leaves the opencode process orphaned and holding port 8100,
-    # causing every subsequent restart attempt to fail.
-    trap 'kill 0' EXIT TERM INT
-
-    # Start opencode web server on internal port 8100.
-    # nginx on port 8099 handles ingress path rewriting and proxies to it.
-    cd /homeassistant
-    opencode web --hostname 127.0.0.1 --port 8100 &
-    OPENCODE_PID=$!
-
-    # Give the server a moment to bind
-    sleep 2
-
-    if ! kill -0 "${OPENCODE_PID}" 2>/dev/null; then
-        bashio::log.error "opencode web failed to start"
-        exit 1
-    fi
-
-    bashio::log.info "opencode web running (pid ${OPENCODE_PID}), starting nginx proxy on 8099..."
-
-    # Run nginx in the background and wait for either process to exit.
-    # If one dies, the EXIT trap kills the other via 'kill 0'.
-    # (We can't use 'exec nginx' because that replaces the shell and
-    # loses the ability to clean up the backgrounded opencode process.)
-    nginx -c /etc/nginx/opencode-web.conf &
-    NGINX_PID=$!
-
-    # wait -n: return as soon as ANY child exits (bash 4.3+)
-    wait -n "${OPENCODE_PID}" "${NGINX_PID}" 2>/dev/null
-    EXIT_CODE=$?
-
-    bashio::log.error "Process exited unexpectedly (code ${EXIT_CODE}), shutting down..."
-    exit "${EXIT_CODE}"
-fi
-
-# ==============================================================================
-# TUI mode — everything below is the original ttyd + tmux terminal
-# ==============================================================================
 
 # ==============================================================================
 # Read terminal appearance configuration

@@ -22,8 +22,6 @@ Configure the app from the **Configuration** tab in the app page.
 |--------|---------|-------------|
 | **Enable MCP Home Assistant Integration** | `true` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 33 tools, 13 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
 | **Enable LSP Home Assistant Integration** | `true` | Enable the Language Server Protocol (LSP) server for intelligent YAML editing. Provides entity/service autocomplete, hover documentation, diagnostics for unknown entities, and go-to-definition for !include tags. |
-| **UI Mode** | `tui` | Controls how OpenCode is displayed. `tui` uses a full terminal (ttyd + tmux) with shell access. `web` uses OpenCode's built-in browser UI — a cleaner interface but without shell access. See [Web UI Mode](#web-ui-mode) below. |
-
 ### Terminal Appearance
 
 | Option | Default | Description |
@@ -32,28 +30,6 @@ Configure the app from the **Configuration** tab in the app page.
 | **Font Size** | `14` | Terminal font size in pixels (10-24) |
 | **Cursor Style** | `block` | Cursor appearance: `block`, `underline`, or `bar` |
 | **Blinking Cursor** | `false` | Whether the cursor should blink |
-
-### Web UI Mode
-
-Setting **UI Mode** to `web` replaces the default terminal with OpenCode's built-in browser interface. This provides a cleaner chat-focused experience that some users prefer over the full terminal.
-
-#### How It Works
-
-- OpenCode's web server runs on an internal port, with an nginx reverse proxy handling Home Assistant ingress path rewriting
-- The browser UI connects to the OpenCode API automatically — no additional configuration needed
-- All MCP and LSP features work identically in both modes
-
-#### Known Limitation: No Shell Access
-
-Web mode does **not** provide a shell. You cannot run terminal commands (`ha-logs`, `hab`, `git`, etc.) from the web UI. If you need shell access alongside the AI chat, use the default `tui` mode.
-
-#### Switching Modes
-
-1. Go to the add-on **Configuration** tab
-2. Change **UI Mode** from `tui` to `web` (or vice versa)
-3. Save and restart the add-on
-
-Switching modes does not affect your OpenCode sessions, API credentials, or configuration — all data is preserved.
 
 ### Advanced Options
 

@@ -1,46 +1,11 @@
 # Changelog
 
-## 1.7.0b3
-
-- **Fix: web UI "Could not connect to server"** — HA ingress enforces
-  `Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'` which
-  blocked the inline `<script>` that set the API base URL, causing the
-  OpenCode client to fall back to `location.origin` (missing the ingress
-  path prefix) and 404 on every API call (`/global/health`, `/global/event`,
-  etc.). Fixed by serving the ingress URL detection logic as an external
-  JS file (`/ha-ingress-fix.js`) via an nginx `return 200` block — external
-  scripts from the same origin satisfy CSP `'self'`
-- Known limitation: custom fonts (Inter, Blex Mono) 404 because the JS
-  bundle references them with absolute paths (`/assets/...`) that bypass
-  ingress. System fallback fonts are used instead — purely cosmetic
-
 ## 1.7.0b2
 
-- **Fix: web UI mode crash on startup** — nginx refused to start due to a
-  literal `$` in a `sub_filter` JavaScript regex (`/\/$/`), which nginx
-  interpreted as a variable reference. Rewrote the ingress path injection
-  to use `endsWith()`+`slice()` instead, avoiding `$` entirely
-- **Fix: duplicate MIME type warning** — removed redundant
-  `sub_filter_types text/html` (already the default)
-- **Fix: port 8100 stuck after crash** — the backgrounded `opencode web`
-  process was orphaned when nginx died (due to `exec` replacing the shell),
-  blocking the port on every restart attempt. Now uses `trap 'kill 0'` for
-  process group cleanup and `wait -n` to detect when either process exits
 - **write_config_safe: generalized content protection** — blocks writes that
   would remove top-level keys from mapping files (e.g. `configuration.yaml`)
   or significantly shrink any config file. Addresses [#14](https://github.com/magnusoverli/opencode/issues/14)
 - `.bak` files are now retained after successful writes as a recovery point
-
-## 1.7.0b1
-
-- **New: Web UI mode** — set `ui_mode: web` in addon configuration to use
-  OpenCode's built-in browser interface instead of the terminal (ttyd + tmux)
-  - Cleaner chat-focused UI that runs behind an nginx reverse proxy
-  - All MCP and LSP features work identically in both modes
-  - Known limitation: no shell access (no `ha-logs`, `hab`, `git`, etc.)
-  - Default remains `tui` — existing setups are completely unaffected
-- nginx added to the container image for web mode ingress path rewriting
-- New `ui_mode` configuration option with `tui` (default) and `web` choices
 
 ## 1.6.1b16
 

@@ -1,6 +1,12 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 1.6.3
+
+- **Removed: Web UI mode** — the experimental `ui_mode: web` option has been removed. It was never promoted to stable and had unresolved ingress path rewriting issues. The terminal (TUI) mode remains the only UI. Users who had `ui_mode` set in their configuration can safely ignore it — the addon will start in TUI mode regardless
+- **Fix: clear error when ESPHome tools are used without an access token** — previously produced a cryptic 500 error; now shows step-by-step setup instructions in the MCP tools, the `hab_run` gateway, and the shell ([#16](https://github.com/magnusoverli/opencode/issues/16))
+- nginx removed from container image (reduces image size)
+
 ## 1.6.2
 
 **write_config_safe: Generalized content protection for all config files**

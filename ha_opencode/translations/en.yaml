@@ -8,10 +8,6 @@ configuration:
     name: "Enable LSP (Language Server Protocol)"
     description: "Enable Language Server Protocol support for intelligent code assistance. Provides real-time diagnostics, auto-completion, and validation for Home Assistant YAML configuration files."
   
-  ui_mode:
-    name: "UI Mode"
-    description: "Controls how OpenCode is displayed. 'tui' uses a full terminal (ttyd + tmux) with shell access — you can run shell commands, use tab completion, and interact with OpenCode's TUI. 'web' uses OpenCode's built-in browser UI — a cleaner interface but without shell access (no terminal commands, only the OpenCode chat). Default: tui."
-  
   cpu_mode:
     name: "CPU Mode"
     description: "Controls which OpenCode binary is used. 'auto' detects your CPU capabilities automatically (recommended). 'baseline' forces the baseline binary for older CPUs without AVX2 support. 'regular' forces the standard binary."

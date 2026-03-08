@@ -34,14 +34,12 @@ ENV NODE_ENV=production \
 # - curl/ca-certificates: For downloading ttyd
 # - procps: Provides pgrep for health check
 # - tmux: Session persistence to prevent multiple OpenCode instances
-# - nginx: Reverse proxy for web UI mode (rewrites paths for HA ingress)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         git \
         jq \
-        nginx \
         nodejs \
         npm \
         procps \
@@ -86,9 +84,9 @@ RUN chmod +x /usr/local/bin/* \
 # Set working directory to HA config (mounted at runtime)
 WORKDIR /homeassistant
 
-# Health check - verify the UI process is running (ttyd in TUI mode, nginx in web mode)
+# Health check - verify ttyd is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep ttyd > /dev/null || pgrep nginx > /dev/null || exit 1
+    CMD pgrep ttyd > /dev/null || exit 1
 
 # Labels for Home Assistant
 LABEL \

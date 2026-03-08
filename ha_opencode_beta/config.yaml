@@ -39,9 +39,6 @@ options:
   mcp_enabled: true
   lsp_enabled: true
 
-  # UI mode: tui (terminal via ttyd + tmux), web (browser UI via opencode web)
-  ui_mode: "tui"
-
   # CPU mode: auto (detect), baseline (for older CPUs), regular (force AVX2)
   cpu_mode: "auto"
 
@@ -66,9 +63,6 @@ schema:
   # Feature toggles
   mcp_enabled: bool
   lsp_enabled: bool
-
-  # UI mode
-  ui_mode: list(tui|web)
 
   # CPU mode
   cpu_mode: list(auto|baseline|regular)
