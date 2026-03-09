@@ -300,9 +300,15 @@ async function discoverHACoreUrl() {
 /**
  * Take a screenshot of a Home Assistant page using headless Chromium.
  *
- * Launches a headless browser, injects the long-lived access token into
- * localStorage so the HA frontend authenticates automatically, navigates
- * to the requested page, waits for rendering, and captures a PNG screenshot.
+ * Uses three complementary auth strategies to ensure the HA frontend
+ * authenticates correctly regardless of frontend version:
+ *
+ *   1. localStorage injection — sets hassTokens so the frontend's auth
+ *      module finds a valid session on startup
+ *   2. WebSocket monkey-patch — intercepts the auth_required handshake
+ *      and responds with the LLAT before the frontend's own handler
+ *   3. HTTP request interception — adds Authorization header to all
+ *      requests to the HA server (REST API fallback)
  *
  * @param {string} haCoreUrl - HA Core base URL (e.g. "http://192.168.1.100:8123")
  * @param {string} urlPath - Page path to screenshot (e.g. "/lovelace/0")
@@ -333,21 +339,78 @@ async function takeScreenshot(haCoreUrl, urlPath, options = {}) {
     const page = await browser.newPage();
     await page.setViewport({ width, height });
 
-    // Inject auth token into localStorage before page loads.
-    // The HA frontend reads hassTokens from localStorage on startup and
-    // uses the access_token for WebSocket and REST API authentication.
-    // We set a far-future expiry so it won't attempt a refresh during
-    // our brief screenshot window.
-    await page.evaluateOnNewDocument((tokenData) => {
-      localStorage.setItem("hassTokens", JSON.stringify(tokenData));
-    }, {
-      hassUrl: haCoreUrl,
-      clientId: `${haCoreUrl}/`,
-      access_token: HA_ACCESS_TOKEN,
-      token_type: "Bearer",
-      refresh_token: "",
-      expires_in: 86400 * 365,
-      expires: Date.now() + 86400 * 365 * 1000,
+    // ── Auth Strategy 1: localStorage tokens ──────────────────────────
+    // The HA frontend reads "hassTokens" from localStorage on startup.
+    // We inject a token entry with a non-empty refresh_token (empty string
+    // is falsy and causes the auth module to reject the token) and a
+    // far-future expiry so it won't attempt a refresh during our brief
+    // screenshot window.
+    await page.evaluateOnNewDocument((config) => {
+      try {
+        localStorage.setItem("hassTokens", JSON.stringify({
+          hassUrl: config.hassUrl,
+          clientId: config.hassUrl + "/",
+          access_token: config.token,
+          token_type: "Bearer",
+          refresh_token: "ha-screenshot-tool",
+          expires_in: 1800,
+          expires: Date.now() + 1800000,
+        }));
+      } catch (e) {
+        // localStorage may be unavailable in rare cases — fall through
+        // to the other auth strategies
+      }
+
+      // ── Auth Strategy 2: WebSocket interceptor ────────────────────
+      // Monkey-patch the WebSocket constructor so that when the HA
+      // frontend opens /api/websocket, our listener auto-responds to
+      // the auth_required handshake with the LLAT.  This covers cases
+      // where localStorage auth fails or the frontend ignores it.
+      const _WebSocket = window.WebSocket;
+      window.WebSocket = function (url, protocols) {
+        const ws = protocols !== undefined
+          ? new _WebSocket(url, protocols)
+          : new _WebSocket(url);
+
+        if (url && url.includes("/api/websocket")) {
+          let authSent = false;
+          ws.addEventListener("message", function (event) {
+            try {
+              const msg = JSON.parse(event.data);
+              if (msg.type === "auth_required" && !authSent) {
+                authSent = true;
+                ws.send(JSON.stringify({
+                  type: "auth",
+                  access_token: config.token,
+                }));
+              }
+            } catch (_) { /* ignore parse errors on non-JSON frames */ }
+          });
+        }
+
+        return ws;
+      };
+      // Preserve prototype chain so instanceof checks still work
+      window.WebSocket.prototype = _WebSocket.prototype;
+      window.WebSocket.CONNECTING = _WebSocket.CONNECTING;
+      window.WebSocket.OPEN = _WebSocket.OPEN;
+      window.WebSocket.CLOSING = _WebSocket.CLOSING;
+      window.WebSocket.CLOSED = _WebSocket.CLOSED;
+    }, { hassUrl: haCoreUrl, token: HA_ACCESS_TOKEN });
+
+    // ── Auth Strategy 3: HTTP request interception ────────────────────
+    // Add the Authorization header to every request targeting the HA
+    // server.  External requests (fonts, map tiles, etc.) are left
+    // untouched so we don't leak the token to third parties.
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (req.url().startsWith(haCoreUrl)) {
+        req.continue({
+          headers: { ...req.headers(), Authorization: `Bearer ${HA_ACCESS_TOKEN}` },
+        });
+      } else {
+        req.continue();
+      }
     });
 
     // Navigate to the target page
