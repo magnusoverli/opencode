@@ -28,33 +28,37 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
-      - name: Update version in beta config.yaml
+      - name: Sync beta metadata from dev to main
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          sed -i "s/^version: .*/version: \"${VERSION}\"/" ha_opencode_beta/config.yaml
 
-          # Verify
+          # Update version in beta config.yaml
+          sed -i "s/^version: .*/version: \"${VERSION}\"/" ha_opencode_beta/config.yaml
           grep "version:" ha_opencode_beta/config.yaml
 
-      - name: Commit version update
+          # Copy changelog and docs from the tagged commit (on dev) to main
+          # so HA Supervisor can display them in the update UI
+          git show ${{ github.ref_name }}:ha_opencode_beta/CHANGELOG.md > ha_opencode_beta/CHANGELOG.md
+          git show ${{ github.ref_name }}:ha_opencode_beta/DOCS.md > ha_opencode_beta/DOCS.md
+
+      - name: Commit metadata update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ha_opencode_beta/config.yaml
-          git commit -m "chore: bump beta version to ${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          git add ha_opencode_beta/config.yaml ha_opencode_beta/CHANGELOG.md ha_opencode_beta/DOCS.md
+          git commit -m "chore: bump beta to ${{ steps.version.outputs.version }} — sync metadata from dev" || echo "No changes to commit"
           git push origin main
 
       - name: Extract changelog
         id: changelog
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          # Read changelog from the tagged commit (on dev branch)
-          # using git show so we don't need to checkout dev
-          CHANGELOG=$(git show ${{ github.ref_name }}:ha_opencode_beta/CHANGELOG.md | awk "
+          # Changelog is now on main (synced above), read it directly
+          CHANGELOG=$(awk "
             /^## ${VERSION}$/ { found=1; next }
             found && /^## / { exit }
             found { print }
-          ")
+          " ha_opencode_beta/CHANGELOG.md)
 
           echo "content<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
