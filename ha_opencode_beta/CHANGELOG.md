@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0b4
+
+- **New `screenshot_url` MCP tool** — visual verification of HA frontend pages using headless Chromium. After making dashboard changes via hab, the AI can take a screenshot and analyze it with vision. Requires `screenshot_enabled` option and a Long-Lived Access Token (opt-in, disabled by default)
+- **`discoverHACoreUrl()` utility** — extracted HA Core URL discovery into a reusable function (used by both screenshot and ESPHome features)
+- Chromium and puppeteer-core added to container image
+- MCP server bumped to v2.7.0 (34 tools)
+- Beta release workflow updated to use `dev` branch
+
 ## 1.7.0b2
 
 - **write_config_safe: generalized content protection** — blocks writes that
