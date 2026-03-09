@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0b5
+
+- **Fix: screenshot_enabled option now visible in Configuration UI** — was missing a translation entry in `translations/en.yaml`, causing HA to hide it
+- Updated access token description to mention screenshot tool
+
 ## 1.7.0b4
 
 - **New `screenshot_url` MCP tool** — visual verification of HA frontend pages using headless Chromium. After making dashboard changes via hab, the AI can take a screenshot and analyze it with vision. Requires `screenshot_enabled` option and a Long-Lived Access Token (opt-in, disabled by default)
