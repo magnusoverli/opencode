@@ -28,24 +28,26 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
-      - name: Sync beta metadata from dev to main
+      - name: Sync entire beta addon directory from dev to main
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          # Update version in beta config.yaml
+          # Replace the entire ha_opencode_beta/ directory with the version
+          # from the tagged commit (on dev). This syncs everything HA reads
+          # from the repo: config.yaml (schema, options), translations,
+          # CHANGELOG.md, DOCS.md, icons, build.yaml, etc.
+          git checkout ${{ github.ref_name }} -- ha_opencode_beta/
+
+          # Set the release version (dev's config.yaml may show the previous
+          # beta version since the version bump happens here, not on dev)
           sed -i "s/^version: .*/version: \"${VERSION}\"/" ha_opencode_beta/config.yaml
           grep "version:" ha_opencode_beta/config.yaml
-
-          # Copy changelog and docs from the tagged commit (on dev) to main
-          # so HA Supervisor can display them in the update UI
-          git show ${{ github.ref_name }}:ha_opencode_beta/CHANGELOG.md > ha_opencode_beta/CHANGELOG.md
-          git show ${{ github.ref_name }}:ha_opencode_beta/DOCS.md > ha_opencode_beta/DOCS.md
 
       - name: Commit metadata update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ha_opencode_beta/config.yaml ha_opencode_beta/CHANGELOG.md ha_opencode_beta/DOCS.md
+          git add ha_opencode_beta/
           git commit -m "chore: bump beta to ${{ steps.version.outputs.version }} — sync metadata from dev" || echo "No changes to commit"
           git push origin main
 
