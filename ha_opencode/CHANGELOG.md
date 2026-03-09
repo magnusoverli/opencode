@@ -1,7 +1,7 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## 1.6.3
+## 1.7.0
 
 ### Visual Verification (Screenshot Tool)
 
