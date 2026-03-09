@@ -1,7 +1,7 @@
 ---
 name: "OpenCode Beta"
 description: "Beta channel for OpenCode - AI coding agent for Home Assistant. May contain experimental features."
-version: "1.7.0b5"
+version: "1.7.0b6"
 slug: "ha_opencode_beta"
 image: "ghcr.io/magnusoverli/ha_opencode_beta/{arch}"
 url: "https://github.com/magnusoverli/opencode"
@@ -48,9 +48,13 @@ options:
   cursor_style: "block"
   cursor_blink: false
 
+  # Screenshot tool: enables visual verification of dashboards and UI changes.
+  # Requires a Long-Lived Access Token (below) to authenticate with the HA frontend.
+  screenshot_enabled: false
+
   # Long-lived access token for direct HA Core API access.
-  # Required for ESPHome ingress (create at: Profile → Long-Lived Access Tokens).
-  # Leave empty if you don't use ESPHome tools.
+  # Required for ESPHome ingress and screenshot tool (create at: Profile → Long-Lived Access Tokens).
+  # Leave empty if you don't use ESPHome or screenshot tools.
   access_token: ""
 
   # Environment variables to inject into the container
@@ -72,6 +76,9 @@ schema:
   font_size: int(10,24)
   cursor_style: list(block|underline|bar)
   cursor_blink: bool
+
+  # Screenshot tool
+  screenshot_enabled: bool
 
   # HA Core access token
   access_token: str?

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0b6
+
+- **Fix: screenshot_enabled config option and translation now synced to main** — the release workflow was only sed-bumping the version in config.yaml without syncing schema changes or translations. Now syncs the entire `ha_opencode_beta/` directory from the tagged commit to main
+- This is the same Docker image as b5 — only the repository metadata sync is fixed
+
 ## 1.7.0b5
 
 - **Fix: screenshot_enabled option now visible in Configuration UI** — was missing a translation entry in `translations/en.yaml`, causing HA to hide it
