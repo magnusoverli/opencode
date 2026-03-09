@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 ### Visual Verification (Screenshot Tool)
 
 - **New `screenshot_url` MCP tool** — takes screenshots of any Home Assistant frontend page using headless Chromium, enabling AI models with vision capabilities to visually verify dashboard changes, card layouts, and UI modifications
+- **Three-layer authentication** — uses localStorage token injection, WebSocket auth interception, and HTTP request header injection to reliably authenticate with the HA frontend regardless of version
 - **Opt-in via configuration** — disabled by default to keep resource usage minimal. Enable via the `screenshot_enabled` option in the add-on Configuration tab
 - **Requires Long-Lived Access Token** — uses the same `access_token` option already available for ESPHome tools to authenticate with the HA frontend
 - **Configurable viewport** — supports custom width, height, render wait time, and full-page capture
@@ -17,6 +18,11 @@ All notable changes to this project will be documented in this file.
 - **34 tools** (was 33) — `screenshot_url` added to the tool set
 - MCP server version bumped to v2.7.0
 - New `createImageContent` helper in `lib/helpers.js` for building MCP image content objects
+
+### CI/CD
+
+- **New `dev` branch** for beta development — beta releases are now tagged and built from `dev`, stable releases from `main`
+- Beta release workflow now syncs the entire `ha_opencode_beta/` directory (config, translations, changelog, docs) from dev to main automatically
 
 ## 1.6.2
 
