@@ -10,6 +10,7 @@ OpenCode is an AI-powered coding agent that helps you edit and manage your Home 
 - **Ingress Support**: Access directly from the Home Assistant sidebar
 - **Provider Agnostic**: Works with Anthropic, OpenAI, Google, and 70+ other AI providers
 - **MCP Integration**: Deep Home Assistant integration with Tools, Resources, Prompts, and Intelligence
+- **Visual Verification**: Screenshot tool for verifying dashboard changes with AI vision
 - **LSP Integration**: Intelligent YAML editing with entity autocomplete, hover info, and diagnostics
 
 ## Configuration
@@ -20,8 +21,9 @@ Configure the app from the **Configuration** tab in the app page.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| **Enable MCP Home Assistant Integration** | `true` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 33 tools, 13 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
+| **Enable MCP Home Assistant Integration** | `true` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 34 tools, 13 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
 | **Enable LSP Home Assistant Integration** | `true` | Enable the Language Server Protocol (LSP) server for intelligent YAML editing. Provides entity/service autocomplete, hover documentation, diagnostics for unknown entities, and go-to-definition for !include tags. |
+| **Screenshot Tool** | `false` | Enable visual verification of dashboards and UI pages. Uses headless Chromium to capture screenshots that vision-capable AI models can analyze. Requires a Long-Lived Access Token. See [Visual Verification](#visual-verification-screenshots). |
 ### Terminal Appearance
 
 | Option | Default | Description |
@@ -216,7 +218,7 @@ The app includes an enhanced MCP (Model Context Protocol) server that provides d
 
 | Capability | Count | Description |
 |------------|-------|-------------|
-| **Tools** | 33 | Actions, queries, config validation, device management, and hab CLI |
+| **Tools** | 34 | Actions, queries, config validation, device management, screenshots, and hab CLI |
 | **Resources** | 9 + 4 templates | Browsable data exposed to the AI |
 | **Prompts** | 6 | Pre-built guided workflows for common tasks |
 | **Intelligence** | Built-in | Anomaly detection, suggestions, semantic search |
@@ -335,6 +337,12 @@ Then restart OpenCode (exit and run `opencode` again).
 | Tool | Description |
 |------|-------------|
 | `hab_run` | Run any [hab](https://github.com/balloob/home-assistant-build-cli) CLI command as a native MCP tool. Covers dashboard CRUD, area/floor/zone management, helpers, backups, blueprints, automation CRUD via API, and more. Pass the command without the `hab` prefix (e.g., `area list`, `dashboard list`). |
+
+### Visual Verification
+
+| Tool | Description |
+|------|-------------|
+| `screenshot_url` | Take a screenshot of any Home Assistant page for visual verification. Use after making dashboard changes via hab to verify the result. Requires the `screenshot_enabled` option and a Long-Lived Access Token. Returns a PNG image that vision-capable AI models can analyze. |
 
 ---
 
@@ -486,6 +494,58 @@ The tool returns a structured result with:
 - **`templateErrors`** — Jinja2 template syntax or rendering errors
 - **`configCheckResult`** — Output from HA Core's config validation
 - **`backupPath`** — Path to the backup file (if a write occurred)
+
+---
+
+## Visual Verification (Screenshots)
+
+The `screenshot_url` MCP tool lets the AI visually verify changes to dashboards and other HA frontend pages. After creating or modifying a dashboard view via `hab`, the AI can take a screenshot to confirm the result looks correct.
+
+### How It Works
+
+1. A headless Chromium browser launches inside the add-on container
+2. It authenticates with the HA frontend using your Long-Lived Access Token
+3. Navigates to the requested page and waits for it to render
+4. Captures a PNG screenshot and returns it to the AI model
+5. Vision-capable AI models (Claude, GPT-4o, Gemini, etc.) can analyze the image
+
+### Setup
+
+1. Go to **Settings → Add-ons → OpenCode → Configuration**
+2. Enable **"Screenshot tool"**
+3. Set a **Long-Lived Access Token** (create one at Profile → Long-Lived Access Tokens)
+4. Restart the add-on
+
+### Usage Examples
+
+```
+Create a new dashboard for the living room and show me what it looks like
+```
+
+```
+Take a screenshot of my energy dashboard
+```
+
+```
+Add a weather card to the overview and verify it looks right
+```
+
+### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `url_path` | (required) | HA page path (e.g., `/lovelace/0`, `/energy`, `/dashboard-name/0`) |
+| `width` | `1280` | Viewport width in pixels |
+| `height` | `720` | Viewport height in pixels |
+| `wait_seconds` | `3` | Wait time for dynamic content to render (max 15) |
+| `full_page` | `false` | Capture the full scrollable page |
+
+### Notes
+
+- The screenshot tool adds Chromium to the container image, increasing its size
+- Each screenshot takes approximately 5-10 seconds (browser launch + page load + render wait)
+- Screenshots are only taken when the AI explicitly calls the tool — no background processes
+- The Long-Lived Access Token is the same one used for ESPHome tools
 
 ---
 

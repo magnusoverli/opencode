@@ -1,6 +1,23 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 1.6.3
+
+### Visual Verification (Screenshot Tool)
+
+- **New `screenshot_url` MCP tool** — takes screenshots of any Home Assistant frontend page using headless Chromium, enabling AI models with vision capabilities to visually verify dashboard changes, card layouts, and UI modifications
+- **Opt-in via configuration** — disabled by default to keep resource usage minimal. Enable via the `screenshot_enabled` option in the add-on Configuration tab
+- **Requires Long-Lived Access Token** — uses the same `access_token` option already available for ESPHome tools to authenticate with the HA frontend
+- **Configurable viewport** — supports custom width, height, render wait time, and full-page capture
+- **HA Core URL auto-discovery** — extracted into a reusable `discoverHACoreUrl()` function shared with the ESPHome ingress discovery logic
+- Chromium and puppeteer-core added to the container image
+
+### MCP Server
+
+- **34 tools** (was 33) — `screenshot_url` added to the tool set
+- MCP server version bumped to v2.7.0
+- New `createImageContent` helper in `lib/helpers.js` for building MCP image content objects
+
 ## 1.6.2
 
 ### ESPHome Error Handling

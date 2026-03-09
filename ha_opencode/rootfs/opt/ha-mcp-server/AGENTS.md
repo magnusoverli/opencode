@@ -484,6 +484,7 @@ Query and interact with the running Home Assistant instance:
 - `diagnose_entity` - Comprehensive entity troubleshooting
 - `watch_firmware_update` - **Real-time firmware update monitoring** (ESPHome, WLED, Zigbee, etc.)
 - `get_available_updates`, `update_component` - System update management
+- `screenshot_url` - **Visual verification** of dashboards and UI pages (requires `screenshot_enabled` option)
 
 ### Choosing the Right Approach
 
@@ -498,6 +499,7 @@ Query and interact with the running Home Assistant instance:
 | Find entities | Grep YAML files | `search_entities` | `hab entity list --domain` |
 | View history | N/A | `get_history` | N/A |
 | **Manage dashboards** | Edit YAML | N/A | **`hab dashboard` (primary)** |
+| **Verify UI changes** | N/A | **`screenshot_url`** | N/A |
 | **Manage areas/floors** | N/A | `get_areas` (read-only) | **`hab area/floor` (CRUD)** |
 | **Manage helpers** | N/A | N/A | **`hab helper` (primary)** |
 | **Backups** | N/A | N/A | **`hab backup` (primary)** |
