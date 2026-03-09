@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0b7
+
+- **Fix: screenshot tool now authenticates correctly** — the previous approach only used localStorage with an empty `refresh_token` (falsy in JS), causing the HA frontend to show the login page instead of the dashboard. Now uses three complementary auth strategies:
+  1. localStorage injection with non-empty `refresh_token`
+  2. WebSocket monkey-patch that auto-responds to `auth_required`
+  3. HTTP request interception adding `Authorization` header to HA server requests (token is not sent to external URLs)
+
 ## 1.7.0b6
 
 - **Fix: screenshot_enabled config option and translation now synced to main** — the release workflow was only sed-bumping the version in config.yaml without syncing schema changes or translations. Now syncs the entire `ha_opencode_beta/` directory from the tagged commit to main
