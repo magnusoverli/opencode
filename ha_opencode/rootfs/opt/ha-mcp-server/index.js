@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Home Assistant MCP Server for OpenCode (Safe Config Edition v2.6)
+ * Home Assistant MCP Server for OpenCode (Safe Config Edition v2.7)
  * 
  * A cutting-edge MCP server providing deep integration with Home Assistant.
  * Implements the latest MCP specification (2025-06-18) features:
@@ -22,8 +22,9 @@
  * - Structural YAML validation for automations, scripts, templates
  * - HA Repairs API integration (instance-specific deprecation warnings)
  * - HA Alerts feed integration (global integration issue awareness)
+ * - Visual verification via headless Chromium screenshots
  * 
- * TOOLS (33):
+ * TOOLS (34):
  * - Entity state management (get, search, history)
  * - Service calls with intelligent targeting
  * - Configuration validation and safe writing
@@ -33,6 +34,7 @@
  * - Documentation fetching and syntax checking
  * - Update management with real-time progress monitoring
  * - ESPHome device management, compile, and upload
+ * - Visual verification screenshots of HA frontend pages
  * 
  * RESOURCES (9 + 4 templates):
  * - Live entity states by domain
@@ -72,7 +74,8 @@ import { fileURLToPath } from "url";
 import { detectAnomaly, searchEntities, generateSuggestions, generateStateSummary } from "./lib/intelligence.js";
 import { validateYamlStructure, resolveConfigPath } from "./lib/validation.js";
 import { extractContentFromHtml, extractConfigurationSection, extractYamlExamples } from "./lib/html-parser.js";
-import { createTextContent, createResourceLink } from "./lib/helpers.js";
+import { createTextContent, createImageContent, createResourceLink } from "./lib/helpers.js";
+import puppeteer from "puppeteer-core";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -90,6 +93,25 @@ const ESPHOME_TOKEN_ERROR = "ESPHome tools require a Long-Lived Access Token.\n\
   "3. Go to Settings → Add-ons → OpenCode → Configuration\n" +
   "4. Paste the token into the 'access_token' field\n" +
   "5. Restart the OpenCode add-on (with ESPHome already running)";
+
+// Screenshot feature (visual verification of dashboards and UI)
+const SCREENSHOT_ENABLED = process.env.SCREENSHOT_ENABLED === "true";
+const CHROMIUM_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium";
+
+const SCREENSHOT_DISABLED_ERROR = "Screenshot tool is disabled.\n\n" +
+  "To enable visual verification:\n" +
+  "1. Go to Settings → Add-ons → OpenCode → Configuration\n" +
+  "2. Enable 'Screenshot tool'\n" +
+  "3. Set a Long-Lived Access Token (Profile → Long-Lived Access Tokens)\n" +
+  "4. Restart the OpenCode add-on";
+
+const SCREENSHOT_TOKEN_ERROR = "Screenshot tool requires a Long-Lived Access Token.\n\n" +
+  "To configure:\n" +
+  "1. Go to your Home Assistant Profile page (click your user icon)\n" +
+  "2. Scroll to Long-Lived Access Tokens and create one\n" +
+  "3. Go to Settings → Add-ons → OpenCode → Configuration\n" +
+  "4. Paste the token into the 'access_token' field\n" +
+  "5. Restart the OpenCode add-on";
 
 // Home Assistant documentation base URLs
 const HA_DOCS_BASE = "https://www.home-assistant.io";
@@ -205,6 +227,226 @@ async function callSupervisor(endpoint, method = "GET", body = null) {
     return result.data !== undefined ? result.data : result;
   }
   return response.text();
+}
+
+// ============================================================================
+// HA CORE URL DISCOVERY
+// ============================================================================
+
+/**
+ * Discover the Home Assistant Core frontend URL.
+ *
+ * Tries internal_url / external_url from /api/config first, then falls back
+ * to network interface discovery via the Supervisor API.
+ *
+ * @returns {Promise<string>} The HA Core URL (e.g. "http://192.168.1.100:8123")
+ * @throws {Error} If the URL cannot be determined
+ */
+async function discoverHACoreUrl() {
+  let haConfig;
+  try {
+    haConfig = await callHA("/config");
+  } catch (e) {
+    throw new Error(`Failed to get HA config: ${e.message}`);
+  }
+
+  let haCoreUrl = (haConfig.internal_url || haConfig.external_url || "").replace(/\/+$/, "");
+
+  if (!haCoreUrl) {
+    // internal_url is "automatic" (null) — discover from Supervisor APIs
+    try {
+      const [coreInfo, networkInfo] = await Promise.all([
+        callSupervisor("/core/info"),
+        callSupervisor("/network/info"),
+      ]);
+
+      const port = coreInfo.port || 8123;
+      const ssl = coreInfo.ssl || false;
+      const protocol = ssl ? "https" : "http";
+
+      let hostIp = null;
+      if (networkInfo.interfaces) {
+        const primary = networkInfo.interfaces.find(i => i.primary && i.connected);
+        const iface = primary || networkInfo.interfaces.find(i => i.connected);
+        if (iface?.ipv4?.address?.[0]) {
+          hostIp = iface.ipv4.address[0].split("/")[0];
+        }
+      }
+
+      if (hostIp) {
+        haCoreUrl = `${protocol}://${hostIp}:${port}`;
+      }
+    } catch (e) {
+      sendLog("warning", "ha-core-url", { action: "network_fallback_failed", error: e.message });
+    }
+  }
+
+  if (!haCoreUrl) {
+    throw new Error(
+      "Could not determine HA Core URL. " +
+      "Set internal_url in Settings → System → Network, " +
+      "or ensure the host has a connected network interface."
+    );
+  }
+
+  sendLog("debug", "ha-core-url", { action: "discovered", url: haCoreUrl });
+  return haCoreUrl;
+}
+
+// ============================================================================
+// SCREENSHOT HELPERS
+// ============================================================================
+
+/**
+ * Take a screenshot of a Home Assistant page using headless Chromium.
+ *
+ * Uses three complementary auth strategies to ensure the HA frontend
+ * authenticates correctly regardless of frontend version:
+ *
+ *   1. localStorage injection — sets hassTokens so the frontend's auth
+ *      module finds a valid session on startup
+ *   2. WebSocket monkey-patch — intercepts the auth_required handshake
+ *      and responds with the LLAT before the frontend's own handler
+ *   3. HTTP request interception — adds Authorization header to all
+ *      requests to the HA server (REST API fallback)
+ *
+ * @param {string} haCoreUrl - HA Core base URL (e.g. "http://192.168.1.100:8123")
+ * @param {string} urlPath - Page path to screenshot (e.g. "/lovelace/0")
+ * @param {object} options - Screenshot options
+ * @param {number} [options.width=1280] - Viewport width in pixels
+ * @param {number} [options.height=720] - Viewport height in pixels
+ * @param {number} [options.waitSeconds=3] - Extra wait time for dynamic content
+ * @param {boolean} [options.fullPage=false] - Capture full scrollable page
+ * @returns {Promise<string>} Base64-encoded PNG screenshot
+ */
+async function takeScreenshot(haCoreUrl, urlPath, options = {}) {
+  const { width = 1280, height = 720, waitSeconds = 3, fullPage = false } = options;
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROMIUM_PATH,
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-first-run",
+      "--disable-extensions",
+    ],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width, height });
+
+    // ── Auth Strategy 1: localStorage tokens ──────────────────────────
+    // The HA frontend reads "hassTokens" from localStorage on startup.
+    // We inject a token entry with a non-empty refresh_token (empty string
+    // is falsy and causes the auth module to reject the token) and a
+    // far-future expiry so it won't attempt a refresh during our brief
+    // screenshot window.
+    await page.evaluateOnNewDocument((config) => {
+      try {
+        localStorage.setItem("hassTokens", JSON.stringify({
+          hassUrl: config.hassUrl,
+          clientId: config.hassUrl + "/",
+          access_token: config.token,
+          token_type: "Bearer",
+          refresh_token: "ha-screenshot-tool",
+          expires_in: 1800,
+          expires: Date.now() + 1800000,
+        }));
+      } catch (e) {
+        // localStorage may be unavailable in rare cases — fall through
+        // to the other auth strategies
+      }
+
+      // ── Auth Strategy 2: WebSocket interceptor ────────────────────
+      // Monkey-patch the WebSocket constructor so that when the HA
+      // frontend opens /api/websocket, our listener auto-responds to
+      // the auth_required handshake with the LLAT.  This covers cases
+      // where localStorage auth fails or the frontend ignores it.
+      const _WebSocket = window.WebSocket;
+      window.WebSocket = function (url, protocols) {
+        const ws = protocols !== undefined
+          ? new _WebSocket(url, protocols)
+          : new _WebSocket(url);
+
+        if (url && url.includes("/api/websocket")) {
+          let authSent = false;
+          ws.addEventListener("message", function (event) {
+            try {
+              const msg = JSON.parse(event.data);
+              if (msg.type === "auth_required" && !authSent) {
+                authSent = true;
+                ws.send(JSON.stringify({
+                  type: "auth",
+                  access_token: config.token,
+                }));
+              }
+            } catch (_) { /* ignore parse errors on non-JSON frames */ }
+          });
+        }
+
+        return ws;
+      };
+      // Preserve prototype chain so instanceof checks still work
+      window.WebSocket.prototype = _WebSocket.prototype;
+      window.WebSocket.CONNECTING = _WebSocket.CONNECTING;
+      window.WebSocket.OPEN = _WebSocket.OPEN;
+      window.WebSocket.CLOSING = _WebSocket.CLOSING;
+      window.WebSocket.CLOSED = _WebSocket.CLOSED;
+    }, { hassUrl: haCoreUrl, token: HA_ACCESS_TOKEN });
+
+    // ── Auth Strategy 3: HTTP request interception ────────────────────
+    // Add the Authorization header to every request targeting the HA
+    // server.  External requests (fonts, map tiles, etc.) are left
+    // untouched so we don't leak the token to third parties.
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (req.url().startsWith(haCoreUrl)) {
+        req.continue({
+          headers: { ...req.headers(), Authorization: `Bearer ${HA_ACCESS_TOKEN}` },
+        });
+      } else {
+        req.continue();
+      }
+    });
+
+    // Navigate to the target page
+    const normalizedPath = urlPath.startsWith("/") ? urlPath : `/${urlPath}`;
+    const fullUrl = `${haCoreUrl}${normalizedPath}`;
+
+    sendLog("info", "screenshot", { action: "navigating", url: fullUrl, width, height });
+
+    await page.goto(fullUrl, {
+      waitUntil: "networkidle0",
+      timeout: 30000,
+    });
+
+    // Wait for dynamic content to render (dashboards, cards, graphs, etc.)
+    const clampedWait = Math.max(0, Math.min(waitSeconds, 15));
+    if (clampedWait > 0) {
+      await new Promise(resolve => setTimeout(resolve, clampedWait * 1000));
+    }
+
+    // Take screenshot
+    const screenshotBuffer = await page.screenshot({
+      type: "png",
+      fullPage,
+      encoding: "base64",
+    });
+
+    sendLog("info", "screenshot", {
+      action: "captured",
+      path: normalizedPath,
+      size: `${Math.round(screenshotBuffer.length / 1024)}KB (base64)`,
+    });
+
+    return screenshotBuffer;
+  } finally {
+    await browser.close();
+  }
 }
 
 // ============================================================================
@@ -2071,6 +2313,41 @@ const TOOLS = [
     annotations: {
       readOnly: false,
       idempotent: false,
+    },
+  },
+  {
+    name: "screenshot_url",
+    title: "Screenshot Home Assistant Page",
+    description: "Take a screenshot of any Home Assistant page for visual verification. Use this after making dashboard changes, creating views or cards via hab, or any time you need to visually verify a result. Returns a PNG image that vision-capable AI models can analyze. Requires the 'screenshot_enabled' option and a Long-Lived Access Token. Examples: '/lovelace/0' (default dashboard), '/energy' (energy panel), '/config/dashboard' (settings), '/dashboard-custom/my-view' (custom dashboard).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url_path: {
+          type: "string",
+          description: "The HA page path to screenshot (e.g., '/lovelace/0', '/energy', '/config/dashboard', '/dashboard-name/view-index')",
+        },
+        width: {
+          type: "number",
+          description: "Viewport width in pixels (default: 1280)",
+        },
+        height: {
+          type: "number",
+          description: "Viewport height in pixels (default: 720)",
+        },
+        wait_seconds: {
+          type: "number",
+          description: "Seconds to wait after page load for dynamic content to render (default: 3, max: 15)",
+        },
+        full_page: {
+          type: "boolean",
+          description: "Capture full scrollable page instead of just viewport (default: false)",
+        },
+      },
+      required: ["url_path"],
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
     },
   },
 ];
@@ -4047,6 +4324,57 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
       }
 
+      // === VISUAL VERIFICATION ===
+      case "screenshot_url": {
+        if (!SCREENSHOT_ENABLED) {
+          throw new Error(SCREENSHOT_DISABLED_ERROR);
+        }
+        if (!HA_ACCESS_TOKEN) {
+          throw new Error(SCREENSHOT_TOKEN_ERROR);
+        }
+
+        const urlPath = args.url_path;
+        const width = args.width || 1280;
+        const height = args.height || 720;
+        const waitSeconds = args.wait_seconds !== undefined ? args.wait_seconds : 3;
+        const fullPage = args.full_page || false;
+
+        sendLog("info", "screenshot", {
+          action: "requested",
+          path: urlPath,
+          width,
+          height,
+          waitSeconds,
+          fullPage,
+        });
+
+        // Discover HA Core frontend URL
+        const haCoreUrl = await discoverHACoreUrl();
+
+        // Take the screenshot
+        const base64Screenshot = await takeScreenshot(haCoreUrl, urlPath, {
+          width,
+          height,
+          waitSeconds,
+          fullPage,
+        });
+
+        const normalizedPath = urlPath.startsWith("/") ? urlPath : `/${urlPath}`;
+
+        return makeCompatibleResponse({
+          content: [
+            createTextContent(
+              `Screenshot of ${normalizedPath} (${width}x${height}) captured successfully.`,
+              { audience: ["user", "assistant"], priority: 0.5 }
+            ),
+            createImageContent(base64Screenshot, "image/png", {
+              audience: ["assistant"],
+              priority: 1.0,
+            }),
+          ],
+        });
+      }
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -4519,15 +4847,15 @@ async function main() {
   
   sendLog("info", "mcp-server", { 
     action: "started",
-    version: "2.6.0",
+    version: "2.7.0",
     tools: TOOLS.length,
     resources: RESOURCES.length,
     prompts: PROMPTS.length,
   });
   
-  console.error("Home Assistant MCP server v2.6.0 started (Safe Config Edition)");
+  console.error("Home Assistant MCP server v2.7.0 started (Safe Config Edition)");
   console.error(`Capabilities: Tools (${TOOLS.length}), Resources (${RESOURCES.length}), Prompts (${PROMPTS.length}), Logging`);
-  console.error("Features: Structured Output, Tool Annotations, Resource Links, Content Annotations, Live Docs, Safe Config Writing");
+  console.error(`Features: Structured Output, Tool Annotations, Resource Links, Content Annotations, Live Docs, Safe Config Writing, Screenshots${SCREENSHOT_ENABLED ? " (enabled)" : " (disabled)"}`);
 }
 
 main().catch((error) => {

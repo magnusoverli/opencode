@@ -18,6 +18,19 @@ export function createTextContent(text, options = {}) {
 }
 
 /**
+ * Build an MCP image content object with optional annotations.
+ */
+export function createImageContent(base64Data, mimeType, options = {}) {
+  const content = { type: "image", data: base64Data, mimeType };
+  if (options.audience || options.priority !== undefined) {
+    content.annotations = {};
+    if (options.audience) content.annotations.audience = options.audience;
+    if (options.priority !== undefined) content.annotations.priority = options.priority;
+  }
+  return content;
+}
+
+/**
  * Build an MCP resource link object with optional annotations.
  */
 export function createResourceLink(uri, name, description, options = {}) {

@@ -28,9 +28,13 @@ configuration:
     name: "Blinking Cursor"
     description: "Whether the terminal cursor should blink."
   
+  screenshot_enabled:
+    name: "Enable Screenshot Tool"
+    description: "Enable visual verification of dashboards and UI pages. When enabled, the AI can take screenshots of Home Assistant pages using a headless browser to verify the result of dashboard changes. Requires a Long-Lived Access Token (below). Each screenshot takes approximately 5-10 seconds."
+
   access_token:
     name: "Home Assistant Access Token"
-    description: "A long-lived access token for direct communication with Home Assistant Core. Required for ESPHome integration (device listing, log streaming, builds). Create one in the HA UI under Profile → Long-Lived Access Tokens. Leave empty if you don't use ESPHome tools."
+    description: "A long-lived access token for direct communication with Home Assistant Core. Required for ESPHome integration and the screenshot tool. Create one in the HA UI under Profile → Long-Lived Access Tokens. Leave empty if you don't use ESPHome or screenshot tools."
 
   env_vars:
     name: "Environment Variables"

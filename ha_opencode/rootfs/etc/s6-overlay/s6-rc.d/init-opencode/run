@@ -16,10 +16,11 @@ bashio::addon.version > /data/.addon_version
 CPU_MODE_CONFIG=$(bashio::config 'cpu_mode' || echo "auto")
 MCP_ENABLED=$(bashio::config 'mcp_enabled')
 LSP_ENABLED=$(bashio::config 'lsp_enabled' || echo "true")
+SCREENSHOT_ENABLED=$(bashio::config 'screenshot_enabled' || echo "false")
 
 ACCESS_TOKEN=$(bashio::config 'access_token' || echo "")
 
-bashio::log.info "Configuration: MCP=${MCP_ENABLED} LSP=${LSP_ENABLED} CPU_MODE=${CPU_MODE_CONFIG}"
+bashio::log.info "Configuration: MCP=${MCP_ENABLED} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} CPU_MODE=${CPU_MODE_CONFIG}"
 
 # ==============================================================================
 # Process user-defined environment variables
@@ -80,6 +81,18 @@ if [ -n "${ACCESS_TOKEN}" ]; then
     bashio::log.info "HA Core access token configured (for ESPHome ingress)"
 else
     bashio::log.info "No HA Core access token configured (ESPHome tools may not work)"
+fi
+
+# ==============================================================================
+# Export screenshot_enabled flag for the MCP server
+# ==============================================================================
+
+if [ "${SCREENSHOT_ENABLED}" = "true" ]; then
+    printf 'export SCREENSHOT_ENABLED=true\n' >> "${ENV_VARS_FILE}"
+    chmod 600 "${ENV_VARS_FILE}"
+    bashio::log.info "Screenshot tool enabled (Chromium headless for visual verification)"
+else
+    bashio::log.info "Screenshot tool disabled (enable in Configuration tab to use visual verification)"
 fi
 
 # ==============================================================================

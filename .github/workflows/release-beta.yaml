@@ -17,6 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get version
@@ -27,26 +28,34 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
-      - name: Update version in beta config.yaml
+      - name: Sync entire beta addon directory from dev to main
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          sed -i "s/^version: .*/version: \"${VERSION}\"/" ha_opencode_beta/config.yaml
 
-          # Verify
+          # Replace the entire ha_opencode_beta/ directory with the version
+          # from the tagged commit (on dev). This syncs everything HA reads
+          # from the repo: config.yaml (schema, options), translations,
+          # CHANGELOG.md, DOCS.md, icons, build.yaml, etc.
+          git checkout ${{ github.ref_name }} -- ha_opencode_beta/
+
+          # Set the release version (dev's config.yaml may show the previous
+          # beta version since the version bump happens here, not on dev)
+          sed -i "s/^version: .*/version: \"${VERSION}\"/" ha_opencode_beta/config.yaml
           grep "version:" ha_opencode_beta/config.yaml
 
-      - name: Commit version update
+      - name: Commit metadata update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ha_opencode_beta/config.yaml
-          git commit -m "chore: bump beta version to ${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          git add ha_opencode_beta/
+          git commit -m "chore: bump beta to ${{ steps.version.outputs.version }} — sync metadata from dev" || echo "No changes to commit"
           git push origin main
 
       - name: Extract changelog
         id: changelog
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          # Changelog is now on main (synced above), read it directly
           CHANGELOG=$(awk "
             /^## ${VERSION}$/ { found=1; next }
             found && /^## / { exit }
