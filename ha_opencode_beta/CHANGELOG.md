@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.0b8
+
+- **Fix: screenshot_url no longer always times out** — `waitUntil: "networkidle0"` was used for page navigation, which waits for zero active network connections. The HA frontend keeps a persistent WebSocket open (`/api/websocket`) for the lifetime of the page, so this condition was never satisfied and every screenshot timed out after 30 seconds. Changed to `waitUntil: "load"`, which fires once the page and its subresources are fetched and ignores ongoing connections. Dynamic content rendering is already handled by the existing `wait_seconds` delay. Fixes [#19](https://github.com/magnusoverli/opencode/issues/19)
+
 ## 1.7.0b7
 
 - **Fix: screenshot tool now authenticates correctly** — the previous approach only used localStorage with an empty `refresh_token` (falsy in JS), causing the HA frontend to show the login page instead of the dashboard. Now uses three complementary auth strategies:
