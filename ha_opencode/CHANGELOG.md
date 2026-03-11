@@ -1,6 +1,16 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 1.7.2
+
+### hab CLI Documentation
+
+Improved LLM context documentation to cover all hab CLI commands added in 1.7.1.
+
+- **Fixed JSON/text flag documentation** — `--json` enables structured JSON output; text is the default. The previous docs had this inverted, which would cause errors for any agent following them.
+- **Added missing command groups to AGENTS.md, INSTRUCTIONS.md, and the `hab_run` tool description**: `scene`, `person`, `category`, `todo`, `notification`, `integration`, `repairs`, `event`, `template`, `entity logbook`, and `overview` — none of which were previously visible to the LLM
+- **Added concrete examples** for every new command group in INSTRUCTIONS.md so agents know how to invoke them correctly
+
 ## 1.7.1
 
 ### hab CLI Update

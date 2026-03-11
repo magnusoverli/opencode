@@ -68,20 +68,29 @@ Real-time interaction with the running Home Assistant instance:
 
 ### 3. hab CLI (Home Assistant Builder)
 A CLI tool designed for AI agents to manage Home Assistant. Run `hab` commands via the terminal:
-- **Entity management**: `hab entity list`, `hab entity get light.living_room`
+- **Entity management**: `hab entity list`, `hab entity get light.living_room`, `hab entity logbook sensor.power --start 2h`
 - **Service calls**: `hab action call light.turn_on --entity light.living_room --data '{"brightness": 200}'`
 - **Automation CRUD**: `hab automation list`, `hab automation create`, `hab automation delete`
 - **Dashboard management**: `hab dashboard list`, `hab dashboard view create`
 - **Area/floor/zone/label**: `hab area list`, `hab area create "Kitchen"`
 - **Helpers**: `hab helper list`, `hab helper create`
 - **Scripts**: `hab script list`, `hab script create`
+- **Scenes**: `hab scene list`, `hab scene create`, `hab scene activate "Movie Time"`
 - **Blueprints**: `hab blueprint list`
 - **Backups**: `hab backup list`, `hab backup create`
-- **System**: `hab system info`, `hab system health`
+- **System**: `hab system info`, `hab system health`, `hab overview`
 - **Devices**: `hab device list`
+- **People**: `hab person list`, `hab person create`, `hab person update`
+- **Categories**: `hab category list`, `hab category assign --entity light.kitchen`
+- **To-do lists**: `hab todo list`, `hab todo item list todo.shopping`, `hab todo item add todo.shopping "Milk"`
+- **Notifications**: `hab notification list`, `hab notification create --message "Hello" --title "Alert"`
+- **Integrations**: `hab integration list`, `hab integration reload hue`, `hab integration disable mqtt`
+- **Repairs**: `hab repairs list`, `hab repairs ignore <issue_id>`
+- **Events**: `hab event list`, `hab event fire my_custom_event --data '{"key": "value"}'`
+- **Templates**: `hab template render --expression "{{ states('sensor.temperature') }}"`
 - **Search**: `hab search related`
 
-`hab` outputs JSON by default (ideal for parsing). Use `--text` for human-readable output.
+`hab` outputs human-readable text by default. Use `--json` for structured JSON output (ideal for parsing).
 `hab` is pre-authenticated via the Supervisor token - no login required.
 Run `hab --help` or `hab <command> --help` for full usage details.
 

@@ -176,48 +176,87 @@ Use these prompts for complex tasks:
 
 The `hab_run` MCP tool provides access to the full Home Assistant admin CLI. It wraps the `hab` (Home Assistant Builder) CLI as a native MCP tool.
 
+`hab` outputs human-readable text by default. Use `--json` on any command for structured JSON output that is easier to parse programmatically.
+
 ### When to Use hab_run vs Other MCP Tools
 
-- **Use existing MCP tools** for: safe config writing, anomaly detection, entity diagnostics, firmware updates, template rendering, history queries
-- **Use hab_run** for: dashboard management, area/floor/zone CRUD, helper creation, automation CRUD via API, backups, blueprints, script management, search
+- **Use existing MCP tools** for: safe config writing, anomaly detection, entity diagnostics, firmware updates, history queries
+- **Use hab_run** for: dashboard management, area/floor/zone/person/category CRUD, helper creation, automation/script/scene CRUD via API, todo and notification management, integration control, repair issues, event firing, template rendering, backups, blueprints, search
 
 ### Common hab_run Commands
 
 ```
-# List entities
-hab_run(command="entity list --domain light")
-hab_run(command="entity get light.living_room")
+# List entities (--json for structured output)
+hab_run(command="entity list --domain light --json")
+hab_run(command="entity get light.living_room --json")
+hab_run(command="entity logbook sensor.power --start 2h --json")
 
 # Call actions
 hab_run(command='action call light.turn_on --entity light.living_room --data \'{"brightness": 200}\'')
 
 # Manage automations
-hab_run(command="automation list")
+hab_run(command="automation list --json")
 hab_run(command="automation get my-automation")
 
+# Manage scenes
+hab_run(command="scene list --json")
+hab_run(command='scene activate "Movie Time"')
+
 # Manage dashboards
-hab_run(command="dashboard list")
+hab_run(command="dashboard list --json")
 
 # Manage areas
-hab_run(command="area list")
+hab_run(command="area list --json")
 hab_run(command="area create Kitchen")
+
+# Manage people
+hab_run(command="person list --json")
+hab_run(command='person create --name "Alice"')
 
 # Manage helpers
 hab_run(command='helper create input_boolean --name "Guest Mode"')
 
+# To-do lists
+hab_run(command="todo list --json")
+hab_run(command="todo item list todo.shopping --json")
+hab_run(command='todo item add todo.shopping "Buy milk"')
+hab_run(command="todo item complete todo.shopping <uid>")
+
+# Notifications
+hab_run(command="notification list --json")
+hab_run(command='notification create --message "Backup done" --title "Status"')
+hab_run(command="notification dismiss <notification_id>")
+
+# Integration management
+hab_run(command="integration list --json")
+hab_run(command="integration reload hue")
+hab_run(command="integration disable mqtt")
+
+# Repair issues
+hab_run(command="repairs list --json")
+hab_run(command="repairs ignore <issue_id>")
+
+# Fire events
+hab_run(command="event list --json")
+hab_run(command='event fire my_custom_event --data \'{"key": "value"}\'')
+
+# Render templates
+hab_run(command="template render --expression \"{{ states('sensor.temperature') }}\"")
+
 # Backups
-hab_run(command="backup list")
+hab_run(command="backup list --json")
 hab_run(command="backup create")
 
 # System info
-hab_run(command="system info")
-hab_run(command="system health")
+hab_run(command="system info --json")
+hab_run(command="system health --json")
+hab_run(command="overview --json")
 
 # See all available commands
 hab_run(command="help")
 ```
 
-The tool returns structured JSON output from hab. Auth is pre-configured via Supervisor token.
+Auth is pre-configured via Supervisor token — no login required.
 
 ## Example Patterns
 

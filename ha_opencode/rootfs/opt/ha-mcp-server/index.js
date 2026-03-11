@@ -2299,13 +2299,13 @@ const TOOLS = [
   {
     name: "hab_run",
     title: "Run hab CLI Command",
-    description: "Run a Home Assistant Builder (hab) CLI command. hab is a comprehensive admin CLI that covers the full Home Assistant admin area via REST and WebSocket APIs. Use this for: dashboard CRUD (create views, sections, cards), area/floor/zone/label management, helper entity creation, automation CRUD via API, script management, backup/restore, blueprint management, calendar operations, device management, entity groups, and search. hab outputs structured JSON. Examples: 'entity list --domain light', 'area create Kitchen', 'dashboard list', 'automation list', 'helper create input_boolean --name Guest Mode', 'backup list', 'system health'. Run with just 'help' to see all available command groups.",
+    description: "Run a Home Assistant Builder (hab) CLI command. hab is a comprehensive admin CLI that covers the full Home Assistant admin area via REST and WebSocket APIs. Use this for: dashboard CRUD (create views, sections, cards), area/floor/zone/label/person/category management, helper entity creation, automation/script/scene CRUD, backup/restore, blueprint management, calendar and todo list management, notification management, integration reload/enable/disable, repair issue management, event firing, template rendering, device management, and search. hab outputs human-readable text by default; add --json for structured JSON output. Examples: 'entity list --domain light --json', 'area create Kitchen', 'scene activate \"Movie Time\"', 'todo item add todo.shopping Milk', 'notification create --message \"Done\" --title \"Status\"', 'integration reload hue', 'repairs list --json', 'template render --expression \"{{ states(\\'sensor.temp\\') }}\"'. Run with just 'help' to see all available command groups.",
     inputSchema: {
       type: "object",
       properties: {
         command: {
           type: "string",
-          description: "The hab command and arguments to run (without the 'hab' prefix). Examples: 'entity list', 'area create Kitchen', 'dashboard list', 'automation get my-automation', 'helper create input_boolean --name \"Guest Mode\"', 'backup create', 'system info'",
+          description: "The hab command and arguments to run (without the 'hab' prefix). Examples: 'entity list --json', 'area create Kitchen', 'dashboard list', 'automation get my-automation', 'helper create input_boolean --name \"Guest Mode\"', 'scene list --json', 'todo item add todo.shopping \"Buy milk\"', 'notification list --json', 'integration reload hue', 'repairs list --json', 'person list --json', 'backup create', 'system info', 'overview --json'",
         },
       },
       required: ["command"],
