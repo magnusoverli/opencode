@@ -1,6 +1,36 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 1.7.1
+
+### hab CLI Update
+
+This release rebuilds the container to pick up significant upstream improvements to the `hab` CLI ([balloob/home-assistant-build-cli](https://github.com/balloob/home-assistant-build-cli)).
+
+**New command groups**
+
+- **`todo`** — manage to-do lists and items (list, add, complete, uncomplete, update, remove)
+- **`notification`** — list, create, and dismiss persistent notifications
+- **`calendar`** — create and delete timed or all-day calendar events
+- **`integration`** — list, get, reload, enable, and disable config entries
+- **`event`** — list event types and fire custom events (JSON/YAML/file input supported)
+- **`repairs`** — list HA repair issues with severity filtering; ignore/unignore
+- **`scene`** — full CRUD plus `activate` with `--transition` support
+- **`person`** — full CRUD with device tracker and user ID support
+- **`category`** — full CRUD with scope inference from entity ID prefix; assign/remove
+- **`template`** — render Jinja2 templates inline, from `--file`, or stdin
+- **`entity logbook`** — read logbook entries with `--start`/`--end` filters
+
+**Performance improvements**
+
+- Entity list, overview, and automation list `--extended` now fire all API calls concurrently, reducing wall-clock time from multiple sequential round-trips to approximately one
+- ESPHome `GetDevices` and `GetPing` calls parallelised
+- CLI internals optimised: cached auth with `sync.Once`, atomic WebSocket message IDs, pre-allocated slices, zero-copy format detection
+
+**ESPHome ingress fix**
+
+- New `HAB_ESPHOME_TOKEN`, `HAB_ESPHOME_SESSION`, and `HA_ACCESS_TOKEN` env var overrides for ESPHome access through HA Core's ingress proxy (required since ESPHome ~2026.2.x in addon containers)
+
 ## 1.7.0
 
 ### Visual Verification (Screenshot Tool)
