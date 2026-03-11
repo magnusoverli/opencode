@@ -419,8 +419,15 @@ async function takeScreenshot(haCoreUrl, urlPath, options = {}) {
 
     sendLog("info", "screenshot", { action: "navigating", url: fullUrl, width, height });
 
+    // Use "load" rather than "networkidle0"/"networkidle2" because the HA
+    // frontend keeps a persistent WebSocket open (/api/websocket) for the
+    // lifetime of the page.  "networkidle0" waits for zero active connections,
+    // which is never satisfied, causing every screenshot to time out.  "load"
+    // fires once the page and its subresources are fetched, ignoring ongoing
+    // connections.  Dynamic content rendering is handled by the waitSeconds
+    // delay below.
     await page.goto(fullUrl, {
-      waitUntil: "networkidle0",
+      waitUntil: "load",
       timeout: 30000,
     });
 
