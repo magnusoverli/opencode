@@ -84,6 +84,43 @@ else
 fi
 
 # ==============================================================================
+# Auto-configure zigporter CLI credentials
+# zigporter needs HA_URL + HA_TOKEN to talk to Home Assistant.
+# Inside the Supervisor environment, http://supervisor/core proxies to HA Core
+# and SUPERVISOR_TOKEN is a valid Bearer token — same mechanism as hab.
+# ==============================================================================
+
+printf 'export HA_URL=http://supervisor/core\n' >> "${ENV_VARS_FILE}"
+printf 'export HA_TOKEN=%q\n' "${SUPERVISOR_TOKEN}" >> "${ENV_VARS_FILE}"
+printf 'export HA_VERIFY_SSL=false\n' >> "${ENV_VARS_FILE}"
+
+# Z2M configuration — auto-discover or use manual override
+# If the user has set z2m_url in the config, use that (manual override).
+# Otherwise, try to auto-discover Z2M via the Supervisor API (same pattern as ESPHome).
+Z2M_URL_CONFIG=$(bashio::config 'z2m_url' || echo "")
+Z2M_TOPIC_CONFIG=$(bashio::config 'z2m_mqtt_topic' || echo "")
+
+if [ -n "${Z2M_URL_CONFIG}" ]; then
+    printf 'export Z2M_URL=%q\n' "${Z2M_URL_CONFIG}" >> "${ENV_VARS_FILE}"
+    bashio::log.info "zigporter Z2M URL configured (manual): ${Z2M_URL_CONFIG}"
+    if [ -n "${Z2M_TOPIC_CONFIG}" ]; then
+        printf 'export Z2M_MQTT_TOPIC=%q\n' "${Z2M_TOPIC_CONFIG}" >> "${ENV_VARS_FILE}"
+    fi
+else
+    bashio::log.info "Discovering Zigbee2MQTT for zigporter..."
+    Z2M_EXPORTS=$(node /usr/local/bin/discover-z2m.js 2>/dev/null || true)
+    if [ -n "${Z2M_EXPORTS}" ]; then
+        printf '%s\n' "${Z2M_EXPORTS}" >> "${ENV_VARS_FILE}"
+        bashio::log.info "Zigbee2MQTT discovered — zigporter Z2M commands ready"
+    else
+        bashio::log.info "Zigbee2MQTT discovery skipped (addon not installed or not running)"
+    fi
+fi
+
+chmod 600 "${ENV_VARS_FILE}"
+bashio::log.info "zigporter credentials configured (HA via Supervisor proxy)"
+
+# ==============================================================================
 # Export screenshot_enabled flag for the MCP server
 # ==============================================================================
 
@@ -300,6 +337,17 @@ else
 fi
 
 # ==============================================================================
+# Verify zigporter CLI is available
+# ==============================================================================
+
+if command -v zigporter &>/dev/null; then
+    ZIGPORTER_VERSION=$(zigporter --version 2>/dev/null | grep -oP '[\d.]+' | head -1 || echo "unknown")
+    bashio::log.info "zigporter CLI available (v${ZIGPORTER_VERSION}) - Zigbee rename, inspect, mesh tools"
+else
+    bashio::log.warning "zigporter CLI not found - Zigbee management features will be unavailable"
+fi
+
+# ==============================================================================
 # Deploy AGENTS.md to Home Assistant config directory
 # On first install: copy the full file
 # On update: if user hasn't customized it, refresh to get latest instructions
@@ -351,6 +399,40 @@ if command -v hab &>/dev/null && [ -f "/homeassistant/AGENTS.md" ]; then
                 && mv /tmp/agents_tmp /homeassistant/AGENTS.md
             rm -f /tmp/hab_help.txt
             bashio::log.info "Injected live hab help (v${HAB_VERSION}) into AGENTS.md"
+        fi
+    fi
+fi
+
+# ==============================================================================
+# Inject live zigporter help output into AGENTS.md
+# Same pattern as hab — replaces content between ZIGPORTER_LIVE_HELP markers
+# so the AI always sees the exact commands available in the installed version.
+# ==============================================================================
+
+if command -v zigporter &>/dev/null && [ -f "/homeassistant/AGENTS.md" ]; then
+    if grep -q "<!-- ZIGPORTER_LIVE_HELP_START -->" /homeassistant/AGENTS.md 2>/dev/null; then
+        ZIGPORTER_HELP_OUTPUT=$(zigporter --help 2>/dev/null || echo "")
+        if [ -n "${ZIGPORTER_HELP_OUTPUT}" ]; then
+            printf '%s\n' "${ZIGPORTER_HELP_OUTPUT}" > /tmp/zigporter_help.txt
+            awk '
+                /<!-- ZIGPORTER_LIVE_HELP_START -->/ {
+                    print
+                    print "```"
+                    while ((getline line < "/tmp/zigporter_help.txt") > 0) print line
+                    print "```"
+                    skip=1
+                    next
+                }
+                /<!-- ZIGPORTER_LIVE_HELP_END -->/ {
+                    skip=0
+                    print
+                    next
+                }
+                !skip { print }
+            ' /homeassistant/AGENTS.md > /tmp/agents_tmp \
+                && mv /tmp/agents_tmp /homeassistant/AGENTS.md
+            rm -f /tmp/zigporter_help.txt
+            bashio::log.info "Injected live zigporter help (v${ZIGPORTER_VERSION}) into AGENTS.md"
         fi
     fi
 fi

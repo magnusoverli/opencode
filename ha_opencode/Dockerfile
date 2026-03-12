@@ -45,6 +45,8 @@ RUN apt-get update \
         nodejs \
         npm \
         procps \
+        python3 \
+        python3-venv \
         tmux \
     && rm -rf /var/lib/apt/lists/*
 
@@ -59,6 +61,13 @@ RUN ARCH=$([ "$BUILD_ARCH" = "aarch64" ] && echo "aarch64" || echo "x86_64") \
 # Copy hab CLI binary built from source (main branch)
 # A CLI designed for AI agents to manage HA via REST/WebSocket APIs
 COPY --from=hab-builder /hab /usr/local/bin/hab
+
+# Install zigporter CLI in an isolated Python virtual environment
+# A Zigbee toolkit for cascade-rename, device inspection, and mesh mapping
+ARG ZIGPORTER_VERSION=1.2.0
+RUN python3 -m venv /opt/zigporter-venv \
+    && /opt/zigporter-venv/bin/pip install --no-cache-dir zigporter==${ZIGPORTER_VERSION} \
+    && ln -s /opt/zigporter-venv/bin/zigporter /usr/local/bin/zigporter
 
 # Install OpenCode and Prettier globally
 # - OpenCode: AI coding agent (pin version in build.yaml for reproducible builds)
@@ -84,6 +93,7 @@ RUN chmod +x /usr/local/bin/* \
     && chmod +x /etc/s6-overlay/s6-rc.d/init-opencode/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode/run \
     && chmod +x /etc/profile.d/hab-esphome.sh \
+    && chmod +x /etc/profile.d/zigporter-z2m.sh \
     && mkdir -p /data/.local/share/opencode /data/.config/opencode
 
 # Set working directory to HA config (mounted at runtime)

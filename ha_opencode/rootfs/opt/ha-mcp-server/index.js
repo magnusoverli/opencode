@@ -2323,6 +2323,40 @@ const TOOLS = [
     },
   },
   {
+    name: "zigporter_run",
+    title: "Run zigporter CLI Command",
+    description:
+      "Run a zigporter CLI command for Zigbee device management. " +
+      "zigporter handles cascade entity/device renames (updating ALL references " +
+      "in automations, scripts, scenes, and dashboards), device inspection across " +
+      "ZHA and Z2M, stale device cleanup, and mesh visualization. Key commands: " +
+      "'rename-entity old new --apply' (cascade rename), " +
+      "'rename-device \"Old\" \"New\" --apply', " +
+      "'inspect \"Device\" --json', 'list-devices --json', 'list-z2m --json', " +
+      "'stale \"Device\" --action remove', 'fix-device \"Device\" --apply', " +
+      "'network-map --format table', 'check'. " +
+      "Always dry-run renames first (omit --apply).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description:
+            "The zigporter command and arguments to run (without the 'zigporter' prefix). " +
+            "Examples: 'list-devices --json', 'inspect \"Kitchen\" --json', " +
+            "'rename-entity light.old light.new', " +
+            "'rename-entity light.old light.new --apply', " +
+            "'stale \"Device\" --action remove'",
+        },
+      },
+      required: ["command"],
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: false,
+    },
+  },
+  {
     name: "screenshot_url",
     title: "Screenshot Home Assistant Page",
     description: "Take a screenshot of any Home Assistant page for visual verification. Use this after making dashboard changes, creating views or cards via hab, or any time you need to visually verify a result. Returns a PNG image that vision-capable AI models can analyze. Requires the 'screenshot_enabled' option and a Long-Lived Access Token. Examples: '/lovelace/0' (default dashboard), '/energy' (energy panel), '/config/dashboard' (settings), '/dashboard-custom/my-view' (custom dashboard).",
@@ -4328,6 +4362,93 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         return makeCompatibleResponse({
           content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.7 })],
+        });
+      }
+
+      // === ZIGPORTER CLI INTEGRATION ===
+      case "zigporter_run": {
+        const { command } = args;
+        if (!command || typeof command !== "string") {
+          throw new Error("command parameter is required and must be a string");
+        }
+
+        // Security: block interactive/dangerous commands
+        const zigLowerCmd = command.toLowerCase().trim();
+        if (zigLowerCmd.startsWith("migrate") || zigLowerCmd === "migrate") {
+          throw new Error(
+            "The migrate command requires physical device interaction and cannot be " +
+            "run by an AI agent. Use it from the terminal instead."
+          );
+        }
+        if (zigLowerCmd.startsWith("setup") || zigLowerCmd === "setup") {
+          throw new Error(
+            "Setup is not needed - zigporter is pre-configured via Supervisor credentials."
+          );
+        }
+
+        sendLog("info", "zigporter", { action: "run_command", command });
+
+        // Parse command string into args array for execFile (safe, no shell injection)
+        const zigCmdArgs =
+          command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')/g) || [];
+        const zigCleanArgs = zigCmdArgs.map((arg) =>
+          arg.replace(/^["']|["']$/g, "")
+        );
+
+        const zigResult = await new Promise((resolvePromise, rejectPromise) => {
+          execFile(
+            "/usr/local/bin/zigporter",
+            zigCleanArgs,
+            {
+              timeout: 60000,
+              maxBuffer: 2 * 1024 * 1024,
+              env: {
+                ...process.env,
+                // zigporter uses HA_URL + HA_TOKEN (set in /data/.env_vars at init)
+                // Ensure they're available even if sourcing didn't propagate
+                HA_URL: process.env.HA_URL || "http://supervisor/core",
+                HA_TOKEN: process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN,
+                HA_VERIFY_SSL: "false",
+                // Z2M config (optional, may be empty)
+                ...(process.env.Z2M_URL
+                  ? { Z2M_URL: process.env.Z2M_URL }
+                  : {}),
+                ...(process.env.Z2M_MQTT_TOPIC
+                  ? { Z2M_MQTT_TOPIC: process.env.Z2M_MQTT_TOPIC }
+                  : {}),
+              },
+            },
+            (error, stdout, stderr) => {
+              if (error) {
+                const output = stdout || stderr || error.message;
+                rejectPromise(
+                  new Error(`zigporter command failed: ${output}`)
+                );
+              } else {
+                resolvePromise(stdout);
+              }
+            }
+          );
+        });
+
+        // Try to parse as JSON for structured output
+        let zigResponseText;
+        try {
+          const parsed = JSON.parse(zigResult);
+          zigResponseText =
+            "```json\n" + JSON.stringify(parsed, null, 2) + "\n```";
+        } catch {
+          // Not JSON, return as plain text (diffs, confirmations, etc.)
+          zigResponseText = zigResult.trim();
+        }
+
+        return makeCompatibleResponse({
+          content: [
+            createTextContent(zigResponseText, {
+              audience: ["user", "assistant"],
+              priority: 0.7,
+            }),
+          ],
         });
       }
 
