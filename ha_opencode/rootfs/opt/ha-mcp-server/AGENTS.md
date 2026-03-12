@@ -93,7 +93,37 @@ Run `hab --help` or `hab <command> --help` for full usage details.
 **Use MCP tools when:** checking current state, safe config writing, anomaly detection, entity diagnostics
 **Use hab CLI when:** managing dashboards, areas, helpers, backups, blueprints, and bulk admin operations
 
-### 4. Internal Directories (OFF-LIMITS)
+### 4. zigporter CLI (Zigbee Toolkit)
+A CLI for Zigbee device management in Home Assistant. Handles cascade renames (updating entity IDs across automations, scripts, scenes, and all Lovelace dashboards atomically), device inspection, stale device cleanup, and Zigbee mesh visualization.
+
+**Cascade rename** — zigporter's unique value: when you rename an entity or device, it automatically patches every reference in automations, scripts, scenes, and Lovelace dashboards. `hab` can rename a single entity/device but does NOT cascade to references.
+
+Key commands:
+- **Cascade rename**: `zigporter rename-entity light.old_id light.new_id --apply`, `zigporter rename-device "Old Name" "New Name" --apply`
+- **Device inventory**: `zigporter list-devices --json`, `zigporter list-z2m --json` (requires Z2M config)
+- **Device inspection**: `zigporter inspect "Device Name" --json`, `zigporter inspect sensor.entity_id --json`
+- **Stale device management**: `zigporter stale "Device" --action remove`, `zigporter stale "Device" --action ignore`
+- **Post-migration cleanup**: `zigporter fix-device "Device" --apply`
+- **Connectivity check**: `zigporter check`
+- **ZHA export**: `zigporter export --output devices.json`
+- **Mesh visualization**: `zigporter network-map --format table` (terminal), `zigporter network-map --output mesh.svg` (SVG file)
+
+**Output format**: Use `--json` on listing/inspect commands for structured output (ideal for AI parsing). Rename commands output diffs and confirmation text.
+
+zigporter is pre-authenticated via the Supervisor token. Z2M commands (`list-z2m`, `network-map --backend z2m`) require Z2M URL configuration in the add-on settings.
+
+**Important limitations**:
+- `rename-entity` / `rename-device` do NOT patch Jinja2 template expressions (e.g. `{{ states('old.id') }}`). A warning is printed listing affected files — inform the user these need manual review after renaming.
+- The `migrate` command is inherently interactive (requires physical device actions) and must NOT be used by AI agents.
+- Dry-run is the default for renames — always preview before using `--apply`.
+
+<!-- ZIGPORTER_LIVE_HELP_START -->
+*(Live zigporter command reference will be injected here at container startup)*
+<!-- ZIGPORTER_LIVE_HELP_END -->
+
+**Use zigporter CLI when:** renaming entities/devices with cascade updates, inspecting Zigbee devices across integrations, cleaning up stale or post-migration devices, visualizing the Zigbee mesh
+
+### 5. Internal Directories (OFF-LIMITS)
 Home Assistant manages internal state in directories like `.storage/`. These are:
 - Not designed for direct access
 - Subject to change without notice
@@ -488,25 +518,32 @@ Query and interact with the running Home Assistant instance:
 
 ### Choosing the Right Approach
 
-| Task | Configuration Files | MCP Tools | hab CLI |
-|------|---------------------|-----------|---------|
-| Create/edit automations | Primary | **Write with `write_config_safe`** | `hab automation create` |
-| Understand automation logic | Read YAML | Check state with `get_states` | `hab automation get` |
-| Check current device state | Reference only | Primary | `hab entity get` |
-| Control devices | N/A | `call_service` | `hab action call` |
-| Add new integrations | Primary | N/A | N/A |
-| Troubleshoot issues | Review configs | `diagnose_entity`, `get_error_log` | `hab system health` |
-| Find entities | Grep YAML files | `search_entities` | `hab entity list --domain` |
-| View history | N/A | `get_history` | N/A |
-| **Manage dashboards** | Edit YAML | N/A | **`hab dashboard` (primary)** |
-| **Verify UI changes** | N/A | **`screenshot_url`** | N/A |
-| **Manage areas/floors** | N/A | `get_areas` (read-only) | **`hab area/floor` (CRUD)** |
-| **Manage helpers** | N/A | N/A | **`hab helper` (primary)** |
-| **Backups** | N/A | N/A | **`hab backup` (primary)** |
-| **Blueprints** | N/A | N/A | **`hab blueprint` (primary)** |
-| **Update firmware** | N/A | **`watch_firmware_update`** | N/A |
-| **Check for updates** | N/A | `get_available_updates` | N/A |
-| **Update HA Core/OS** | N/A | `update_component` | N/A |
+| Task | Configuration Files | MCP Tools | hab CLI | zigporter CLI |
+|------|---------------------|-----------|---------|---------------|
+| Create/edit automations | Primary | **Write with `write_config_safe`** | `hab automation create` | N/A |
+| Understand automation logic | Read YAML | Check state with `get_states` | `hab automation get` | N/A |
+| Check current device state | Reference only | Primary | `hab entity get` | N/A |
+| Control devices | N/A | `call_service` | `hab action call` | N/A |
+| Add new integrations | Primary | N/A | N/A | N/A |
+| Troubleshoot issues | Review configs | `diagnose_entity`, `get_error_log` | `hab system health` | N/A |
+| Find entities | Grep YAML files | `search_entities` | `hab entity list --domain` | N/A |
+| View history | N/A | `get_history` | N/A | N/A |
+| **Manage dashboards** | Edit YAML | N/A | **`hab dashboard` (primary)** | N/A |
+| **Verify UI changes** | N/A | **`screenshot_url`** | N/A | N/A |
+| **Manage areas/floors** | N/A | `get_areas` (read-only) | **`hab area/floor` (CRUD)** | N/A |
+| **Manage helpers** | N/A | N/A | **`hab helper` (primary)** | N/A |
+| **Backups** | N/A | N/A | **`hab backup` (primary)** | N/A |
+| **Blueprints** | N/A | N/A | **`hab blueprint` (primary)** | N/A |
+| **Update firmware** | N/A | **`watch_firmware_update`** | N/A | N/A |
+| **Check for updates** | N/A | `get_available_updates` | N/A | N/A |
+| **Update HA Core/OS** | N/A | `update_component` | N/A | N/A |
+| **Rename entity with cascade** | N/A | N/A | `hab entity update` (no cascade) | **`zigporter rename-entity` (primary)** |
+| **Rename device with cascade** | N/A | N/A | `hab device update` (no cascade) | **`zigporter rename-device` (primary)** |
+| **Inspect Zigbee device** | N/A | `get_entity_details` | `hab device list` | **`zigporter inspect --json` (cross-ref ZHA+Z2M+HA)** |
+| **List Z2M devices** | N/A | N/A | N/A | **`zigporter list-z2m --json`** |
+| **Clean up stale devices** | N/A | N/A | N/A | **`zigporter stale --action`** |
+| **Fix post-migration entities** | N/A | N/A | N/A | **`zigporter fix-device --apply`** |
+| **Zigbee mesh topology** | N/A | N/A | N/A | **`zigporter network-map`** |
 
 ### Update Management (IMPORTANT)
 

@@ -57,6 +57,11 @@ options:
   # Leave empty if you don't use ESPHome or screenshot tools.
   access_token: ""
 
+  # Zigbee2MQTT configuration (optional — only needed for zigporter Z2M commands)
+  # Set your Z2M ingress URL to enable list-z2m, network-map --backend z2m, etc.
+  z2m_url: ""
+  z2m_mqtt_topic: "zigbee2mqtt"
+
   # Environment variables to inject into the container
   env_vars: []
   
@@ -83,6 +88,10 @@ schema:
   # HA Core access token
   access_token: str?
   
+  # Zigbee2MQTT (optional)
+  z2m_url: url?
+  z2m_mqtt_topic: str?
+
   # Environment variables
   env_vars:
     - name: str

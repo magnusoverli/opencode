@@ -219,6 +219,68 @@ hab_run(command="help")
 
 The tool returns structured JSON output from hab. Auth is pre-configured via Supervisor token.
 
+## zigporter_run Tool (Zigbee Toolkit)
+
+The `zigporter_run` MCP tool provides access to zigporter — a Zigbee device management CLI for Home Assistant. It wraps the `zigporter` CLI as a native MCP tool.
+
+### When to Use zigporter_run vs Other Tools
+
+- **Use zigporter_run** for: cascade entity/device renames (patches automations, scripts, scenes, dashboards), Zigbee device inspection across integrations, stale device cleanup, Z2M device listing, mesh visualization
+- **Use hab_run** for: simple entity/device renames (single registry update, no cascade), dashboard CRUD, area management, helpers, backups
+- **Use MCP tools** for: entity state queries, service calls, config writing, history, diagnostics
+
+### Key difference: cascade rename
+
+`hab` can rename an entity or device in the HA registry, but references in automations, scripts, scenes, and dashboards are NOT updated. `zigporter` patches ALL references atomically — this is its unique value.
+
+### Common zigporter_run Commands
+
+```
+# List all HA devices with structured output
+zigporter_run(command="list-devices --json")
+
+# List Zigbee2MQTT devices (requires Z2M config)
+zigporter_run(command="list-z2m --json")
+
+# Inspect a device (by name, entity ID, or IEEE address)
+zigporter_run(command='inspect "Kitchen Plug" --json')
+zigporter_run(command="inspect sensor.kitchen_plug --json")
+
+# Preview a cascade entity rename (dry-run, no --apply)
+zigporter_run(command="rename-entity light.old_name light.new_name")
+
+# Apply a cascade entity rename
+zigporter_run(command="rename-entity light.old_name light.new_name --apply")
+
+# Preview a cascade device rename
+zigporter_run(command='rename-device "Old Name" "New Name"')
+
+# Apply a cascade device rename
+zigporter_run(command='rename-device "Old Name" "New Name" --apply')
+
+# Manage stale/offline devices
+zigporter_run(command='stale "Offline Device" --action remove')
+zigporter_run(command='stale "Offline Device" --action ignore')
+zigporter_run(command='stale "Offline Device" --action mark-stale --note "Replaced"')
+
+# Fix post-migration entity suffix conflicts
+zigporter_run(command='fix-device "Migrated Device" --apply')
+
+# Check HA + Z2M connectivity
+zigporter_run(command="check")
+
+# Zigbee mesh as a text table
+zigporter_run(command="network-map --format table")
+```
+
+### Important: Rename safety
+
+1. **Always dry-run first**: Omit `--apply` to see the full diff before committing
+2. **Jinja2 templates are NOT patched**: After a rename, zigporter prints warnings listing automations/scripts that contain `{{ states('old.id') }}` patterns — inform the user these need manual review
+3. **Do NOT use the `migrate` command** — it requires physical device interaction (factory resets, button presses) and is not suitable for AI-driven workflows
+
+The tool returns structured JSON when `--json` is used, or diff/confirmation text for rename operations. Auth is pre-configured via Supervisor token.
+
 ## Example Patterns
 
 ### Turn on a light
