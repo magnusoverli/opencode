@@ -89,7 +89,7 @@ schema:
   access_token: str?
   
   # Zigbee2MQTT (optional)
-  z2m_url: url?
+  z2m_url: str?
   z2m_mqtt_topic: str?
 
   # Environment variables
