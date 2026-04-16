@@ -5,7 +5,6 @@ build_from:
 args:
   OPENCODE_VERSION: "latest"
   TTYD_VERSION: "1.7.7"
-  ZIGPORTER_VERSION: "1.2.0"
 labels:
   org.opencontainers.image.title: "OpenCode Beta"
   org.opencontainers.image.description: "Beta channel for OpenCode - AI coding agent for Home Assistant"

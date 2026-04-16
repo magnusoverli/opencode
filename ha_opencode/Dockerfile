@@ -64,9 +64,8 @@ COPY --from=hab-builder /hab /usr/local/bin/hab
 
 # Install zigporter CLI in an isolated Python virtual environment
 # A Zigbee toolkit for cascade-rename, device inspection, and mesh mapping
-ARG ZIGPORTER_VERSION=1.2.0
 RUN python3 -m venv /opt/zigporter-venv \
-    && /opt/zigporter-venv/bin/pip install --no-cache-dir zigporter==${ZIGPORTER_VERSION} \
+    && /opt/zigporter-venv/bin/pip install --no-cache-dir zigporter \
     && ln -s /opt/zigporter-venv/bin/zigporter /usr/local/bin/zigporter
 
 # Install OpenCode and Prettier globally
