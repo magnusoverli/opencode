@@ -1,6 +1,16 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 1.8.0
+
+### Zigbee and Stability Improvements
+
+- **New zigporter integration** - adds zigporter CLI tooling to the add-on for Zigbee migration and device management workflows, including a new `zigporter_run` MCP tool
+- **Z2M discovery and configuration support** - startup now supports Zigbee2MQTT discovery plus optional `z2m_url` and `z2m_mqtt_topic` configuration for zigporter commands
+- **Fix `screenshot_url` timeouts** - switched navigation wait strategy from `networkidle0` to `load` to avoid Home Assistant's persistent WebSocket causing guaranteed timeouts
+- **Fix optional Z2M URL handling** - `z2m_url` now allows empty values so users are not blocked by validation when Zigbee2MQTT is not configured
+- **Zigporter build behavior update** - zigporter is now installed as latest at image build time rather than pinning a fixed version
+
 ## 1.7.2
 
 ### hab CLI Documentation
