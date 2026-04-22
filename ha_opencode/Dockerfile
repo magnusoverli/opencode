@@ -2,11 +2,12 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-debian:trixie
 ARG BUILD_ARCH
 
-## Stage 1: Build hab CLI from source (main branch)
+## Stage 1: Build hab CLI from source (pinned release)
 FROM golang:1.24-trixie AS hab-builder
 
 ARG BUILD_ARCH
-RUN git clone --depth 1 https://github.com/balloob/home-assistant-build-cli.git /src
+ARG HAB_VERSION=1.6.4
+RUN git clone --depth 1 --branch "${HAB_VERSION}" https://github.com/balloob/home-assistant-build-cli.git /src
 WORKDIR /src
 
 # Cross-compile for the target architecture
@@ -58,7 +59,7 @@ RUN ARCH=$([ "$BUILD_ARCH" = "aarch64" ] && echo "aarch64" || echo "x86_64") \
     && curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ARCH}" -o /usr/bin/ttyd \
     && chmod +x /usr/bin/ttyd
 
-# Copy hab CLI binary built from source (main branch)
+# Copy hab CLI binary built from source (pinned release)
 # A CLI designed for AI agents to manage HA via REST/WebSocket APIs
 COPY --from=hab-builder /hab /usr/local/bin/hab
 

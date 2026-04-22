@@ -1,6 +1,13 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 1.8.1
+
+### Build: pin hab CLI to a released version
+
+- **Pin hab CLI to `1.6.4`** — the add-on image previously built the [`hab` CLI](https://github.com/balloob/home-assistant-build-cli) from whatever commit happened to be on `main` at build time, which made builds non-reproducible and exposed users to unreviewed upstream changes. The Dockerfile now clones a specific release tag via a new `HAB_VERSION` build arg.
+- **Update monitoring workflow** — `.github/workflows/check-hab-update.yaml` now compares the pinned `HAB_VERSION` against the latest upstream GitHub release and flags drift in the job summary, instead of reporting the latest `main` commit.
+
 ## 1.8.0
 
 ### Zigbee and Stability Improvements
