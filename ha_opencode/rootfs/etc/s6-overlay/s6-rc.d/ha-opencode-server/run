@@ -1,0 +1,36 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# OpenCode - Optional LAN Server Service
+# ==============================================================================
+
+export HOME="/data"
+export XDG_DATA_HOME="/data/.local/share"
+export XDG_CONFIG_HOME="/data/.config"
+
+if [ -f /data/.env_vars ]; then
+    source /data/.env_vars
+fi
+
+ENABLE_SERVER=$(bashio::config 'enable_server' 2>/dev/null || echo "false")
+SERVER_PORT=4096
+
+if ! bashio::var.true "${ENABLE_SERVER}"; then
+    exec sleep infinity
+fi
+
+HOST_PORT=$(bashio::addon.port "${SERVER_PORT}" 2>/dev/null || true)
+
+bashio::log.info "LAN server config: ENABLE_SERVER=${ENABLE_SERVER} INTERNAL_PORT=${SERVER_PORT} HOST_PORT=${HOST_PORT:-unmapped}"
+bashio::log.warning "LAN server mode is enabled. OpenCode will listen on 0.0.0.0:${SERVER_PORT} inside the container."
+bashio::log.warning "Only map this port on trusted networks. Do not expose it to the internet."
+if bashio::var.has_value "${HOST_PORT}"; then
+    bashio::log.info "Home Assistant port mapping: ${SERVER_PORT}/tcp -> ${HOST_PORT}"
+    bashio::log.info "Connect from another computer with: opencode attach http://<home-assistant-host>:${HOST_PORT}"
+else
+    bashio::log.warning "Home Assistant port mapping for ${SERVER_PORT}/tcp is disabled; LAN clients cannot connect yet."
+    bashio::log.info "Map ${SERVER_PORT}/tcp in the add-on Network settings, then connect with: opencode attach http://<home-assistant-host>:<mapped-host-port>"
+fi
+bashio::log.info "If OpenCode prints http://0.0.0.0:${SERVER_PORT}, that is the internal container listener."
+bashio::log.info "Starting OpenCode LAN server: opencode serve --hostname 0.0.0.0 --port ${SERVER_PORT}"
+
+exec opencode serve --hostname 0.0.0.0 --port "${SERVER_PORT}"

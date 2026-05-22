@@ -17,6 +17,10 @@ ingress_port: 8099
 ingress_stream: true
 panel_icon: mdi:robot-outline
 panel_title: OpenCode Beta
+ports:
+  4096/tcp: null
+ports_description:
+  4096/tcp: "OpenCode LAN server"
 
 # File access - Home Assistant config directory
 map:
@@ -66,6 +70,10 @@ options:
   # Enable this to show add-on development guidance in the terminal.
   addon_access_enabled: false
 
+  # Optional LAN server mode for remote OpenCode clients.
+  # Warning: If you map 4096/tcp in Network settings, this exposes an OpenCode server on your LAN.
+  enable_server: false
+
   # Long-lived access token for direct HA Core API access.
   # Required for ESPHome ingress and screenshot tool (create at: Profile → Long-Lived Access Tokens).
   # Leave empty if you don't use ESPHome or screenshot tools.
@@ -106,6 +114,9 @@ schema:
 
   # Add-on development access acknowledgement
   addon_access_enabled: bool
+
+  # OpenCode LAN server mode
+  enable_server: bool
 
   # HA Core access token
   access_token: str?
