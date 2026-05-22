@@ -94,6 +94,28 @@ THEME_JSON=$(get_theme "${TERMINAL_THEME}")
 bashio::log.info "Starting ttyd on port 8099 (Home Assistant ingress)..."
 
 # ==============================================================================
+# Optional LAN server mode
+# ==============================================================================
+
+ENABLE_SERVER=$(bashio::config 'enable_server' || echo "false")
+SERVER_PORT=$(bashio::config 'server_port' || echo "4096")
+
+bashio::log.info "LAN server config: ENABLE_SERVER=${ENABLE_SERVER} SERVER_PORT=${SERVER_PORT}"
+
+if bashio::var.true "${ENABLE_SERVER}"; then
+    bashio::log.warning "LAN server mode is enabled. OpenCode will listen on 0.0.0.0:${SERVER_PORT}"
+    bashio::log.warning "Ensure your OpenCode provider credentials and access controls are configured appropriately."
+    bashio::log.info "Starting OpenCode LAN server: opencode serve --host 0.0.0.0 --port ${SERVER_PORT}"
+
+    opencode serve --host 0.0.0.0 --port "${SERVER_PORT}" &
+    OPENCODE_SERVER_PID=$!
+
+    trap 'kill "${OPENCODE_SERVER_PID}" 2>/dev/null || true' EXIT INT TERM
+else
+    bashio::log.info "LAN server mode disabled; ingress terminal only."
+fi
+
+# ==============================================================================
 # Start ttyd with configured options
 # Uses tmux to maintain a single persistent session. When a user disconnects
 # and reconnects, they reattach to the existing session instead of spawning
