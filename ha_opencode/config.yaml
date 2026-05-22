@@ -17,6 +17,10 @@ ingress_port: 8099
 ingress_stream: true
 panel_icon: mdi:robot
 panel_title: OpenCode
+ports:
+  4096/tcp: 4096
+ports_description:
+  4096/tcp: "OpenCode LAN server"
 
 # File access - Home Assistant config directory
 map:
@@ -52,6 +56,11 @@ options:
   # Requires a Long-Lived Access Token (below) to authenticate with the HA frontend.
   screenshot_enabled: false
 
+  # Optional LAN server mode for remote OpenCode clients.
+  # Warning: This exposes an OpenCode server on your local network.
+  enable_server: false
+  server_port: 4096
+
   # Long-lived access token for direct HA Core API access.
   # Required for ESPHome ingress and screenshot tool (create at: Profile → Long-Lived Access Tokens).
   # Leave empty if you don't use ESPHome or screenshot tools.
@@ -84,6 +93,10 @@ schema:
 
   # Screenshot tool
   screenshot_enabled: bool
+
+  # OpenCode LAN server mode
+  enable_server: bool
+  server_port: port
 
   # HA Core access token
   access_token: str?
