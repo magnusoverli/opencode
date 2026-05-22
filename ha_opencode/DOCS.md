@@ -24,6 +24,8 @@ Configure the app from the **Configuration** tab in the app page.
 | **Enable MCP Home Assistant Integration** | `true` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 34 tools, 13 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
 | **Enable LSP Home Assistant Integration** | `true` | Enable the Language Server Protocol (LSP) server for intelligent YAML editing. Provides entity/service autocomplete, hover documentation, diagnostics for unknown entities, and go-to-definition for !include tags. |
 | **Screenshot Tool** | `false` | Enable visual verification of dashboards and UI pages. Uses headless Chromium to capture screenshots that vision-capable AI models can analyze. Requires a Long-Lived Access Token. See [Visual Verification](#visual-verification-screenshots). |
+| **Enable OpenCode LAN Server** | `false` | Start an OpenCode server bound to `0.0.0.0` so other computers on your local network can connect. Keep this off unless you need remote clients. |
+| **OpenCode LAN Server Port** | `4096` | TCP port used by the LAN server mode. This port is exposed by the add-on when LAN server mode is enabled. |
 ### Terminal Appearance
 
 | Option | Default | Description |
@@ -240,6 +242,42 @@ ha-mcp enable
 ```
 
 Then restart OpenCode (exit and run `opencode` again).
+
+---
+
+## OpenCode LAN Server Mode
+
+By default, this add-on is only used through Home Assistant ingress in the sidebar. If you also want other computers on your local network to connect directly to OpenCode, enable LAN server mode.
+
+### Enable LAN Server Mode
+
+1. Open the add-on **Configuration** tab.
+2. Set **Enable OpenCode LAN Server** to `true`.
+3. Set **OpenCode LAN Server Port** (default `4096`).
+4. Save and restart the add-on.
+
+When enabled, the add-on starts `opencode serve` bound to `0.0.0.0:<port>`.
+
+### Connect from Another Computer
+
+Use your Home Assistant host IP and configured port:
+
+```text
+http://<home-assistant-ip>:4096
+```
+
+Example:
+
+```text
+http://192.168.1.50:4096
+```
+
+### Security Notes
+
+- LAN server mode is **disabled by default**.
+- Exposing an AI coding agent on your network may allow remote users to access configuration files or provider-integrated actions.
+- Only enable this on trusted networks.
+- Use host firewall/router controls if you want to restrict which devices can connect.
 
 ---
 
