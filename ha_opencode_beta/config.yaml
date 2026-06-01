@@ -58,7 +58,8 @@ options:
   access_token: ""
 
   # Zigbee2MQTT configuration (optional — only needed for zigporter Z2M commands)
-  # Set your Z2M ingress URL to enable list-z2m, network-map --backend z2m, etc.
+  # Set your Z2M URL to enable list-z2m, network-map --backend z2m, etc.
+  # Include http:// or https://. Host/IP-only values are treated as http://.
   z2m_url: ""
   z2m_mqtt_topic: "zigbee2mqtt"
 

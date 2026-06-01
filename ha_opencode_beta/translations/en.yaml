@@ -36,6 +36,14 @@ configuration:
     name: "Home Assistant Access Token"
     description: "A long-lived access token for direct communication with Home Assistant Core. Required for ESPHome integration and the screenshot tool. Create one in the HA UI under Profile → Long-Lived Access Tokens. Leave empty if you don't use ESPHome or screenshot tools."
 
+  z2m_url:
+    name: "Zigbee2MQTT URL"
+    description: "Optional URL for Zigbee2MQTT, used by zigporter commands such as list-z2m and network-map. Include http:// or https://, for example http://homeassistant.local:8099. Host/IP-only values are treated as http://."
+
+  z2m_mqtt_topic:
+    name: "Zigbee2MQTT MQTT Topic"
+    description: "MQTT base topic used by Zigbee2MQTT. The default is zigbee2mqtt."
+
   env_vars:
     name: "Environment Variables"
     description: "Define custom environment variables that are available to OpenCode and the terminal shell. Useful for provider credentials and configuration that must be set as environment variables (e.g. AZURE_RESOURCE_NAME, OPENAI_API_KEY). Each entry needs a variable name and value. Changes take effect after restarting the add-on."

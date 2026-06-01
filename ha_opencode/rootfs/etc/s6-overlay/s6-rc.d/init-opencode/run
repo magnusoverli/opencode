@@ -101,8 +101,17 @@ Z2M_URL_CONFIG=$(bashio::config 'z2m_url' || echo "")
 Z2M_TOPIC_CONFIG=$(bashio::config 'z2m_mqtt_topic' || echo "")
 
 if [ -n "${Z2M_URL_CONFIG}" ]; then
-    printf 'export Z2M_URL=%q\n' "${Z2M_URL_CONFIG}" >> "${ENV_VARS_FILE}"
-    bashio::log.info "zigporter Z2M URL configured (manual): ${Z2M_URL_CONFIG}"
+    case "${Z2M_URL_CONFIG}" in
+        http://*|https://*)
+            Z2M_URL="${Z2M_URL_CONFIG}"
+            ;;
+        *)
+            Z2M_URL="http://${Z2M_URL_CONFIG}"
+            bashio::log.info "zigporter Z2M URL missing scheme; defaulting to ${Z2M_URL}"
+            ;;
+    esac
+    printf 'export Z2M_URL=%q\n' "${Z2M_URL}" >> "${ENV_VARS_FILE}"
+    bashio::log.info "zigporter Z2M URL configured (manual): ${Z2M_URL}"
     if [ -n "${Z2M_TOPIC_CONFIG}" ]; then
         printf 'export Z2M_MQTT_TOPIC=%q\n' "${Z2M_TOPIC_CONFIG}" >> "${ENV_VARS_FILE}"
     fi

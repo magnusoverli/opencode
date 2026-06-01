@@ -8,6 +8,10 @@ This is the **beta channel** for the OpenCode add-on. It contains experimental f
 
 - **Beta baseline reset**: `1.9.0b0` is based on the current stable OpenCode add-on release and does not include beta-only feature changes yet.
 
+## Zigbee2MQTT URL
+
+If you configure `z2m_url` for zigporter commands, use a full URL such as `http://homeassistant.local:8099`. Host/IP-only values are accepted and treated as `http://`.
+
 ## Reporting Issues
 
 If you encounter problems with the beta, please report them at:

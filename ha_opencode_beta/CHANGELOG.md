@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Improve Zigbee2MQTT URL configuration by documenting the required `http://` or `https://` scheme and automatically treating host/IP-only `z2m_url` values as `http://`.
+
 ## 1.9.0b0
 
 - Reset the beta channel baseline to the current stable OpenCode add-on release.
