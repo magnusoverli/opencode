@@ -6,6 +6,7 @@
 export HOME="/data"
 export XDG_DATA_HOME="/data/.local/share"
 export XDG_CONFIG_HOME="/data/.config"
+export NODE_OPTIONS="--max-old-space-size=512"
 
 if [ -f /data/.env_vars ]; then
     source /data/.env_vars
@@ -33,4 +34,5 @@ fi
 bashio::log.info "If OpenCode prints http://0.0.0.0:${SERVER_PORT}, that is the internal container listener."
 bashio::log.info "Starting OpenCode LAN server: opencode serve --hostname 0.0.0.0 --port ${SERVER_PORT}"
 
+cd /homeassistant
 exec opencode serve --hostname 0.0.0.0 --port "${SERVER_PORT}"
