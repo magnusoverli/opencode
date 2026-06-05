@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 2.0.0b1
+
+- Mask the Home Assistant access token field in the add-on configuration UI.
+
 ## 2.0.0b0
 
 - **Optional LAN server mode** — added an opt-in beta setting that starts an OpenCode server on fixed internal port `4096`, with Home Assistant Network settings controlling any host port mapping. This allows remote clients to connect with `opencode attach` when the port is explicitly mapped.

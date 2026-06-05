@@ -108,7 +108,7 @@ schema:
   addon_access_enabled: bool
 
   # HA Core access token
-  access_token: str?
+  access_token: password
   
   # Zigbee2MQTT (optional)
   z2m_url: str?
