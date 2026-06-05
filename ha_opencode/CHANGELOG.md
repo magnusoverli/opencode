@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## 2.0.0
 
+- **PPQ private TEE models** — added an opt-in internal PPQ private-mode proxy, pinned at image build time, with a masked PPQ API key option and an OpenCode custom provider for PPQ private models. The proxy binds only to `127.0.0.1` inside the container and is not exposed through Home Assistant networking.
 - **Optional LAN server mode** — added an opt-in setting that starts an OpenCode server on fixed internal port `4096`, with Home Assistant Network settings controlling any host port mapping. This allows remote clients to connect with `opencode attach` when the port is explicitly mapped. Thanks to [@benwestrate](https://github.com/benwestrate) for contributing this feature.
 - **Masked access token field** — the Home Assistant access token option now uses a password-style configuration field in the add-on UI.
 

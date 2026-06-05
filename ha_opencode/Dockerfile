@@ -22,6 +22,8 @@ ARG BUILD_VERSION
 ARG BUILD_ARCH
 ARG TTYD_VERSION=1.7.7
 ARG OPENCODE_VERSION=latest
+ARG PPQ_PROXY_VERSION=0.1.0
+ARG TSX_VERSION=4.20.6
 
 # Environment for better Node.js performance
 ENV NODE_ENV=production \
@@ -69,10 +71,12 @@ RUN python3 -m venv /opt/zigporter-venv \
     && /opt/zigporter-venv/bin/pip install --no-cache-dir zigporter \
     && ln -s /opt/zigporter-venv/bin/zigporter /usr/local/bin/zigporter
 
-# Install OpenCode and Prettier globally
+# Install OpenCode, Prettier, and the PPQ private-mode proxy globally
 # - OpenCode: AI coding agent (pin version in build.yaml for reproducible builds)
 # - Prettier: Code formatter for YAML files, configured for HA conventions
-RUN npm install -g opencode-ai@${OPENCODE_VERSION} prettier \
+# - ppq-private-mode: local OpenAI-compatible encryption proxy for PPQ TEE models
+# - tsx: pinned runtime for the PPQ package's TypeScript entrypoint
+RUN npm install -g opencode-ai@${OPENCODE_VERSION} prettier ppq-private-mode@${PPQ_PROXY_VERSION} tsx@${TSX_VERSION} \
     && npm cache clean --force
 
 # Copy package.json files first for better layer caching
@@ -93,6 +97,7 @@ RUN chmod +x /usr/local/bin/* \
     && chmod +x /etc/s6-overlay/s6-rc.d/init-opencode/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-server/run \
+    && chmod +x /etc/s6-overlay/s6-rc.d/ppq-private-proxy/run \
     && chmod +x /etc/profile.d/hab-esphome.sh \
     && chmod +x /etc/profile.d/zigporter-z2m.sh \
     && mkdir -p /data/.local/share/opencode /data/.config/opencode

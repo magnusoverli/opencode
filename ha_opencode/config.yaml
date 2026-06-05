@@ -65,6 +65,11 @@ options:
   # Requires a Long-Lived Access Token (below) to authenticate with the HA frontend.
   screenshot_enabled: false
 
+  # PPQ private mode: routes OpenCode through a local encryption proxy for TEE-backed models.
+  # Requires a PPQ API key. The proxy binds to 127.0.0.1 inside the container only.
+  ppq_private_enabled: false
+  ppq_api_key: ""
+
   # Add-on development access acknowledgement.
   # The /addons and /addon_configs folders are mounted for custom add-on work.
   # Enable this to show add-on development guidance in the terminal.
@@ -111,6 +116,10 @@ schema:
 
   # Screenshot tool
   screenshot_enabled: bool
+
+  # PPQ private TEE models
+  ppq_private_enabled: bool
+  ppq_api_key: password
 
   # Add-on development access acknowledgement
   addon_access_enabled: bool

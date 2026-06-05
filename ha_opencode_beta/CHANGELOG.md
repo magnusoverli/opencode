@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 2.0.3b0
+
+- **PPQ private TEE models** — added an opt-in internal PPQ private-mode proxy, pinned at image build time, with a masked PPQ API key option and an OpenCode custom provider for PPQ private models. The proxy binds only to `127.0.0.1` inside the container and is not exposed through Home Assistant networking.
+
 ## 2.0.0b1
 
 - Mask the Home Assistant access token field in the add-on configuration UI.

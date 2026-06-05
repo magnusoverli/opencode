@@ -32,6 +32,14 @@ configuration:
     name: "Enable Screenshot Tool"
     description: "Enable visual verification of dashboards and UI pages. When enabled, the AI can take screenshots of Home Assistant pages using a headless browser to verify the result of dashboard changes. Requires a Long-Lived Access Token (below). Each screenshot takes approximately 5-10 seconds."
 
+  ppq_private_enabled:
+    name: "Enable PPQ Private TEE Models"
+    description: "Start an internal PPQ private-mode encryption proxy and add it as an OpenCode provider. The proxy binds only to 127.0.0.1 inside the add-on container and is not exposed on your network. Requires a PPQ API key."
+
+  ppq_api_key:
+    name: "PPQ API Key"
+    description: "API key for PPQ private-mode models. Stored as a masked add-on option and exported only to the internal PPQ proxy service. Leave empty unless PPQ private mode is enabled."
+
   addon_access_enabled:
     name: "Enable Add-on Folder Guidance"
     description: "Show guidance for working with Home Assistant add-on folders. Security note: /addons and /addon_configs are mounted into this add-on for development access, and /addon_configs may contain sensitive add-on data. Changing this option requires restarting the add-on to update terminal guidance, but it is not a hard filesystem permission boundary."
