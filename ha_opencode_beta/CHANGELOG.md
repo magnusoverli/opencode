@@ -4,8 +4,6 @@
 
 ## 2.0.0b0
 
-- Reduce memory and disk pressure by disabling OpenCode snapshots by default and ignoring noisy Home Assistant internal paths in OpenCode's file watcher.
-- **Opt-in serial device access** — added a `serial_devices` option that lets users map selected host UART/serial devices into the add-on for USB flashing and adapter inspection workflows. Supervisor `uart` and `udev` manifest flags remain disabled by default because they are static permissions, not runtime user options.
 - **Optional LAN server mode** — added an opt-in beta setting that starts an OpenCode server on fixed internal port `4096`, with Home Assistant Network settings controlling any host port mapping. This allows remote clients to connect with `opencode attach` when the port is explicitly mapped.
 
 ## 1.9.0b1
