@@ -65,7 +65,7 @@ options:
   # Requires a Long-Lived Access Token (below) to authenticate with the HA frontend.
   screenshot_enabled: false
 
-  # PPQ private mode: routes OpenCode through a local encryption proxy for TEE-backed models.
+  # PPQ private mode (beta): routes OpenCode through a local encryption proxy for TEE-backed models.
   # Requires a PPQ API key. The proxy binds to 127.0.0.1 inside the container only.
   ppq_private_enabled: false
   ppq_api_key: ""
@@ -117,7 +117,7 @@ schema:
   # Screenshot tool
   screenshot_enabled: bool
 
-  # PPQ private TEE models
+  # PPQ private TEE models (beta)
   ppq_private_enabled: bool
   ppq_api_key: password
 

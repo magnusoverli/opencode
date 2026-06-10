@@ -12,7 +12,7 @@ OpenCode is an AI-powered coding agent that helps you edit and manage your Home 
 - **MCP Integration**: Deep Home Assistant integration with Tools, Resources, Prompts, and Intelligence
 - **Visual Verification**: Screenshot tool for verifying dashboard changes with AI vision
 - **LSP Integration**: Intelligent YAML editing with entity autocomplete, hover info, and diagnostics
-- **PPQ Private TEE Models**: Optional encrypted proxy for PPQ private models running in remote TEEs
+- **PPQ Private TEE Models (Beta)**: Optional encrypted proxy for PPQ private models running in remote TEEs. Included in stable releases, but still considered beta.
 - **Serial Device Access**: Optionally map selected host serial devices into the add-on for USB flashing and adapter inspection workflows
 - **Optional LAN Server Mode**: Attach from another computer on your local network using the OpenCode CLI
 
@@ -27,7 +27,7 @@ Configure the app from the **Configuration** tab in the app page.
 | **Enable MCP Home Assistant Integration** | `true` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 34 tools, 13 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
 | **Enable LSP Home Assistant Integration** | `true` | Enable the Language Server Protocol (LSP) server for intelligent YAML editing. Provides entity/service autocomplete, hover documentation, diagnostics for unknown entities, and go-to-definition for !include tags. |
 | **Screenshot Tool** | `false` | Enable visual verification of dashboards and UI pages. Uses headless Chromium to capture screenshots that vision-capable AI models can analyze. Requires a Long-Lived Access Token. See [Visual Verification](#visual-verification-screenshots). |
-| **Enable PPQ Private TEE Models** | `false` | Start an internal PPQ private-mode encryption proxy and add it as an OpenCode provider. Requires **PPQ API Key**. See [PPQ Private TEE Models](#ppq-private-tee-models). |
+| **Enable PPQ Private TEE Models (Beta)** | `false` | Start an internal PPQ private-mode encryption proxy and add it as an OpenCode provider. Requires **PPQ API Key**. This feature is included in stable releases, but should still be considered beta. See [PPQ Private TEE Models (Beta)](#ppq-private-tee-models-beta). |
 | **Enable OpenCode LAN Server** | `false` | Start an OpenCode server on internal port `4096` so clients on your local network can attach with the OpenCode CLI. Also requires mapping `4096/tcp` in the add-on Network settings. See [LAN Server Mode](#lan-server-mode). |
 ### Terminal Appearance
 
@@ -43,7 +43,7 @@ Configure the app from the **Configuration** tab in the app page.
 | Option | Default | Description |
 |--------|---------|-------------|
 | **CPU Mode** | `auto` | Controls which OpenCode binary is used. `auto` detects your CPU capabilities automatically (recommended). `baseline` forces the baseline binary for older CPUs without AVX2 support. `regular` forces the standard binary. |
-| **PPQ API Key** | `""` | API key for PPQ private-mode models. Stored as a masked add-on option and exported only to the internal PPQ proxy service. |
+| **PPQ API Key** | `""` | API key for PPQ private-mode models. Stored as a masked add-on option and exported only to the internal PPQ proxy service. Only needed for the beta PPQ feature. |
 | **Enable Add-on Folder Guidance** | `false` | Shows terminal guidance for Home Assistant add-on development folders. The add-on mounts `/addons` and `/addon_configs` for development access; `/addon_configs` may contain sensitive add-on data. This option updates guidance after restart, but it is not a hard filesystem permission boundary. |
 | **Zigbee2MQTT URL** | `""` | Optional URL for Zigbee2MQTT, used by zigporter commands such as `list-z2m` and `network-map --backend z2m`. Include `http://` or `https://`, for example `http://homeassistant.local:8099`. Host/IP-only values are treated as `http://`. |
 | **Zigbee2MQTT MQTT Topic** | `zigbee2mqtt` | MQTT base topic used by Zigbee2MQTT. |
@@ -68,9 +68,11 @@ After saving and restarting the add-on, these variables will be available in the
 
 > **Note:** Environment variable values are stored on disk inside the container and are excluded from Home Assistant backups. However, they are visible in the add-on's Configuration tab. Treat them with the same care as any stored credential.
 
-### PPQ Private TEE Models
+### PPQ Private TEE Models (Beta)
 
 PPQ private mode routes OpenCode requests through a local encryption proxy before forwarding them to PPQ's private inference API. The proxy verifies the remote enclave, encrypts the request locally, and decrypts the response locally.
+
+This feature is included in stable releases, but should still be considered beta while provider behavior and proxy integration are validated.
 
 Flow:
 
@@ -81,7 +83,7 @@ OpenCode -> 127.0.0.1:8787 PPQ proxy -> PPQ API -> remote TEE
 To enable PPQ private models:
 
 1. Get a PPQ API key from PPQ.
-2. In the add-on **Configuration** tab, set **Enable PPQ Private TEE Models** to `true`.
+2. In the add-on **Configuration** tab, set **Enable PPQ Private TEE Models (Beta)** to `true`.
 3. Paste the key into **PPQ API Key**. Alternatively, set `PPQ_API_KEY` through **Environment Variables** if you manage credentials that way.
 4. Save and restart the add-on.
 5. In OpenCode, select the `PPQ Private (TEE)` provider and one of the `private/...` models.
