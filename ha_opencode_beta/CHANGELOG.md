@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.3b5
+
+- **Native ARM64 builds** — the aarch64 image now builds on GitHub's native `ubuntu-24.04-arm` runners instead of QEMU emulation, cutting ARM build times from ~20 minutes to roughly amd64 speed. The QEMU setup step is removed from the build workflows.
+- **Cross-platform hab build stage** — the hab CLI builder stage is pinned to the build platform and cross-compiles via `GOARCH`, so it runs natively regardless of target architecture.
+- No add-on functionality changes.
+
 ## 2.0.3b4
 
 - **Node 24-ready CI** — all GitHub Actions in the build and release workflows bumped to Node 24 runtimes (checkout v6, docker setup-qemu/setup-buildx/login v4, build-push v7, action-gh-release v3) ahead of GitHub's enforced runtime switch on June 16, 2026. No add-on functionality changes — the image is rebuilt from the same source as 2.0.3b3.
