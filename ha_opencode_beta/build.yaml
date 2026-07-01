@@ -10,6 +10,6 @@ args:
 labels:
   org.opencontainers.image.title: "OpenCode Beta"
   org.opencontainers.image.description: "Beta channel for OpenCode - AI coding agent for Home Assistant"
-  org.opencontainers.image.source: "https://github.com/magnusoverli/opencode"
+  org.opencontainers.image.source: "https://github.com/Rahulsharma0810/opencode"
   org.opencontainers.image.licenses: "Unlicense"
-  org.opencontainers.image.vendor: "Magnus Overli"
+  org.opencontainers.image.vendor: "Rahul Sharma"
