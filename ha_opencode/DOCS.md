@@ -364,6 +364,12 @@ Long-term plan:
 | **Prompts** | 6 | Pre-built guided workflows for common tasks |
 | **Intelligence** | Built-in | Anomaly detection, suggestions, semantic search |
 
+### MCP Compatibility and Compact Responses
+
+OpenCode's MCP server keeps compatibility handling local to this add-on. It does not patch or upstream changes to OpenCode's MCP client. Tool discovery exposes the conservative fields OpenCode consumes today, while runtime capability details are available from `get_agent_capabilities`.
+
+For newer MCP-style structured data, tools return machine-readable JSON text with stable `summary`, `data`, and `meta` fields where that helps agents parse results. Large responses such as broad state listings, history, logbook, documentation, changelogs, CLI output, and ESPHome logs are capped and include truncation metadata so agents can filter or retry more narrowly instead of consuming unbounded output.
+
 ### Enabling MCP Integration
 
 **Option 1: Via Configuration (Recommended)**

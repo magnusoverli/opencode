@@ -21,6 +21,10 @@ You have access to the Home Assistant MCP server which provides deep integration
 5. **For overview**: Use `get_states` with `summarize: true` for human-readable summaries
 6. **For agent capability status**: Use `get_agent_capabilities` to see this add-on's MCP surface and whether Home Assistant reports the native `llm` component
 
+### Compact MCP Output
+
+Some tools return machine-readable JSON text with `summary`, `data`, and `meta` fields. If `meta.truncated` is true, do not treat the result as complete. Re-run the tool with narrower filters such as `entity_id`, `domain`, shorter time ranges, fewer log lines, or a more specific CLI command.
+
 ## Home Assistant Native LLM Platform
 
 Home Assistant is adding a native `llm` integration and `<integration>/llm.py` platform so Core integrations and custom integrations can provide curated tools to Assist. Treat that as complementary to OpenCode MCP:

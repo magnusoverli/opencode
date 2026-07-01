@@ -19,6 +19,7 @@ describe("buildAgentCapabilities", () => {
     expect(capabilities.mcp.resource_templates).toBe(1);
     expect(capabilities.mcp.prompts).toBe(1);
     expect(capabilities.mcp.tool_names).toContain("get_agent_capabilities");
+    expect(capabilities.mcp.client_compatibility.call_tool_fields).toEqual(["content", "isError"]);
   });
 
   it("reports native LLM as not detected by default", () => {

@@ -67,6 +67,13 @@ export function buildAgentCapabilities({
       prompts: prompts.length,
       tool_names: tools.map((tool) => tool.name).filter(Boolean),
       highlights: TOOL_HIGHLIGHTS,
+      client_compatibility: {
+        scope: "Server-local compatibility only; this add-on does not patch or upstream changes to OpenCode's MCP client.",
+        list_tools_fields: ["name", "description", "inputSchema"],
+        call_tool_fields: ["content", "isError"],
+        structured_data_strategy: "Machine-readable summary/data/meta JSON is returned as text content because structuredContent/resourceLinks are kept out of tool responses for OpenCode compatibility.",
+        intentionally_stripped_fields: ["title", "annotations", "outputSchema", "structuredContent", "resourceLinks"],
+      },
     },
     strategy: {
       current: "Keep existing MCP functionality as the complete working tool surface while Home Assistant's native LLM platform matures.",

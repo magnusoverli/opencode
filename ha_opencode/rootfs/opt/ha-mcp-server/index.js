@@ -76,7 +76,15 @@ import { fileURLToPath } from "url";
 import { detectAnomaly, searchEntities, generateSuggestions, generateStateSummary } from "./lib/intelligence.js";
 import { validateYamlStructure, resolveConfigPath } from "./lib/validation.js";
 import { extractContentFromHtml, extractConfigurationSection, extractYamlExamples } from "./lib/html-parser.js";
-import { createTextContent, createImageContent, createResourceLink } from "./lib/helpers.js";
+import {
+  createCompactPayload,
+  createJsonTextContent,
+  createTextContent,
+  createImageContent,
+  createResourceLink,
+  truncateLines,
+  truncateText,
+} from "./lib/helpers.js";
 import { buildAgentCapabilities } from "./lib/agent-capabilities.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1862,6 +1870,13 @@ const EMPTY_INPUT_SCHEMA = Object.freeze({
   additionalProperties: false,
 });
 
+const STATE_RESULT_CAP = 500;
+const HISTORY_RESULT_CAP = 200;
+const LOGBOOK_RESULT_CAP = 200;
+const DOCS_MAX_CHARS = 12000;
+const CHANGELOG_MAX_CHARS = 16000;
+const CLI_OUTPUT_MAX_CHARS = 20000;
+
 const server = new Server(
   {
     name: "home-assistant",
@@ -1911,6 +1926,7 @@ const TOOLS = [
           description: "If true, returns a human-readable summary instead of raw data",
         },
       },
+      additionalProperties: false,
     },
     outputSchema: SCHEMAS.entityStateArray,
     annotations: {
@@ -1932,6 +1948,7 @@ const TOOLS = [
         },
       },
       required: ["query"],
+      additionalProperties: false,
     },
     outputSchema: SCHEMAS.searchResult,
     annotations: {
@@ -1952,6 +1969,7 @@ const TOOLS = [
         },
       },
       required: ["entity_id"],
+      additionalProperties: false,
     },
     outputSchema: SCHEMAS.entityDetails,
     annotations: {
@@ -2009,6 +2027,7 @@ const TOOLS = [
         },
       },
       required: ["domain", "service"],
+      additionalProperties: false,
     },
     outputSchema: SCHEMAS.serviceCallResult,
     annotations: {
@@ -2029,6 +2048,7 @@ const TOOLS = [
           description: "Filter services by domain (e.g., 'light', 'climate')",
         },
       },
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2062,6 +2082,7 @@ const TOOLS = [
         },
       },
       required: ["entity_id"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2079,6 +2100,7 @@ const TOOLS = [
         start_time: { type: "string", description: "Start time in ISO format. Defaults to 24 hours ago." },
         end_time: { type: "string", description: "End time in ISO format. Defaults to now." },
       },
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2127,6 +2149,7 @@ const TOOLS = [
       properties: {
         area_id: { type: "string", description: "Filter devices by area ID" },
       },
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2151,8 +2174,9 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        lines: { type: "number", description: "Number of lines to return (default: 100)" },
+        lines: { type: "number", minimum: 1, maximum: 500, description: "Number of lines to return (default: 100, max: 500)" },
       },
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2172,6 +2196,7 @@ const TOOLS = [
         event_data: { type: "object", description: "Optional data to include with the event" },
       },
       required: ["event_type"],
+      additionalProperties: false,
     },
     annotations: {
       destructive: true,
@@ -2188,6 +2213,7 @@ const TOOLS = [
         template: { type: "string", description: "Jinja2 template (e.g., '{{ states(\"sensor.temperature\") }}', '{{ now() }}')" },
       },
       required: ["template"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2218,6 +2244,7 @@ const TOOLS = [
         end: { type: "string", description: "End time in ISO format" },
       },
       required: ["calendar_entity"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2235,6 +2262,7 @@ const TOOLS = [
       properties: {
         domain: { type: "string", description: "Limit scan to specific domain" },
       },
+      additionalProperties: false,
     },
     outputSchema: SCHEMAS.anomalyArray,
     annotations: {
@@ -2263,6 +2291,7 @@ const TOOLS = [
         entity_id: { type: "string", description: "Entity to diagnose" },
       },
       required: ["entity_id"],
+      additionalProperties: false,
     },
     outputSchema: SCHEMAS.diagnostics,
     annotations: {
@@ -2290,6 +2319,7 @@ const TOOLS = [
         },
       },
       required: ["integration"],
+      additionalProperties: false,
     },
     outputSchema: SCHEMAS.integrationDocs,
     annotations: {
@@ -2313,6 +2343,7 @@ const TOOLS = [
           description: "Get changes for a specific HA version (e.g., '2024.12'). Defaults to recent versions.",
         },
       },
+      additionalProperties: false,
     },
     outputSchema: SCHEMAS.breakingChanges,
     annotations: {
@@ -2337,6 +2368,7 @@ const TOOLS = [
         },
       },
       required: ["yaml_config"],
+      additionalProperties: false,
     },
     outputSchema: SCHEMAS.configSyntaxCheck,
     annotations: {
@@ -2373,6 +2405,7 @@ const TOOLS = [
         },
       },
       required: ["file_path", "content"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: false,
@@ -2395,6 +2428,7 @@ const TOOLS = [
           description: "Which component to check (default: 'all')",
         },
       },
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2414,6 +2448,7 @@ const TOOLS = [
         },
       },
       required: ["addon_slug"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2442,6 +2477,7 @@ const TOOLS = [
         },
       },
       required: ["component"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: false,
@@ -2462,6 +2498,7 @@ const TOOLS = [
         },
       },
       required: ["job_id"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2503,6 +2540,7 @@ const TOOLS = [
         },
       },
       required: ["device"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: false,
@@ -2526,6 +2564,7 @@ const TOOLS = [
         },
       },
       required: ["device", "port"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: false,
@@ -2551,6 +2590,7 @@ const TOOLS = [
         },
       },
       required: ["entity_id"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: false,
@@ -2570,6 +2610,7 @@ const TOOLS = [
         },
       },
       required: ["command"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: false,
@@ -2604,6 +2645,7 @@ const TOOLS = [
         },
       },
       required: ["command"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: false,
@@ -2623,14 +2665,20 @@ const TOOLS = [
         },
         width: {
           type: "number",
-          description: "Viewport width in pixels (default: 1280)",
+          minimum: 320,
+          maximum: 3840,
+          description: "Viewport width in pixels (default: 1280, range: 320-3840)",
         },
         height: {
           type: "number",
-          description: "Viewport height in pixels (default: 720)",
+          minimum: 240,
+          maximum: 2160,
+          description: "Viewport height in pixels (default: 720, range: 240-2160)",
         },
         wait_seconds: {
           type: "number",
+          minimum: 0,
+          maximum: 15,
           description: "Seconds to wait after page load for dynamic content to render (default: 3, max: 15)",
         },
         full_page: {
@@ -2639,6 +2687,7 @@ const TOOLS = [
         },
       },
       required: ["url_path"],
+      additionalProperties: false,
     },
     annotations: {
       readOnly: true,
@@ -2819,6 +2868,48 @@ async function getAgentCapabilities() {
   });
 }
 
+function createCompactJsonContent(summary, data, meta = {}, options = {}) {
+  return createJsonTextContent(createCompactPayload(summary, data, meta), {
+    pretty: options.pretty ?? true,
+    audience: options.audience || ["assistant"],
+    priority: options.priority ?? 0.7,
+  });
+}
+
+function createCommandOutputContent(toolName, command, output, options = {}) {
+  const text = String(output ?? "").trim();
+  const baseMeta = { tool: toolName, command };
+
+  try {
+    const parsed = JSON.parse(text);
+    const rawJson = JSON.stringify(parsed);
+    if (rawJson.length <= CLI_OUTPUT_MAX_CHARS) {
+      return createCompactJsonContent(
+        `${toolName} command completed`,
+        parsed,
+        { ...baseMeta, format: "json", truncated: false, original_chars: rawJson.length },
+        options
+      );
+    }
+
+    const truncated = truncateText(rawJson, { maxChars: CLI_OUTPUT_MAX_CHARS });
+    return createCompactJsonContent(
+      `${toolName} command completed with large JSON output`,
+      { raw_json_preview: truncated.text },
+      { ...baseMeta, format: "json", ...truncated, text: undefined },
+      options
+    );
+  } catch {
+    const truncated = truncateText(text, { maxChars: CLI_OUTPUT_MAX_CHARS });
+    return createCompactJsonContent(
+      `${toolName} command completed`,
+      { output: truncated.text },
+      { ...baseMeta, format: "text", ...truncated, text: undefined },
+      options
+    );
+  }
+}
+
 // ============================================================================
 // REQUEST HANDLERS
 // ============================================================================
@@ -2871,7 +2962,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const state = await callHA(`/states/${args.entity_id}`);
           return makeCompatibleResponse({
             content: [
-              createTextContent(JSON.stringify(state, null, 2), { audience: ["assistant"], priority: 0.8 }),
+              createCompactJsonContent(
+                `State for ${args.entity_id}`,
+                state,
+                { returned: 1, truncated: false },
+                { audience: ["assistant"], priority: 0.8 }
+              ),
             ],
           });
         }
@@ -2894,15 +2990,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           friendly_name: s.attributes?.friendly_name,
           device_class: s.attributes?.device_class,
         }));
-        // Unfiltered dumps on large installs waste tokens; cap and point at the filters
-        const CAP = 500;
-        const truncated = !args?.domain && simplified.length > CAP;
-        const payload = truncated
-          ? `Showing ${CAP} of ${simplified.length} entities (use domain or summarize to narrow):\n` +
-            JSON.stringify(simplified.slice(0, CAP))
-          : JSON.stringify(simplified);
+        const truncated = simplified.length > STATE_RESULT_CAP;
+        const returned = truncated ? simplified.slice(0, STATE_RESULT_CAP) : simplified;
         return makeCompatibleResponse({
-          content: [createTextContent(payload, { audience: ["assistant"], priority: 0.7 })],
+          content: [createCompactJsonContent(
+            truncated
+              ? `Showing ${returned.length} of ${simplified.length} entities. Use entity_id, domain, or summarize to narrow.`
+              : `Returned ${returned.length} entities`,
+            returned,
+            {
+              total: simplified.length,
+              returned: returned.length,
+              truncated,
+              filters: {
+                domain: args?.domain || null,
+              },
+            },
+            { audience: ["assistant"], priority: 0.7 }
+          )],
         });
       }
 
@@ -2987,8 +3092,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const history = await callHA(`/history/period/${encodeURIComponent(startTime)}?${params}`);
+        const events = Array.isArray(history?.[0]) ? history[0] : [];
+        const truncated = events.length > HISTORY_RESULT_CAP;
+        const returnedEvents = truncated ? events.slice(-HISTORY_RESULT_CAP) : events;
+        const compactHistory = Array.isArray(history) && history.length > 0 ? [returnedEvents] : history;
         return makeCompatibleResponse({
-          content: [createTextContent(JSON.stringify(history), { audience: ["assistant"], priority: 0.7 })],
+          content: [createCompactJsonContent(
+            truncated
+              ? `Returned last ${returnedEvents.length} of ${events.length} history events for ${entityId}`
+              : `Returned ${events.length} history events for ${entityId}`,
+            compactHistory,
+            {
+              entity_id: entityId,
+              start_time: startTime,
+              end_time: args.end_time || null,
+              minimal: args.minimal !== false,
+              total_events: events.length,
+              returned_events: returnedEvents.length,
+              truncated,
+            },
+            { audience: ["assistant"], priority: 0.7, pretty: false }
+          )],
         });
       }
 
@@ -2999,8 +3123,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.end_time) params.append("end_time", args.end_time);
 
         const logbook = await callHA(`/logbook/${encodeURIComponent(startTime)}?${params}`);
+        const entries = Array.isArray(logbook) ? logbook : [];
+        const truncated = entries.length > LOGBOOK_RESULT_CAP;
+        const returnedEntries = truncated ? entries.slice(-LOGBOOK_RESULT_CAP) : entries;
         return makeCompatibleResponse({
-          content: [createTextContent(JSON.stringify(logbook), { audience: ["assistant"], priority: 0.7 })],
+          content: [createCompactJsonContent(
+            truncated
+              ? `Returned last ${returnedEntries.length} of ${entries.length} logbook entries`
+              : `Returned ${returnedEntries.length} logbook entries`,
+            returnedEntries,
+            {
+              entity_id: args.entity_id || null,
+              start_time: startTime,
+              end_time: args.end_time || null,
+              total_entries: entries.length,
+              returned_entries: returnedEntries.length,
+              truncated,
+            },
+            { audience: ["assistant"], priority: 0.7, pretty: false }
+          )],
         });
       }
 
@@ -3059,10 +3200,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_error_log": {
         // Supervisor proxies http://supervisor/core/api/* to HA's /api/*
         const log = await callHA("/error_log");
-        const lines = args?.lines || 100;
-        const logLines = log.split("\n").slice(-lines).join("\n");
+        const requestedLines = Number.isFinite(args?.lines) ? args.lines : 100;
+        const lines = Math.max(1, Math.min(500, requestedLines));
+        const allLines = log.split("\n");
+        const logLines = allLines.slice(-lines);
         return makeCompatibleResponse({
-          content: [createTextContent(logLines, { audience: ["assistant"], priority: 0.8 })],
+          content: [createCompactJsonContent(
+            `Returned ${logLines.length} Home Assistant error log lines`,
+            { log: logLines.join("\n") },
+            {
+              requested_lines: requestedLines,
+              returned_lines: logLines.length,
+              total_lines: allLines.length,
+              truncated: allLines.length > logLines.length,
+            },
+            { audience: ["assistant"], priority: 0.8 }
+          )],
         });
       }
 
@@ -3265,9 +3418,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               resultContent = "## YAML Examples\n\n" + examples.map((ex, i) => `### Example ${i + 1}\n\`\`\`yaml\n${ex}\n\`\`\``).join("\n\n");
             }
 
+            const truncatedDocs = truncateText(resultContent, { maxChars: DOCS_MAX_CHARS });
             parsed = {
               title: title || integration,
-              resultContent: resultContent.substring(0, 15000), // Limit content size
+              resultContent: truncatedDocs.text,
+              truncated: truncatedDocs.truncated,
+              original_chars: truncatedDocs.original_chars,
+              returned_chars: truncatedDocs.returned_chars,
+              omitted_chars: truncatedDocs.omitted_chars,
               fetched_at: new Date().toISOString(),
             };
             setCachedDoc(cacheKey, parsed);
@@ -3281,6 +3439,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 `**Integration:** ${integration}\n` +
                 `**Docs URL:** ${url}\n` +
                 `**Your HA Version:** ${haVersion}\n` +
+                `**Truncated:** ${parsed.truncated ? `Yes (${parsed.omitted_chars} chars omitted)` : "No"}\n` +
                 `**Fetched:** ${parsed.fetched_at}\n\n` +
                 `---\n\n${parsed.resultContent}`,
                 { audience: ["assistant"], priority: 0.9 }
@@ -4071,7 +4230,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         
         return makeCompatibleResponse({
-          content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 })],
+          content: [
+            createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 }),
+            createCompactJsonContent(
+              `Found ${pendingUpdates.length} available updates`,
+              updates,
+              {
+                checked_at: new Date().toISOString(),
+                component,
+                total_components: updates.length,
+                pending_updates: pendingUpdates.length,
+              },
+              { audience: ["assistant"], priority: 0.6, pretty: false }
+            ),
+          ],
         });
       }
 
@@ -4085,12 +4257,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             callSupervisor(`/addons/${addon_slug}/changelog`),
           ]);
           
+          const truncatedChangelog = truncateText(changelog, { maxChars: CHANGELOG_MAX_CHARS });
           let responseText = `# Changelog: ${addonInfo.name}\n\n`;
           responseText += `**Current Version:** ${addonInfo.version}\n`;
           responseText += `**Latest Version:** ${addonInfo.version_latest}\n`;
           responseText += `**Update Available:** ${addonInfo.update_available ? 'Yes' : 'No'}\n\n`;
+          responseText += `**Truncated:** ${truncatedChangelog.truncated ? `Yes (${truncatedChangelog.omitted_chars} chars omitted)` : 'No'}\n\n`;
           responseText += `---\n\n`;
-          responseText += changelog;
+          responseText += truncatedChangelog.text;
           
           return makeCompatibleResponse({
             content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.8 })],
@@ -4154,7 +4328,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           responseText += `**Example:** \`get_update_progress({ job_id: "${jobId}" })\`\n`;
           
           return makeCompatibleResponse({
-            content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 1.0 })],
+            content: [
+              createTextContent(responseText, { audience: ["user", "assistant"], priority: 1.0 }),
+              createCompactJsonContent(
+                `Update initiated for ${componentName}`,
+                { component, component_name: componentName, addon_slug: addon_slug || null, job_id: jobId, backup },
+                { monitor_tool: "get_update_progress" },
+                { audience: ["assistant"], priority: 0.7 }
+              ),
+            ],
           });
         } catch (e) {
           throw new Error(`Failed to initiate update for ${componentName}: ${e.message}`);
@@ -4213,7 +4395,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
           
           return makeCompatibleResponse({
-            content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 })],
+            content: [
+              createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 }),
+              createCompactJsonContent(
+                `Job ${job.done ? (job.errors ? "failed" : "completed") : "in progress"}`,
+                job,
+                { job_id, done: !!job.done, has_errors: !!job.errors },
+                { audience: ["assistant"], priority: 0.6, pretty: false }
+              ),
+            ],
           });
         } catch (e) {
           throw new Error(`Failed to get job progress: ${e.message}`);
@@ -4394,17 +4584,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           responseText += `## Build Log\n\n`;
           responseText += "```\n";
           
-          // Truncate logs if too long (keep last 200 lines for errors, first 50 for context)
-          const logs = result.logs;
-          if (logs.length > 300) {
-            responseText += logs.slice(0, 50).join("\n");
-            responseText += `\n\n... (${logs.length - 250} lines omitted) ...\n\n`;
-            responseText += logs.slice(-200).join("\n");
-          } else {
-            responseText += logs.join("\n");
-          }
+          const logs = truncateLines(result.logs, { maxLines: 250, headLines: 50 });
+          responseText += logs.lines.join("\n");
           
           responseText += "\n```\n";
+          if (logs.truncated) {
+            responseText += `\n**Log truncated:** ${logs.omitted_lines} of ${logs.original_lines} lines omitted.\n`;
+          }
           
           if (!result.success) {
             responseText += `\n## Troubleshooting\n\n`;
@@ -4467,17 +4653,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           responseText += `## Upload Log\n\n`;
           responseText += "```\n";
           
-          // Truncate logs if too long
-          const logs = result.logs;
-          if (logs.length > 200) {
-            responseText += logs.slice(0, 30).join("\n");
-            responseText += `\n\n... (${logs.length - 130} lines omitted) ...\n\n`;
-            responseText += logs.slice(-100).join("\n");
-          } else {
-            responseText += logs.join("\n");
-          }
+          const logs = truncateLines(result.logs, { maxLines: 130, headLines: 30 });
+          responseText += logs.lines.join("\n");
           
           responseText += "\n```\n";
+          if (logs.truncated) {
+            responseText += `\n**Log truncated:** ${logs.omitted_lines} of ${logs.original_lines} lines omitted.\n`;
+          }
           
           if (result.success) {
             responseText += `\n## Next Steps\n\n`;
@@ -4598,7 +4780,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         
         return makeCompatibleResponse({
-          content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 })],
+          content: [
+            createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 }),
+            createCompactJsonContent(
+              statusText,
+              {
+                entity_id,
+                device_name: deviceName,
+                state: currentState,
+                status: statusText,
+                installed_version: installedVersion,
+                latest_version: latestVersion,
+                in_progress: inProgress,
+                progress: progress ?? null,
+                update_started: start_update && currentState === "on",
+              },
+              { checked_at: new Date().toISOString() },
+              { audience: ["assistant"], priority: 0.6 }
+            ),
+          ],
         });
       }
 
@@ -4673,18 +4873,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         });
         
-        // Try to parse as JSON for structured output
-        let responseText;
-        try {
-          const parsed = JSON.parse(result);
-          responseText = "```json\n" + JSON.stringify(parsed, null, 2) + "\n```";
-        } catch {
-          // Not JSON, return as plain text
-          responseText = result.trim();
-        }
-        
         return makeCompatibleResponse({
-          content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.7 })],
+          content: [createCommandOutputContent("hab", command, result, { audience: ["user", "assistant"], priority: 0.7 })],
         });
       }
 
@@ -4754,20 +4944,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         });
 
-        // Try to parse as JSON for structured output
-        let zigResponseText;
-        try {
-          const parsed = JSON.parse(zigResult);
-          zigResponseText =
-            "```json\n" + JSON.stringify(parsed, null, 2) + "\n```";
-        } catch {
-          // Not JSON, return as plain text (diffs, confirmations, etc.)
-          zigResponseText = zigResult.trim();
-        }
-
         return makeCompatibleResponse({
           content: [
-            createTextContent(zigResponseText, {
+            createCommandOutputContent("zigporter", command, zigResult, {
               audience: ["user", "assistant"],
               priority: 0.7,
             }),

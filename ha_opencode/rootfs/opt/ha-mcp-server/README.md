@@ -12,27 +12,31 @@ A comprehensive Model Context Protocol (MCP) server for deep integration between
 | **Intelligence** | Built-in | Anomaly detection, suggestions, semantic search |
 | **Documentation** | Built-in | Live docs fetching, deprecation checks, syntax validation |
 
-## Cutting-Edge MCP Features (v2.1)
+## MCP Compatibility Features
 
-This server includes MCP server features used by OpenCode:
+This server keeps compatibility handling local to the add-on. It does not patch or upstream OpenCode's MCP client. Tool discovery and tool responses are filtered to the conservative fields OpenCode consumes today, while richer data is encoded as text JSON where useful.
 
-### 1. Structured Tool Output
-All tools return both human-readable text AND structured JSON data:
+### 1. Compatible Machine-Readable Output
+Tools that benefit from structured data return JSON text with stable fields:
 ```javascript
 {
-  content: [{ type: "text", text: "..." }],
-  structuredContent: { /* typed JSON data */ }
+  summary: "Returned 42 entities",
+  data: [/* compact result data */],
+  meta: {
+    total: 42,
+    returned: 42,
+    truncated: false
+  }
 }
 ```
 
-### 2. Output Schemas
-Tools define JSON Schema for their output, enabling:
-- Response validation
-- Type information for integrations
-- Better IDE/tooling support
+Newer MCP fields such as `structuredContent` and `resourceLinks` are intentionally kept out of tool responses until OpenCode consumes them reliably.
+
+### 2. Strict Input Schemas
+Tool input schemas use `additionalProperties: false` and bounded numeric arguments where practical so clients have clearer argument contracts.
 
 ### 3. Tool Annotations
-Safety and behavior hints for each tool:
+Safety and behavior hints are maintained in the server definitions and reported through `get_agent_capabilities` compatibility metadata where relevant:
 ```javascript
 {
   name: "call_service",
@@ -51,16 +55,8 @@ Safety and behavior hints for each tool:
 | `idempotent` | All read-only tools |
 | `requiresConfirmation` | `call_service` |
 
-### 4. Resource Links
-Tools return links to related resources for follow-up:
-```javascript
-{
-  content: [...],
-  resourceLinks: [
-    { uri: "ha://entity/light.living_room", name: "Living Room Light" }
-  ]
-}
-```
+### 4. Bounded Large Outputs
+Broad state listings, history, logbook, documentation, changelogs, CLI output, and ESPHome logs are capped and include truncation metadata. Re-run with narrower filters when `meta.truncated` is true.
 
 ### 5. Logging Capability
 Server-side logging with configurable levels:
@@ -211,7 +207,9 @@ ha-mcp enable
 - Documents the strategy for adopting HA-native LLM capabilities while preserving MCP workflows
 - Targets the current MCP TypeScript SDK `1.29.x` line
 - Adds server implementation description metadata
-- Uses strict empty input schemas for no-argument tools, matching current MCP guidance
+- Uses strict input schemas with `additionalProperties: false`, matching current MCP guidance
+- Adds server-local compatibility metadata and compact `summary`/`data`/`meta` JSON text outputs for tools where structured parsing helps
+- Caps large state, history, logbook, docs, changelog, CLI, and ESPHome log responses with truncation metadata
 
 ### v2.2.0 (Documentation Edition)
 - Added documentation tools for keeping configurations current
