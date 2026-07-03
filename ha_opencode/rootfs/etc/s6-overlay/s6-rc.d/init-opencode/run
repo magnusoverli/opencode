@@ -207,6 +207,71 @@ else
 fi
 
 # ==============================================================================
+# Configure optional SSH server
+# Sets up key-based and/or password auth for root login when enabled.
+# ==============================================================================
+
+SSH_ENABLED=$(bashio::config 'ssh_enabled' 2>/dev/null || echo "false")
+SSH_PASSWORD=$(bashio::config 'ssh_password' 2>/dev/null || echo "")
+SSH_AUTHORIZED_KEYS=$(bashio::config 'ssh_authorized_keys' 2>/dev/null || echo "")
+SSH_PORT=2222
+
+if bashio::var.true "${SSH_ENABLED}"; then
+    bashio::log.info "Configuring SSH server..."
+
+    mkdir -p /data/.ssh /root/.ssh
+    chmod 700 /data/.ssh /root/.ssh
+
+    # Write authorized_keys if provided
+    if [ -n "${SSH_AUTHORIZED_KEYS}" ]; then
+        printf '%s\n' "${SSH_AUTHORIZED_KEYS}" > /root/.ssh/authorized_keys
+        chmod 600 /root/.ssh/authorized_keys
+        bashio::log.info "SSH authorized keys configured"
+    else
+        rm -f /root/.ssh/authorized_keys
+    fi
+
+    # Set root password if provided
+    if [ -n "${SSH_PASSWORD}" ]; then
+        echo "root:${SSH_PASSWORD}" | chpasswd
+        bashio::log.info "SSH password configured"
+    fi
+
+    # Determine password auth based on whether a password was set
+    if [ -n "${SSH_PASSWORD}" ]; then
+        PASSWORD_AUTH="yes"
+    else
+        PASSWORD_AUTH="no"
+        bashio::log.warning "SSH password is not set; only key-based authentication will work"
+    fi
+
+    cat > /data/.ssh/sshd_config <<EOF
+Port ${SSH_PORT}
+ListenAddress 0.0.0.0
+HostKey /data/.ssh/ssh_host_rsa_key
+HostKey /data/.ssh/ssh_host_ed25519_key
+PermitRootLogin yes
+PasswordAuthentication ${PASSWORD_AUTH}
+PubkeyAuthentication yes
+PermitEmptyPasswords no
+KbdInteractiveAuthentication no
+UsePAM yes
+X11Forwarding no
+AllowTcpForwarding no
+PermitTunnel no
+GatewayPorts no
+PrintMotd no
+ForceCommand /usr/local/bin/opencode-session.sh
+EOF
+
+    chmod 600 /data/.ssh/sshd_config
+    bashio::log.info "SSH server configured on port ${SSH_PORT}"
+else
+    bashio::log.info "SSH server disabled"
+    rm -f /data/.ssh/sshd_config /root/.ssh/authorized_keys
+fi
+
+# ==============================================================================
 # Auto-configure zigporter CLI credentials
 # zigporter needs HA_URL + HA_TOKEN to talk to Home Assistant.
 # Inside the Supervisor environment, http://supervisor/core proxies to HA Core

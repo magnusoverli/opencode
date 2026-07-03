@@ -1,0 +1,55 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# OpenCode - SSH server service
+# Provides optional SSH access to the container (disabled by default).
+# ==============================================================================
+
+SSH_ENABLED=$(bashio::config 'ssh_enabled' 2>/dev/null || echo "false")
+SSH_PORT=2222
+
+if ! bashio::var.true "${SSH_ENABLED}"; then
+    bashio::log.info "SSH server disabled in configuration; service is idle."
+    exec sleep infinity
+fi
+
+bashio::log.info "Starting SSH server on port ${SSH_PORT}..."
+
+# Ensure persistent host key directory exists
+mkdir -p /data/.ssh
+chmod 700 /data/.ssh
+
+# Generate host keys if missing
+if [ ! -f /data/.ssh/ssh_host_rsa_key ]; then
+    bashio::log.info "Generating RSA host key..."
+    ssh-keygen -t rsa -b 4096 -f /data/.ssh/ssh_host_rsa_key -N '' -q
+fi
+
+if [ ! -f /data/.ssh/ssh_host_ed25519_key ]; then
+    bashio::log.info "Generating ED25519 host key..."
+    ssh-keygen -t ed25519 -f /data/.ssh/ssh_host_ed25519_key -N '' -q
+fi
+
+if [ ! -f /data/.ssh/sshd_config ]; then
+    bashio::log.error "SSH configuration missing; ensure init-opencode has run."
+    exec sleep infinity
+fi
+
+# Validate sshd_config before starting
+if ! /usr/sbin/sshd -t -f /data/.ssh/sshd_config >/dev/null 2>&1; then
+    bashio::log.error "SSH configuration test failed; check /data/.ssh/sshd_config"
+    exec sleep infinity
+fi
+
+HOST_PORT=$(bashio::addon.port "${SSH_PORT}" 2>/dev/null || true)
+
+if bashio::var.has_value "${HOST_PORT}"; then
+    bashio::log.info "Home Assistant port mapping: ${SSH_PORT}/tcp -> ${HOST_PORT}"
+    bashio::log.info "Connect with: ssh -p ${HOST_PORT} root@<home-assistant-host>"
+else
+    bashio::log.warning "Home Assistant port mapping for ${SSH_PORT}/tcp is disabled; SSH clients cannot connect yet."
+    bashio::log.info "Map ${SSH_PORT}/tcp in the add-on Network settings, then connect with: ssh -p <mapped-host-port> root@<home-assistant-host>"
+fi
+
+bashio::log.warning "SSH server is enabled. Use key-based auth when possible, choose a strong password otherwise, and never expose the SSH port to the internet."
+
+exec /usr/sbin/sshd -D -e -f /data/.ssh/sshd_config

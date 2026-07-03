@@ -75,3 +75,15 @@ configuration:
   opencode_config:
     name: "Custom OpenCode Configuration (JSON)"
     description: "Advanced: Paste a JSON object to customize OpenCode's own configuration (providers, keybindings, etc.). This is merged with the add-on's built-in config. Leave empty for defaults. See https://opencode.ai/docs/config for the full schema."
+
+  ssh_enabled:
+    name: "Enable SSH Server"
+    description: "Start an SSH server inside the add-on container. Disabled by default. When enabled, map 2222/tcp in the add-on Network settings to connect from an SSH client."
+
+  ssh_password:
+    name: "SSH Password"
+    description: "Optional password for root SSH login. Masked in the UI. If SSH authorized keys are set below, password authentication is disabled automatically."
+
+  ssh_authorized_keys:
+    name: "SSH Authorized Keys"
+    description: "Optional public SSH keys allowed to log in as root. Paste one or more public keys (one per line). When set, password authentication is disabled and only key-based login is allowed."

@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 2.3.0
+
+- **Optional SSH access** — added an opt-in SSH server so you can connect to the OpenCode container from SSH clients such as Termius on iOS. Configure from the add-on Configuration tab: enable the server, set an optional password, or paste authorized keys. The server listens on internal port `2222`; map it in the add-on Network settings to connect. When authorized keys are configured, password authentication is disabled automatically.
+
 ## 2.2.0
 
 - **Home Assistant native LLM readiness** — added a read-only `get_agent_capabilities` MCP tool and `ha://agent/capabilities` resource that report OpenCode's MCP surface, current HA version, and whether the running Home Assistant instance exposes the emerging native `llm` component. Documentation now explains the long-term plan: follow HA's LLM platform closely, prefer native capabilities when they become stable and accessible, and keep MCP for add-on/admin/dev/safety workflows.

@@ -16,6 +16,7 @@ OpenCode is an AI-powered coding agent that helps you edit and manage your Home 
 - **PPQ Private TEE Models (Beta)**: Optional encrypted proxy for PPQ private models running in remote TEEs. Included in stable releases, but still considered beta.
 - **Serial Device Access**: Optionally map selected host serial devices into the add-on for USB flashing and adapter inspection workflows
 - **Optional LAN Server Mode**: Attach from another computer on your local network using the OpenCode CLI
+- **Optional SSH Access**: Connect to the OpenCode container directly from SSH clients such as Termius on iOS (disabled by default)
 
 ## Configuration
 
@@ -52,6 +53,14 @@ Configure the app from the **Configuration** tab in the app page.
 | **Serial Devices** | `[]` | Optional list of host UART/serial devices to map into the add-on. Use this for workflows that need direct serial access, such as local USB flashing or adapter inspection. |
 | **Environment Variables** | `[]` | Define custom environment variables that are available to OpenCode and the terminal shell. Each entry has a `name` and `value`. Useful for provider credentials or configuration that must be set as environment variables (e.g. `AZURE_RESOURCE_NAME`, `OPENAI_API_KEY`). Changes take effect after restarting the add-on. Critical system variables (`HOME`, `PATH`, `SUPERVISOR_TOKEN`, etc.) cannot be overridden. |
 | **Custom OpenCode Configuration (JSON)** | `""` | Paste a JSON object to customize OpenCode's own configuration (providers, keybindings, etc.). This is merged with the add-on's built-in config. Leave empty for defaults. See [OpenCode config docs](https://opencode.ai/docs/config) for the full schema. |
+
+### SSH Access
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| **Enable SSH Server** | `false` | Start an SSH server inside the add-on container. When enabled, also map `2222/tcp` in the add-on Network settings. |
+| **SSH Password** | `""` | Optional password for root SSH login. Masked in the UI. If authorized keys are set, password authentication is disabled automatically. |
+| **SSH Authorized Keys** | `""` | Optional public SSH keys allowed to log in as root. Paste one or more keys, one per line. When set, only key-based authentication is allowed. |
 
 ### Resource Usage
 
@@ -151,6 +160,40 @@ opencode attach http://192.168.1.50:4096
 The add-on log shows the current Home Assistant port mapping when the server starts, for example `Home Assistant port mapping: 4096/tcp -> 3443`. If OpenCode also prints `opencode server listening on http://0.0.0.0:4096`, that is the internal container listener, not the URL to use from another computer. Use your Home Assistant host and the mapped host port instead.
 
 Security warning: enabling this service and mapping the port exposes an OpenCode server on your LAN. Only use this on trusted networks, restrict access with your network/firewall controls, and never expose the port to the internet or untrusted networks.
+
+### SSH Access
+
+SSH access lets you connect to the OpenCode container with any SSH client, such as [Termius](https://termius.com/) on iOS. This is useful when you want a native mobile terminal experience or prefer SSH over the Home Assistant web terminal.
+
+To enable SSH:
+
+1. In the add-on **Configuration** tab, set **Enable SSH Server** to `true`.
+2. Choose an authentication method:
+   - **Key-based (recommended)**: paste one or more public SSH keys into **SSH Authorized Keys**.
+   - **Password**: enter a strong password in **SSH Password**. Password authentication is automatically disabled when authorized keys are set.
+3. In the add-on **Network** settings, map `2222/tcp` to the host port you want to use.
+4. Save and restart the add-on.
+
+Connect from your SSH client:
+
+```bash
+ssh -p <mapped-host-port> root@<home-assistant-host>
+```
+
+Example, if you mapped `2222/tcp` to host port `2222`:
+
+```bash
+ssh -p 2222 root@192.168.1.50
+```
+
+Once connected, you are dropped into the same OpenCode session used by the web terminal. From there you can run `opencode`, use the helper commands (`ha-logs`, `hab`, etc.), or exit to a shell.
+
+Security notes:
+
+- SSH is **disabled by default** and does not start unless explicitly enabled.
+- When **SSH Authorized Keys** is set, password authentication is disabled automatically.
+- The SSH server is limited to terminal access: X11 forwarding, TCP forwarding, and tunnels are disabled.
+- Only map the SSH port on trusted networks. Never expose the SSH port to the internet or untrusted networks.
 
 ### Theme Previews
 

@@ -38,6 +38,7 @@ ENV NODE_ENV=production \
 # - git: Required by OpenCode for version control operations
 # - jq: JSON processing for helper scripts
 # - curl/ca-certificates: For downloading ttyd
+# - openssh-server: Optional SSH access to the container (disabled by default)
 # - procps: Provides pgrep for health check
 # - tmux: Session persistence to prevent multiple OpenCode instances
 # - chromium: Headless browser for screenshot_url MCP tool (visual verification)
@@ -53,6 +54,7 @@ RUN apt-get update \
         make \
         nodejs \
         npm \
+        openssh-server \
         procps \
         python3 \
         python3-venv \
@@ -107,6 +109,7 @@ RUN node /opt/openchamber/patch-ingress.js
 RUN chmod +x /usr/local/bin/* \
     && chmod +x /opt/openchamber/patch-ingress.js \
     && chmod +x /etc/s6-overlay/s6-rc.d/init-opencode/run \
+    && chmod +x /etc/s6-overlay/s6-rc.d/sshd/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-openchamber/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-server/run \

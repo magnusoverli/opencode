@@ -1,7 +1,7 @@
 ---
 name: "OpenCode"
 description: "AI coding agent for editing Home Assistant configuration with deep MCP integration and LSP support"
-version: "2.2.0"
+version: "2.3.0"
 slug: "ha_opencode"
 image: "ghcr.io/magnusoverli/ha_opencode"
 url: "https://github.com/magnusoverli/opencode"
@@ -19,8 +19,10 @@ panel_icon: mdi:robot
 panel_title: OpenCode
 ports:
   4096/tcp: null
+  2222/tcp: null
 ports_description:
   4096/tcp: "OpenCode LAN server"
+  2222/tcp: "SSH server"
 
 # File access - Home Assistant config directory
 map:
@@ -103,6 +105,13 @@ options:
   # Advanced: custom OpenCode configuration (JSON)
   opencode_config: ""
 
+  # SSH access (optional)
+  # Allows connecting to the OpenCode container with an SSH client.
+  # When ssh_authorized_keys is set, password auth is disabled automatically.
+  ssh_enabled: false
+  ssh_password: ""
+  ssh_authorized_keys: ""
+
 schema:
   # Feature toggles
   mcp_enabled: bool
@@ -149,6 +158,11 @@ schema:
   
   # Advanced
   opencode_config: str?
+
+  # SSH access
+  ssh_enabled: bool
+  ssh_password: password
+  ssh_authorized_keys: str?
 
 # Exclude caches from backups
 backup_exclude:
