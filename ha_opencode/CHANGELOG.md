@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 2.3.1
+
+- **Configuration UI polish** — options in the Configuration tab are now grouped and ordered by how you use them: interface mode first, then terminal appearance, Home Assistant integration, OpenCode runtime, Zigbee2MQTT/serial devices, PPQ private mode, LAN server, and advanced options last. Labels follow Home Assistant's sentence-case convention with consistent naming for toggles, and descriptions use one consistent style for quoting and punctuation. The previously undocumented Home Assistant access token option now has a proper entry in the documentation. No option keys or default values changed — existing configurations are unaffected.
+
 ## 2.3.0
 
 - **OpenChamber web UI** — new **Interface Mode** option (`terminal`/`openchamber`). The default `terminal` keeps the existing ttyd terminal unchanged; `openchamber` serves the OpenChamber web UI (pinned `@openchamber/web` 1.13.9) through Home Assistant Ingress on the same sidebar entry. OpenChamber binds to `127.0.0.1` inside the container behind a first-party ingress proxy, no LAN port is exposed, and Home Assistant Ingress provides the browser authentication layer. The bundle is patched at image build time so assets, API calls, SSE, and websockets resolve correctly under `/api/hassio_ingress/...`. Promoted from the beta channel after validation through beta 2.3.0b0–2.3.0b8.
