@@ -29,7 +29,18 @@
       "enabled": true,
       "timeout": 10000,
       "environment": {
-        "SUPERVISOR_TOKEN": "{env:SUPERVISOR_TOKEN}"
+        "SUPERVISOR_TOKEN": "{env:SUPERVISOR_TOKEN}",
+        "HA_NATIVE_MCP_API_ID": "assist"
+      }
+    },
+    "homeassistant_native": {
+      "type": "local",
+      "command": ["node", "/opt/ha-mcp-server/ha-native-mcp-proxy.js", "assist"],
+      "enabled": false,
+      "timeout": 10000,
+      "environment": {
+        "SUPERVISOR_TOKEN": "{env:SUPERVISOR_TOKEN}",
+        "HA_NATIVE_MCP_API_ID": "assist"
       }
     }
   },

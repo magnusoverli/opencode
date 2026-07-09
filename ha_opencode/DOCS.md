@@ -66,7 +66,7 @@ If OpenChamber misbehaves (for example after an update), switch **Interface mode
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| **Enable MCP integration** | `true` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 35 tools, 14 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
+| **Enable MCP integration** | `true` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 37 tools, 14 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
 | **Enable LSP integration** | `true` | Enable the Language Server Protocol (LSP) server for intelligent YAML editing. Provides entity/service autocomplete, hover documentation, diagnostics for unknown entities, and go-to-definition for !include tags. |
 | **Enable screenshot tool** | `false` | Enable visual verification of dashboards and UI pages. Uses headless Chromium to capture screenshots that vision-capable AI models can analyze. Requires the access token below. See [Visual Verification](#visual-verification-screenshots). |
 | **Home Assistant access token** | `""` | A long-lived access token for direct communication with Home Assistant Core. Required for ESPHome integration and the screenshot tool. Create one in the Home Assistant UI under Profile → Long-lived access tokens. |
@@ -388,12 +388,16 @@ OpenCode's MCP server remains the complete working agent surface for this add-on
 
 ### Home Assistant Native LLM Readiness
 
-The current Home Assistant native LLM work is primarily an internal platform for Home Assistant integrations and custom integrations. It lets integrations expose an `<integration>/llm.py` file with an `async_get_tools(hass, llm_context)` hook. At the time of this add-on release, that platform is not a public external API that an add-on container can register with directly.
+The current Home Assistant native LLM work is primarily an internal platform for Home Assistant integrations and custom integrations. It lets integrations expose an `<integration>/llm.py` file with an `async_get_tools(hass, llm_context, api_id) -> llm.LLMTools | None` hook. At the time of this add-on release, that platform is not a public external API that an add-on container can register with directly.
 
 OpenCode supports the transition now by:
 
 - Detecting whether the running Home Assistant instance reports the native `llm` component.
+- Probing native MCP endpoints such as `/api/mcp/<API ID>` when available.
+- Testing an opt-in native MCP bridge first in the beta channel before stable exposure.
 - Exposing this status through the `get_agent_capabilities` MCP tool and the `ha://agent/capabilities` resource.
+- Providing `get_home_context` for compact area/domain/entity understanding without dumping every state.
+- Providing `get_ha_llm_development_guide` for custom integration authors building native `<integration>/llm.py` providers.
 - Keeping all existing MCP, LSP, `hab`, screenshot, ESPHome, update, and Zigbee functionality active while HA's native platform matures.
 - Providing a strong environment for custom integration authors to edit and test future `<custom_component>/llm.py` providers.
 
@@ -408,7 +412,7 @@ Long-term plan:
 
 | Capability | Count | Description |
 |------------|-------|-------------|
-| **Tools** | 35 | Actions, queries, config validation, HA-native LLM readiness, device management, screenshots, and hab CLI |
+| **Tools** | 37 | Actions, queries, compact home context, config validation, HA-native LLM readiness, device management, screenshots, and hab CLI |
 | **Resources** | 10 + 4 templates | Browsable data exposed to the AI |
 | **Prompts** | 6 | Pre-built guided workflows for common tasks |
 | **Intelligence** | Built-in | Anomaly detection, suggestions, semantic search |
@@ -439,7 +443,7 @@ Then restart OpenCode (exit and run `opencode` again).
 
 ---
 
-## MCP Tools (35 Available)
+## MCP Tools (37 Available)
 
 ### State Management
 
@@ -448,6 +452,7 @@ Then restart OpenCode (exit and run `opencode` again).
 | `get_states` | Get entity states (all, by domain, or specific). Supports semantic summaries. |
 | `search_entities` | Semantic search - find entities by natural language ("bedroom lights", "motion sensors") |
 | `get_entity_details` | Deep dive into an entity including device/area relationships |
+| `get_home_context` | Compact area/domain/entity-filtered context with registry-derived area and device metadata |
 
 ### Service Calls
 
@@ -469,7 +474,8 @@ Then restart OpenCode (exit and run `opencode` again).
 | Tool | Description |
 |------|-------------|
 | `get_config` | Get HA configuration (location, units, version, components) |
-| `get_agent_capabilities` | Report OpenCode MCP capabilities and whether the running HA instance exposes the native `llm` component |
+| `get_agent_capabilities` | Report OpenCode MCP capabilities, native `llm` readiness, native MCP endpoint status, and likely native AI provider components |
+| `get_ha_llm_development_guide` | Show upstream references, checklist, and starter template for native `<integration>/llm.py` providers |
 | `get_areas` | List all defined areas with IDs and names |
 | `get_devices` | List devices, optionally filtered by area |
 | `validate_config` | Validate configuration files before restarting |

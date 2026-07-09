@@ -17,7 +17,7 @@ const TOOL_HIGHLIGHTS = [
 
 const ROADMAP_NOW = [
   "Use OpenCode MCP as the primary external agent surface for Home Assistant configuration, diagnostics, admin workflows, and visual verification.",
-  "Detect whether the running Home Assistant instance exposes the native llm component.",
+  "Detect whether the running Home Assistant instance exposes the native llm component and native MCP endpoints.",
   "Help users and custom integration authors develop and test <integration>/llm.py tool providers from inside OpenCode.",
 ];
 
@@ -29,8 +29,20 @@ const ROADMAP_NEXT = [
   "Evaluate a companion custom integration or public API bridge if Home Assistant does not expose native LLM tools directly to add-ons.",
 ];
 
+const KNOWN_NATIVE_AI_COMPONENTS = [
+  "anthropic",
+  "google_generative_ai_conversation",
+  "llama_cpp",
+  "litellm",
+  "lmstudio",
+  "ollama",
+  "open_router",
+  "openai_conversation",
+];
+
 export function buildAgentCapabilities({
   haConfig = {},
+  nativeMcp = {},
   tools = [],
   resources = [],
   resourceTemplates = [],
@@ -38,6 +50,19 @@ export function buildAgentCapabilities({
 } = {}) {
   const components = Array.isArray(haConfig.components) ? haConfig.components : [];
   const nativeLlmDetected = components.includes("llm");
+  const nativeConfiguredMcp = nativeMcp.configured || nativeMcp.assist || null;
+  const nativeConfiguredMcpAvailable = nativeConfiguredMcp?.available === true;
+  const nativeConfiguredMcpStatus = nativeConfiguredMcp?.status || "not_checked";
+  const configuredApiId = nativeMcp.configured_api_id !== undefined
+    ? nativeMcp.configured_api_id
+    : nativeConfiguredMcp?.api_id ?? "assist";
+  const configuredEndpointMode = nativeMcp.configured_endpoint_mode || (configuredApiId ? "keyed_api" : "configured_api");
+  const nativeAssistMcpStatus = nativeMcp.assist?.status || "not_checked";
+  const nativeBaseMcpStatus = nativeMcp.base?.status || "not_checked";
+  const loadedNativeAiComponents = KNOWN_NATIVE_AI_COMPONENTS.filter((component) => components.includes(component));
+  const recommendedMode = nativeConfiguredMcpAvailable
+    ? "hybrid_native_llm_api_plus_opencode_mcp"
+    : "opencode_mcp_only";
 
   return {
     surface: {
@@ -56,8 +81,45 @@ export function buildAgentCapabilities({
           : "This Home Assistant instance does not report the native llm integration yet.",
       },
       external_native_llm_api: {
-        available_to_addons: false,
-        note: "Home Assistant's initial llm work is an internal integration platform for HA integrations/custom integrations, not an external add-on API.",
+        available_to_addons: nativeConfiguredMcpAvailable,
+        configured_api_id: configuredApiId || null,
+        configured_endpoint_mode: configuredEndpointMode,
+        note: nativeConfiguredMcpAvailable
+          ? "Home Assistant's native LLM API is reachable through the configured native MCP endpoint. Use it for Assist/entity-control behavior where appropriate and keep OpenCode MCP for add-on/admin/dev workflows."
+          : "Home Assistant's native llm platform may be internal-only or unavailable on this instance. Keep using OpenCode MCP as the working external agent surface.",
+      },
+      native_mcp: {
+        upstream: nativeMcp.upstream || {
+          llm_docs_pr: "home-assistant/developers.home-assistant#3236",
+          keyed_endpoint_pr: "home-assistant/core#175570",
+          endpoint_pattern: "/api/mcp/<API ID>",
+          configured_endpoint: "/api/mcp",
+          assist_api_id: "assist",
+        },
+        status: nativeConfiguredMcpAvailable
+          ? "configured_api_available"
+          : nativeLlmDetected
+            ? "llm_detected_native_mcp_unavailable"
+            : "not_available",
+        recommended_mode: recommendedMode,
+        configured_api_id: configuredApiId || null,
+        configured_endpoint_mode: configuredEndpointMode,
+        base_endpoint_status: nativeBaseMcpStatus,
+        configured_endpoint_status: nativeConfiguredMcpStatus,
+        assist_endpoint_status: nativeAssistMcpStatus,
+        base_endpoint: nativeMcp.base || null,
+        configured_endpoint: nativeConfiguredMcp,
+        assist_endpoint: nativeMcp.assist || null,
+        guidance: nativeConfiguredMcpAvailable
+          ? "Prefer the configured Home Assistant native MCP API for curated native LLM tools. Prefer OpenCode MCP for configuration editing, validation, diagnostics, screenshots, updates, ESPHome, Zigbee, add-on development, and other admin/dev workflows."
+          : "Native Home Assistant MCP is not available yet; use OpenCode MCP for all Home Assistant work and check again after upgrading Home Assistant.",
+      },
+      native_ai_components: {
+        known_components_checked: KNOWN_NATIVE_AI_COMPONENTS,
+        loaded: loadedNativeAiComponents,
+        meaning: loadedNativeAiComponents.length > 0
+          ? "This Home Assistant instance reports one or more native AI/conversation provider components as loaded."
+          : "No known native AI/conversation provider components were found in the loaded component list.",
       },
     },
     mcp: {

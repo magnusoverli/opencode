@@ -25,7 +25,7 @@
  * - HA Alerts feed integration (global integration issue awareness)
  * - Visual verification via headless Chromium screenshots
  * 
- * TOOLS (35):
+ * TOOLS (37):
  * - Entity state management (get, search, history)
  * - Service calls with intelligent targeting
  * - Configuration validation and safe writing
@@ -86,6 +86,12 @@ import {
   truncateText,
 } from "./lib/helpers.js";
 import { buildAgentCapabilities } from "./lib/agent-capabilities.js";
+import { buildHaLlmDevelopmentGuide } from "./lib/ha-llm-development.js";
+import {
+  NATIVE_MCP_ASSIST_API_ID,
+  normalizeNativeMcpApiId,
+  probeNativeMcpEndpoint,
+} from "./lib/ha-native-mcp.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -94,6 +100,10 @@ const SUPERVISOR_API = "http://supervisor/core/api";
 const HA_CONFIG_DIR = "/homeassistant";
 const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
 const HA_ACCESS_TOKEN = process.env.HA_ACCESS_TOKEN;   // Long-lived token for direct HA Core calls
+const HA_NATIVE_MCP_API_ID = normalizeNativeMcpApiId(
+  process.env.HA_NATIVE_MCP_API_ID ?? NATIVE_MCP_ASSIST_API_ID,
+  { allowBaseEndpoint: true }
+);
 
 // Clear error message when ESPHome tools are used without an access token
 const ESPHOME_TOKEN_ERROR = "ESPHome tools require a Long-Lived Access Token.\n\n" +
@@ -171,6 +181,7 @@ function sendLog(level, logger, data) {
 const API_TIMEOUT_MS = 30000;
 const CHECK_CONFIG_TIMEOUT_MS = 120000;
 const UPDATE_TIMEOUT_MS = 600000;
+const NATIVE_MCP_PROBE_TIMEOUT_MS = 5000;
 
 /**
  * Call Home Assistant via Supervisor API proxy
@@ -1659,6 +1670,105 @@ async function getRegistry(commandType) {
   return data;
 }
 
+function normalizeForMatch(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function buildHomeContext(args = {}) {
+  const requestedLimit = Number.isFinite(args?.limit) ? args.limit : HOME_CONTEXT_RESULT_CAP;
+  const limit = Math.max(1, Math.min(requestedLimit, HOME_CONTEXT_RESULT_CAP));
+  const requestedArea = normalizeForMatch(args?.area);
+  const requestedDomain = normalizeForMatch(args?.domain);
+  const requestedEntity = normalizeForMatch(args?.entity_id);
+
+  const [states, areas, devices, entityRegistry] = await Promise.all([
+    getCachedStates(),
+    getRegistry("config/area_registry/list"),
+    getRegistry("config/device_registry/list"),
+    getRegistry("config/entity_registry/list"),
+  ]);
+
+  const areasById = new Map(areas.map((area) => [area.area_id, area]));
+  const devicesById = new Map(devices.map((device) => [device.id, device]));
+  const entitiesById = new Map(entityRegistry.map((entity) => [entity.entity_id, entity]));
+  const matchedAreaIds = new Set();
+
+  if (requestedArea) {
+    for (const area of areas) {
+      const names = [area.area_id, area.name, ...(area.aliases || [])].map(normalizeForMatch);
+      if (names.some((name) => name === requestedArea || name.includes(requestedArea))) {
+        matchedAreaIds.add(area.area_id);
+      }
+    }
+  }
+
+  let entities = states.map((state) => {
+    const registryEntry = entitiesById.get(state.entity_id) || {};
+    const device = registryEntry.device_id ? devicesById.get(registryEntry.device_id) : null;
+    const areaId = registryEntry.area_id || device?.area_id || null;
+    const area = areaId ? areasById.get(areaId) : null;
+    const [domain] = state.entity_id.split(".");
+
+    return {
+      entity_id: state.entity_id,
+      name: state.attributes?.friendly_name || registryEntry.name || registryEntry.original_name || state.entity_id,
+      domain,
+      state: state.state,
+      area_id: areaId,
+      area: area?.name || null,
+      device_id: registryEntry.device_id || null,
+      device: device?.name_by_user || device?.name || null,
+      device_class: state.attributes?.device_class || null,
+      unit_of_measurement: state.attributes?.unit_of_measurement || null,
+      last_changed: state.last_changed,
+    };
+  });
+
+  if (requestedEntity) {
+    entities = entities.filter((entity) => normalizeForMatch(entity.entity_id) === requestedEntity);
+  }
+  if (requestedDomain) {
+    entities = entities.filter((entity) => entity.domain === requestedDomain);
+  }
+  if (requestedArea) {
+    entities = entities.filter((entity) => entity.area_id && matchedAreaIds.has(entity.area_id));
+  }
+  if (!args?.include_unavailable && !requestedEntity) {
+    entities = entities.filter((entity) => !["unknown", "unavailable"].includes(entity.state));
+  }
+
+  entities.sort((a, b) => {
+    const areaCompare = String(a.area || "").localeCompare(String(b.area || ""));
+    if (areaCompare !== 0) return areaCompare;
+    return a.entity_id.localeCompare(b.entity_id);
+  });
+
+  const domainCounts = {};
+  for (const entity of entities) {
+    domainCounts[entity.domain] = (domainCounts[entity.domain] || 0) + 1;
+  }
+
+  const returned = entities.slice(0, limit);
+  return {
+    summary: `Returned ${returned.length} of ${entities.length} matching entities`,
+    filters: {
+      area: args?.area || null,
+      domain: args?.domain || null,
+      entity_id: args?.entity_id || null,
+      include_unavailable: args?.include_unavailable === true,
+      limit,
+    },
+    matched_areas: requestedArea
+      ? [...matchedAreaIds].map((areaId) => ({ area_id: areaId, name: areasById.get(areaId)?.name || areaId }))
+      : [],
+    domain_counts: domainCounts,
+    total_matches: entities.length,
+    returned: returned.length,
+    truncated: entities.length > returned.length,
+    entities: returned,
+  };
+}
+
 /**
  * Get the best available deprecation patterns.
  * Tries remote (GitHub) first, falls back to local bundled patterns.
@@ -1871,6 +1981,7 @@ const EMPTY_INPUT_SCHEMA = Object.freeze({
 });
 
 const STATE_RESULT_CAP = 500;
+const HOME_CONTEXT_RESULT_CAP = 80;
 const HISTORY_RESULT_CAP = 200;
 const LOGBOOK_RESULT_CAP = 200;
 const DOCS_MAX_CHARS = 12000;
@@ -1972,6 +2083,43 @@ const TOOLS = [
       additionalProperties: false,
     },
     outputSchema: SCHEMAS.entityDetails,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_home_context",
+    title: "Get Home Context",
+    description: "Get a compact, area/domain/entity-filtered view of Home Assistant entities with area and device context. Prefer this over broad get_states dumps when you need to understand a room, device class, or focused slice of the home.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        area: {
+          type: "string",
+          description: "Area name, alias, or area ID to focus on, for example 'Kitchen' or 'living_room'.",
+        },
+        domain: {
+          type: "string",
+          description: "Entity domain to focus on, for example 'light', 'sensor', 'climate', or 'binary_sensor'.",
+        },
+        entity_id: {
+          type: "string",
+          description: "Specific entity ID to return with registry-derived area/device context.",
+        },
+        include_unavailable: {
+          type: "boolean",
+          description: "Include entities whose state is unknown or unavailable. Defaults to false unless entity_id is provided.",
+        },
+        limit: {
+          type: "number",
+          description: `Maximum entities to return, capped at ${HOME_CONTEXT_RESULT_CAP}. Defaults to ${HOME_CONTEXT_RESULT_CAP}.`,
+          minimum: 1,
+          maximum: HOME_CONTEXT_RESULT_CAP,
+        },
+      },
+      additionalProperties: false,
+    },
     annotations: {
       readOnly: true,
       idempotent: true,
@@ -2122,8 +2270,31 @@ const TOOLS = [
   {
     name: "get_agent_capabilities",
     title: "Get Agent Capability Status",
-    description: "Summarize OpenCode's current Home Assistant agent capabilities and detect whether the running Home Assistant instance exposes the native llm component. Use this when deciding how to combine OpenCode MCP tools with Home Assistant's emerging native LLM platform.",
+    description: "Summarize OpenCode's current Home Assistant agent capabilities and detect whether the running Home Assistant instance exposes the native llm component and native MCP endpoints such as /api/mcp/<API ID>. Use this when deciding how to combine OpenCode MCP tools with Home Assistant's emerging native LLM platform.",
     inputSchema: EMPTY_INPUT_SCHEMA,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_ha_llm_development_guide",
+    title: "Get HA Native LLM Development Guide",
+    description: "Return a concise guide and starter template for building Home Assistant native <integration>/llm.py tool providers. Use when helping users develop or review custom integrations for HA's native LLM platform.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        integration_domain: {
+          type: "string",
+          description: "Integration domain to use in the starter template, for example 'my_integration'.",
+        },
+        tool_class: {
+          type: "string",
+          description: "Python class name for the example tool. Defaults to ExampleStatusTool.",
+        },
+      },
+      additionalProperties: false,
+    },
     annotations: {
       readOnly: true,
       idempotent: true,
@@ -2858,14 +3029,59 @@ const PROMPTS = [
 ];
 
 async function getAgentCapabilities() {
-  const config = await callHA("/config");
+  const [config, nativeMcp] = await Promise.all([
+    callHA("/config"),
+    probeNativeHaMcpReadiness(),
+  ]);
   return buildAgentCapabilities({
     haConfig: config,
+    nativeMcp,
     tools: TOOLS,
     resources: RESOURCES,
     resourceTemplates: RESOURCE_TEMPLATES,
     prompts: PROMPTS,
   });
+}
+
+async function probeNativeHaMcpReadiness() {
+  const baseProbe = probeNativeMcpEndpoint({
+    supervisorToken: SUPERVISOR_TOKEN,
+    baseUrl: SUPERVISOR_API,
+    timeoutMs: NATIVE_MCP_PROBE_TIMEOUT_MS,
+  });
+  const configuredProbe = HA_NATIVE_MCP_API_ID
+    ? probeNativeMcpEndpoint({
+      supervisorToken: SUPERVISOR_TOKEN,
+      baseUrl: SUPERVISOR_API,
+      apiId: HA_NATIVE_MCP_API_ID,
+      timeoutMs: NATIVE_MCP_PROBE_TIMEOUT_MS,
+    })
+    : baseProbe;
+  const assistProbe = HA_NATIVE_MCP_API_ID === NATIVE_MCP_ASSIST_API_ID
+    ? configuredProbe
+    : probeNativeMcpEndpoint({
+      supervisorToken: SUPERVISOR_TOKEN,
+      baseUrl: SUPERVISOR_API,
+      apiId: NATIVE_MCP_ASSIST_API_ID,
+      timeoutMs: NATIVE_MCP_PROBE_TIMEOUT_MS,
+    });
+
+  const [base, configured, assist] = await Promise.all([baseProbe, configuredProbe, assistProbe]);
+
+  return {
+    upstream: {
+      llm_docs_pr: "home-assistant/developers.home-assistant#3236",
+      keyed_endpoint_pr: "home-assistant/core#175570",
+      endpoint_pattern: "/api/mcp/<API ID>",
+      configured_endpoint: "/api/mcp",
+      assist_api_id: NATIVE_MCP_ASSIST_API_ID,
+    },
+    configured_api_id: HA_NATIVE_MCP_API_ID,
+    configured_endpoint_mode: HA_NATIVE_MCP_API_ID ? "keyed_api" : "configured_api",
+    base,
+    configured,
+    assist,
+  };
 }
 
 function createCompactJsonContent(summary, data, meta = {}, options = {}) {
@@ -3034,6 +3250,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
       }
 
+      case "get_home_context": {
+        const context = await buildHomeContext(args || {});
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            context.summary,
+            {
+              filters: context.filters,
+              matched_areas: context.matched_areas,
+              domain_counts: context.domain_counts,
+              entities: context.entities,
+            },
+            {
+              total_matches: context.total_matches,
+              returned: context.returned,
+              truncated: context.truncated,
+            },
+            { audience: ["assistant"], priority: 0.85 }
+          )],
+        });
+      }
+
       // === SERVICE CALLS ===
       case "call_service": {
         const { domain, service, target, data } = args;
@@ -3157,6 +3394,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const capabilities = await getAgentCapabilities();
         return makeCompatibleResponse({
           content: [createTextContent(JSON.stringify(capabilities, null, 2), { audience: ["assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "get_ha_llm_development_guide": {
+        return makeCompatibleResponse({
+          content: [createTextContent(buildHaLlmDevelopmentGuide(args || {}), { audience: ["assistant"], priority: 0.85 })],
         });
       }
 

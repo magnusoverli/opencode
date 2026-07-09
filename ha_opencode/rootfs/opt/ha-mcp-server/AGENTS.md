@@ -69,12 +69,14 @@ Real-time interaction with the running Home Assistant instance:
 - Report OpenCode/HA agent capability status with `get_agent_capabilities`
 
 ### Native Home Assistant LLM Platform
-Home Assistant is developing a native `llm` integration where Core integrations and custom integrations can expose curated Assist tools through `<integration>/llm.py`. This is complementary to OpenCode MCP, not a replacement.
+Home Assistant is developing a native `llm` integration where Core integrations and custom integrations can expose curated tools through `<integration>/llm.py` and registered LLM APIs. New Home Assistant builds may also expose those APIs over native MCP endpoints such as `/api/mcp/<API ID>`; the built-in Assist API uses `/api/mcp/assist`. This is complementary to OpenCode MCP, not a replacement.
 
-- Use native HA LLM behavior when the user is explicitly testing Assist or an integration's `llm.py` support.
-- Use OpenCode MCP for configuration editing, safe writes, validation, admin/dev workflows, screenshots, updates, ESPHome, `hab`, and Zigbee tasks.
-- Use `get_agent_capabilities` or `ha://agent/capabilities` to check whether the running HA instance reports the native `llm` component.
-- Do not assume this add-on can register tools directly with HA's native `llm` platform; the initial HA platform is internal to HA integrations/custom integrations.
+- If the optional `homeassistant_native` MCP server is available, prefer it for requests that fit the configured native Home Assistant LLM API because those tools are curated by Home Assistant.
+- Use OpenCode MCP for configuration editing, safe writes, validation, admin/dev workflows, screenshots, updates, ESPHome, `hab`, Zigbee tasks, add-on development, and Home Assistant documentation lookup.
+- Use `get_agent_capabilities` or `ha://agent/capabilities` to check whether the running HA instance reports the native `llm` component and native MCP endpoints.
+- Use `get_home_context` for compact area/domain/entity understanding before broad state dumps.
+- Use `get_ha_llm_development_guide` when helping develop or review a custom integration's native `<integration>/llm.py` provider.
+- Do not assume this add-on can register tools directly with HA's native `llm` platform; native tool registration is internal to HA integrations/custom integrations. The add-on can consume configured native LLM APIs through native MCP when Home Assistant exposes them.
 
 ### 3. hab CLI (Home Assistant Builder)
 A CLI tool designed for AI agents to manage Home Assistant. Run `hab` commands via the terminal:
@@ -523,7 +525,7 @@ Read and modify YAML files to understand and change Home Assistant's defined beh
 
 ### MCP Tools (When Available)
 Query and interact with the running Home Assistant instance:
-- `get_states`, `search_entities` - Current entity states
+- `get_states`, `search_entities`, `get_home_context` - Current entity states and compact area/domain/entity context
 - `call_service` - Control devices (with confirmation)
 - `get_history`, `get_logbook` - Historical data
 - `get_devices`, `get_areas` - Device and area registry info
@@ -531,7 +533,8 @@ Query and interact with the running Home Assistant instance:
 - `validate_config` - Check configuration validity
 - `get_error_log` - System errors and warnings
 - `diagnose_entity` - Comprehensive entity troubleshooting
-- `get_agent_capabilities` - OpenCode MCP capabilities and native HA `llm` readiness
+- `get_agent_capabilities` - OpenCode MCP capabilities and native HA `llm` / MCP readiness
+- `get_ha_llm_development_guide` - Upstream references and starter template for native `<integration>/llm.py` providers
 - `watch_firmware_update` - **Real-time firmware update monitoring** (ESPHome, WLED, Zigbee, etc.)
 - `get_available_updates`, `update_component` - System update management
 - `screenshot_url` - **Visual verification** of dashboards and UI pages (requires `screenshot_enabled` option)
@@ -542,11 +545,12 @@ Query and interact with the running Home Assistant instance:
 |------|---------------------|-----------|---------|---------------|
 | Create/edit automations | Primary | **Write with `write_config_safe`** | `hab automation create` | N/A |
 | Understand automation logic | Read YAML | Check state with `get_states` | `hab automation get` | N/A |
-| Check current device state | Reference only | Primary | `hab entity get` | N/A |
+| Check current device state | Reference only | Primary (`get_home_context` for focused context) | `hab entity get` | N/A |
 | Control devices | N/A | `call_service` | `hab action call` | N/A |
 | Add new integrations | Primary | N/A | N/A | N/A |
 | Troubleshoot issues | Review configs | `diagnose_entity`, `get_error_log` | `hab system health` | N/A |
 | Check agent/LLM readiness | N/A | `get_agent_capabilities` | N/A | N/A |
+| Develop native HA LLM tools | `custom_components/*/llm.py` | `get_ha_llm_development_guide` | N/A | N/A |
 | Find entities | Grep YAML files | `search_entities` | `hab entity list --domain` | N/A |
 | View history | N/A | `get_history` | N/A | N/A |
 | **Manage dashboards** | Edit YAML | N/A | **`hab dashboard` (primary)** | N/A |

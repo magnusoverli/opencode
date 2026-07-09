@@ -7,6 +7,9 @@ This is the **beta channel** for the OpenCode add-on. It contains experimental f
 ## Current Beta Changes
 
 - **OpenChamber interface mode**: New experimental `openchamber` interface mode starts the OpenChamber web UI behind Home Assistant Ingress, while the default `terminal` mode keeps the existing ttyd terminal unchanged.
+- **Native Home Assistant MCP bridge**: Optional bridge from OpenCode to Home Assistant Core's native LLM MCP endpoint (`/api/mcp/<API ID>`, default `assist`) for testing the new native LLM/MCP platform when the running Home Assistant version supports it.
+- **Compact Home Assistant context**: New `get_home_context` MCP tool gives agents focused area/domain/entity context with area and device metadata instead of broad state dumps.
+- **Native LLM provider development guide**: New `get_ha_llm_development_guide` MCP tool helps custom integration authors build `<integration>/llm.py` tool providers aligned with Home Assistant's upstream architecture.
 - **Serial device access**: Selected host UART/serial devices can be mapped into the add-on for USB flashing and adapter inspection workflows. Full Supervisor `uart` and `udev` manifest flags remain disabled by default because they are static permissions, not runtime user options.
 - **Optional LAN server mode**: You can now enable an OpenCode server bound to `0.0.0.0` so other computers on your local network can connect directly.
 - **LAN server CORS origins**: The LAN server can now allow-list specific browser origins (`--cors`), so browser-based OpenCode clients — not just the CLI — can connect to it directly. See [LAN Server Mode (Beta)](#lan-server-mode-beta) below.
@@ -30,6 +33,21 @@ OpenCode snapshots are disabled by default in this add-on to reduce memory and d
 By default, **OpenCode Update Policy** is set to `latest`. The add-on installs or updates OpenCode in `/data/.npm-global` and uses that persistent install before the image-bundled fallback. Set the policy to `bundled` to use only the OpenCode version included in the add-on image and disable OpenCode self-update.
 
 For x64 VM installs, make sure the guest can see AVX2 when the host supports it. Generic QEMU/KVM CPU models can hide AVX2 and force OpenCode's baseline binary.
+
+## Native Home Assistant MCP Bridge (Beta)
+
+Home Assistant is adding a native `llm` integration and native MCP endpoints for registered LLM APIs. PR [home-assistant/developers.home-assistant#3236](https://github.com/home-assistant/developers.home-assistant/pull/3236) documents the contract: every registered LLM API is exposed at `/api/mcp/<API ID>` once Home Assistant's MCP Server integration is set up. The built-in Assist API uses the API ID `assist`.
+
+When **Enable native Home Assistant MCP bridge** is on, the add-on adds a second OpenCode MCP server named `homeassistant_native` that forwards requests to the configured Home Assistant Core native endpoint through the Supervisor proxy. **Native Home Assistant MCP API ID** defaults to `assist`, which targets `/api/mcp/assist`. Set it to a custom API ID to test `/api/mcp/<your API ID>` for custom APIs registered inside Home Assistant. Leave it empty to target Home Assistant's configured `/api/mcp` endpoint instead.
+
+Access model from Home Assistant Core: `/api/mcp` serves the API selected in the MCP Server integration and does not require admin access. `/api/mcp/<API ID>` selects a specific registered LLM API by ID and requires admin access except for the built-in Assist API.
+
+Use this only with a Home Assistant version that includes the native keyed MCP endpoint. If the endpoint is not available yet, `get_agent_capabilities` will report the current status and OpenCode's regular `homeassistant` MCP server remains the supported tool surface.
+
+The two MCP servers are intentionally separate:
+
+- `homeassistant_native`: Home Assistant's curated native LLM API tools from the configured `/api/mcp/<API ID>` endpoint when available.
+- `homeassistant`: OpenCode's add-on tools for configuration editing, validation, diagnostics, screenshots, updates, ESPHome, Zigbee, add-on development, and documentation lookup.
 
 ## Interface Mode (Beta)
 

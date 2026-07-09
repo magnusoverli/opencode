@@ -63,6 +63,10 @@ options:
 
   # Home Assistant integration
   mcp_enabled: true
+  # Optional bridge to Home Assistant Core's native /api/mcp/<API ID> endpoint.
+  # Requires a Home Assistant version that includes the native MCP keyed endpoint.
+  native_ha_mcp_enabled: false
+  native_ha_mcp_api_id: "assist"
   lsp_enabled: true
   # Screenshot tool: visual verification of dashboards and UI changes.
   # Requires the access token below to authenticate with the HA frontend.
@@ -121,6 +125,8 @@ schema:
 
   # Home Assistant integration
   mcp_enabled: bool
+  native_ha_mcp_enabled: bool
+  native_ha_mcp_api_id: str?
   lsp_enabled: bool
   screenshot_enabled: bool
   access_token: password

@@ -18,6 +18,8 @@ CPU_MODE_CONFIG=$(bashio::config 'cpu_mode' || echo "auto")
 OPENCODE_UPDATE_POLICY=$(bashio::config 'opencode_update_policy' || echo "latest")
 INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
 MCP_ENABLED=$(bashio::config 'mcp_enabled')
+NATIVE_HA_MCP_ENABLED=$(bashio::config 'native_ha_mcp_enabled' 2>/dev/null || echo "false")
+NATIVE_HA_MCP_API_ID=$(bashio::config 'native_ha_mcp_api_id' 2>/dev/null || echo "assist")
 LSP_ENABLED=$(bashio::config 'lsp_enabled' || echo "true")
 SCREENSHOT_ENABLED=$(bashio::config 'screenshot_enabled' || echo "false")
 ADDON_ACCESS_ENABLED=$(bashio::config 'addon_access_enabled' || echo "false")
@@ -25,6 +27,10 @@ PPQ_PRIVATE_ENABLED=$(bashio::config 'ppq_private_enabled' || echo "false")
 
 ACCESS_TOKEN=$(bashio::config 'access_token' || echo "")
 PPQ_API_KEY=$(bashio::config 'ppq_api_key' || echo "")
+
+if [ "${NATIVE_HA_MCP_API_ID}" = "null" ]; then
+    NATIVE_HA_MCP_API_ID=""
+fi
 
 case "${OPENCODE_UPDATE_POLICY}" in
     latest|bundled)
@@ -35,7 +41,7 @@ case "${OPENCODE_UPDATE_POLICY}" in
         ;;
 esac
 
-bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY}"
+bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY}"
 
 # Set up persistent HOME and npm global prefix for OpenCode runtime updates.
 export HOME="/data"
@@ -71,7 +77,7 @@ OPTIONS_FILE="/data/options.json"
 ENV_VARS_COUNT=$(jq -r '.env_vars // [] | length' "${OPTIONS_FILE}")
 
 # Reserved names that would break the add-on if overridden
-ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_UPDATE_POLICY","SHELL","USER","PWD"'
+ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_UPDATE_POLICY","SHELL","USER","PWD"'
 
 if [ "${ENV_VARS_COUNT}" -gt 0 ]; then
     bashio::log.info "Processing ${ENV_VARS_COUNT} user-defined environment variable(s)..."
@@ -621,11 +627,16 @@ fi
 # ==============================================================================
 
 MCP_BOOL=$([ "${MCP_ENABLED}" = "true" ] && echo "true" || echo "false")
+NATIVE_HA_MCP_BOOL=$([ "${NATIVE_HA_MCP_ENABLED}" = "true" ] && echo "true" || echo "false")
 LSP_DISABLED=$([ "${LSP_ENABLED}" = "true" ] && echo "false" || echo "true")
 PPQ_PROVIDER_ENABLED=$([ "${PPQ_PRIVATE_ENABLED}" = "true" ] && [ "${PPQ_API_KEY_CONFIGURED}" = "true" ] && echo "true" || echo "false")
 
-jq --argjson mcp "${MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" '
+jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" '
     .mcp.homeassistant.enabled = $mcp |
+    .mcp.homeassistant.environment.HA_NATIVE_MCP_API_ID = $native_ha_mcp_api_id |
+    .mcp.homeassistant_native.enabled = ($mcp and $native_ha_mcp) |
+    .mcp.homeassistant_native.command = ["node", "/opt/ha-mcp-server/ha-native-mcp-proxy.js", $native_ha_mcp_api_id] |
+    .mcp.homeassistant_native.environment.HA_NATIVE_MCP_API_ID = $native_ha_mcp_api_id |
     if $lsp_disabled then .lsp["ha-yaml"].disabled = true else del(.lsp["ha-yaml"].disabled) end |
     if $ppq then
         .provider = (.provider // {}) |

@@ -24,6 +24,14 @@ configuration:
     name: "Enable MCP integration"
     description: "Enable the Model Context Protocol (MCP) server that lets OpenCode query entities and call services directly, so you can ask for things like turning on the living room lights or checking the bedroom temperature."
 
+  native_ha_mcp_enabled:
+    name: "Enable native Home Assistant MCP bridge"
+    description: "Add an optional second MCP server in OpenCode that proxies to Home Assistant Core's native LLM MCP endpoint (/api/mcp/<API ID>) when your Home Assistant version supports it. Leave disabled unless you are testing the new Home Assistant native LLM/MCP platform. This complements, but does not replace, OpenCode's built-in MCP tools."
+
+  native_ha_mcp_api_id:
+    name: "Native Home Assistant MCP API ID"
+    description: "Home Assistant native LLM API ID to consume through the beta bridge. The default 'assist' targets /api/mcp/assist. Use a custom API ID to target /api/mcp/<API ID>, or leave empty to target Home Assistant's configured /api/mcp endpoint. Custom keyed API endpoints require admin access in Home Assistant except for Assist."
+
   lsp_enabled:
     name: "Enable LSP integration"
     description: "Enable Language Server Protocol (LSP) support for intelligent code assistance. Provides real-time diagnostics, auto-completion, and validation for Home Assistant YAML configuration files."

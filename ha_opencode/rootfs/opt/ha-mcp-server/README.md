@@ -6,7 +6,7 @@ A comprehensive Model Context Protocol (MCP) server for deep integration between
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| **Tools** | 35 | Actions, queries, config validation, HA-native LLM readiness, and admin workflows |
+| **Tools** | 37 | Actions, queries, compact home context, config validation, HA-native LLM readiness, and admin workflows |
 | **Resources** | 10 + 4 templates | Browsable data exposed to the AI |
 | **Prompts** | 6 | Pre-built guided workflows |
 | **Intelligence** | Built-in | Anomaly detection, suggestions, semantic search |
@@ -86,6 +86,7 @@ All tools, resources, and prompts include a `title` field for display.
 | `get_states` | Get Entity States | `readOnly`, `idempotent` |
 | `search_entities` | Search Entities | `readOnly`, `idempotent` |
 | `get_entity_details` | Get Entity Details | `readOnly`, `idempotent` |
+| `get_home_context` | Get Home Context | `readOnly`, `idempotent` |
 
 ### Service Calls
 | Tool | Title | Annotations |
@@ -105,6 +106,7 @@ All tools, resources, and prompts include a `title` field for display.
 |------|-------|-------------|
 | `get_config` | Get Home Assistant Configuration | `readOnly`, `idempotent` |
 | `get_agent_capabilities` | Get Agent Capability Status | `readOnly`, `idempotent` |
+| `get_ha_llm_development_guide` | Get HA Native LLM Development Guide | `readOnly`, `idempotent` |
 | `get_areas` | List All Areas | `readOnly`, `idempotent` |
 | `get_devices` | List Devices | `readOnly`, `idempotent` |
 | `validate_config` | Validate Configuration | `readOnly`, `idempotent` |
@@ -197,13 +199,16 @@ ha-mcp enable
 | Variable | Description |
 |----------|-------------|
 | `SUPERVISOR_TOKEN` | Auto-provided by Home Assistant app |
+| `HA_NATIVE_MCP_API_ID` | Optional API ID for the native Home Assistant MCP proxy. Defaults to `assist`. |
 
 ## Version History
 
 ### v2.8.0 (Agent Capability Edition)
 - Added `get_agent_capabilities` read-only tool
 - Added `ha://agent/capabilities` resource
-- Reports OpenCode MCP capability counts and Home Assistant native `llm` component readiness
+- Reports OpenCode MCP capability counts and Home Assistant native `llm` / `/api/mcp/<API ID>` readiness
+- Includes an optional stdio proxy for Home Assistant Core's native LLM MCP endpoint (`homeassistant_native` in OpenCode config, default API ID `assist`)
+- Adds compact `get_home_context` and native `<integration>/llm.py` development guidance tools
 - Documents the strategy for adopting HA-native LLM capabilities while preserving MCP workflows
 - Targets the current MCP TypeScript SDK `1.29.x` line
 - Adds server implementation description metadata

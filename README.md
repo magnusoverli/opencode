@@ -44,7 +44,7 @@ Works with **75+ AI providers**: Anthropic, OpenAI, Google, Groq, Ollama, and ma
 <td width="50%">
 
 #### 🔧 **Deep MCP Integration**
-35 tools, 14 resources, and 6 guided prompts for comprehensive Home Assistant interaction.
+37 tools, 14 resources, and 6 guided prompts for comprehensive Home Assistant interaction.
 
 #### 💡 **Intelligent LSP Support**
 Smart YAML editing with entity autocomplete, live hover information, deprecation warnings, and go-to-definition support.
@@ -56,7 +56,7 @@ Validated config pipeline with automatic backup/restore. Multi-layered checks ar
 Includes the [Home Assistant Builder CLI](https://github.com/balloob/home-assistant-build-cli) by [@balloob](https://github.com/balloob) — a CLI purpose-built for AI agents to manage Home Assistant via REST and WebSocket APIs. Enables dashboard CRUD, area/floor management, helper creation, backup/restore, and bulk admin operations that would otherwise require direct API calls or UI interaction.
 
 #### 🧭 **HA Native LLM Ready**
-Tracks Home Assistant's emerging native `llm` integration, reports readiness through MCP, and is intended to become a first-class workbench for users testing HA's agent-focused features.
+Tracks Home Assistant's emerging native `llm` integration and native MCP endpoints such as `/api/mcp/<API ID>`, reports readiness through MCP, and targets beta-channel bridge testing first.
 
 </td>
 </tr>
@@ -164,9 +164,9 @@ OpenCode includes a multi-layered validation pipeline designed to prevent AI-wri
 
 ## 🧭 Home Assistant Native LLM Roadmap
 
-Home Assistant is developing a native `llm` integration so Core integrations and custom integrations can expose curated tools to Assist through `<integration>/llm.py`. OpenCode will follow this work closely and aims to be a premium consumer of the agent capabilities Home Assistant makes available.
+Home Assistant is developing a native `llm` integration so Core integrations and custom integrations can expose curated tools to Assist through `<integration>/llm.py` and registered LLM APIs over `/api/mcp/<API ID>`. OpenCode will follow this work closely and aims to be a premium consumer of the agent capabilities Home Assistant makes available.
 
-Today, the add-on keeps MCP as the complete working tool surface and adds readiness reporting through `get_agent_capabilities` / `ha://agent/capabilities`. As HA-native LLM capabilities become stable and accessible to add-ons, OpenCode will prefer native HA tools where they fit while keeping MCP for safe config writing, validation, admin/dev workflows, screenshots, firmware updates, and troubleshooting.
+Today, the add-on keeps MCP as the complete working tool surface, adds readiness reporting through `get_agent_capabilities` / `ha://agent/capabilities`, provides compact `get_home_context` discovery, and includes a native LLM provider guide for custom integration authors. The beta channel can opt into a configurable native MCP bridge targeting `/api/mcp/<API ID>` with `assist` as the default. As HA-native LLM capabilities become stable and accessible to add-ons, OpenCode will prefer native HA tools where they fit while keeping MCP for safe config writing, validation, admin/dev workflows, screenshots, firmware updates, and troubleshooting.
 
 See the [full documentation][docs] for the current support status and long-term integration plan.
 
