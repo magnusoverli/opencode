@@ -323,7 +323,7 @@ This is free and unencumbered software released into the public domain - see the
 [project-stage-shield]: https://img.shields.io/badge/project%20stage-experimental-orange.svg?style=for-the-badge
 [license-shield]: https://img.shields.io/github/license/magnusoverli/opencode.svg?style=for-the-badge
 [maintenance-shield]: https://img.shields.io/maintenance/yes/2026.svg?style=for-the-badge
-[stable-build-shield]: https://img.shields.io/github/actions/workflow/status/magnusoverli/opencode/build.yaml?style=for-the-badge&label=stable%20build
+[stable-build-shield]: https://img.shields.io/github/v/release/magnusoverli/opencode?style=for-the-badge&label=stable%20release
 [beta-build-shield]: https://img.shields.io/github/v/release/magnusoverli/opencode?include_prereleases&style=for-the-badge&label=beta%20release
-[stable-build-workflow]: https://github.com/magnusoverli/opencode/actions/workflows/build.yaml
+[stable-build-workflow]: https://github.com/magnusoverli/opencode/releases
 [beta-build-workflow]: https://github.com/magnusoverli/opencode/releases
