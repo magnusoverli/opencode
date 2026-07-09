@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.3.4b1
 
 - **Native Home Assistant MCP readiness and bridge** — `get_agent_capabilities` now probes Home Assistant Core's native MCP endpoints, including the configured `/api/mcp` or `/api/mcp/<API ID>` endpoint and `/api/mcp/assist`, and reports whether OpenCode should use regular MCP only or a hybrid native-LLM-API/OpenCode-MCP mode. Added opt-in beta options for **Enable native Home Assistant MCP bridge** and **Native Home Assistant MCP API ID**. The bridge creates a second OpenCode MCP server (`homeassistant_native`) proxying to Home Assistant's native MCP endpoint when the running Home Assistant version supports it. The API ID defaults to `assist`, can target custom APIs registered inside Home Assistant, and can be left empty to target the configured `/api/mcp` endpoint. The bridge is disabled by default and does not replace OpenCode's built-in MCP tools.
 - **Better Home Assistant context and native LLM development support** — added `get_home_context` for compact area/domain/entity-scoped understanding with registry-derived area/device metadata, plus `get_ha_llm_development_guide` for upstream references, checklist, and a starter template for native `<integration>/llm.py` tool providers.
