@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.6b3
+
+- **Supervisor-safe Home Assistant logs ([issue #57](https://github.com/magnusoverli/opencode/issues/57))** — `ha-logs error` and the MCP `get_error_log` tool returned a 404 on Home Assistant instances running under Supervisor, which disables the file-backed `/api/error_log` endpoint in favor of journald. Both now fall back to Core's journal logs when the file-backed endpoint is unavailable. Thanks to [@GuiPoM](https://github.com/GuiPoM) for reporting it.
+- **Home Assistant configuration directory no longer prompts every session** — OpenCode now persistently allows the mounted `/homeassistant` configuration directory, so normal configuration work no longer asks for external-directory permission on every session. Sensitive-file read protection (**Restrict access to sensitive files**) remains in effect regardless.
+
 ## 2.3.6b2
 
 - **Optional focus-friendly response mode** — added a disabled-by-default **Focus-friendly response mode** option that applies action-first, numbered, progress-aware response guidance to both the terminal and OpenChamber interfaces. It changes response formatting only and preserves Home Assistant approval, validation, and safety requirements. Inspired by [@ayghri's `i-have-adhd`](https://github.com/ayghri/i-have-adhd); thanks to Ayoub Ghriss for publishing the upstream skill.
