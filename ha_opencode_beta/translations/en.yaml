@@ -30,11 +30,11 @@ configuration:
 
   native_ha_mcp_enabled:
     name: "Enable native Home Assistant MCP bridge"
-    description: "Add an optional second MCP server in OpenCode that proxies to Home Assistant Core's native LLM MCP endpoint (/api/mcp/<API ID>) when your Home Assistant version supports it. Leave disabled unless you are testing the new Home Assistant native LLM/MCP platform. This complements, but does not replace, OpenCode's built-in MCP tools."
+    description: "Add an optional second MCP server in OpenCode that proxies to Home Assistant Core's native LLM MCP endpoint. Requires the MCP Server integration to be set up in Home Assistant. The keyed /api/mcp/<API ID> endpoints and the native LLM tool platforms first ship in Home Assistant 2026.8; on earlier versions the bridge falls back to the configured /api/mcp endpoint. Leave disabled unless you are testing the new Home Assistant native LLM/MCP platform. This complements, but does not replace, OpenCode's built-in MCP tools."
 
   native_ha_mcp_api_id:
     name: "Native Home Assistant MCP API ID"
-    description: "Home Assistant native LLM API ID to consume through the beta bridge. The default 'assist' targets /api/mcp/assist. Use a custom API ID to target /api/mcp/<API ID>, or leave empty to target Home Assistant's configured /api/mcp endpoint. Custom keyed API endpoints require admin access in Home Assistant except for Assist."
+    description: "Home Assistant native LLM API ID to consume through the beta bridge. The default 'assist' targets /api/mcp/assist. Use a custom API ID to target /api/mcp/<API ID>, or leave empty to target Home Assistant's configured /api/mcp endpoint. Custom keyed API endpoints require admin access in Home Assistant except for Assist, so an API ID other than 'assist' may not be reachable from an add-on."
 
   lsp_enabled:
     name: "Enable LSP integration"

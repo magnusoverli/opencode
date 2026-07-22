@@ -199,7 +199,11 @@ ha-mcp enable
 | Variable | Description |
 |----------|-------------|
 | `SUPERVISOR_TOKEN` | Auto-provided by Home Assistant app |
-| `HA_NATIVE_MCP_API_ID` | Optional API ID for the native Home Assistant MCP proxy. Defaults to `assist`. |
+| `HA_NATIVE_MCP_API_ID` | Optional API ID for the native Home Assistant MCP proxy. Defaults to `assist`. Empty targets the configured `/api/mcp` endpoint. |
+| `HA_NATIVE_MCP_ENDPOINT_MODE` | `auto` (default), `keyed`, or `configured`. `auto` prefers `/api/mcp/<API ID>` and falls back to `/api/mcp` when it answers 404 — which it always does before Home Assistant 2026.8. |
+| `HA_NATIVE_MCP_SANITIZE_SCHEMAS` | Set to `0` to disable repair of Home Assistant tool schemas that strict MCP clients cannot compile (home-assistant/core#176762, fixed upstream in 2026.8). |
+| `HA_NATIVE_MCP_BASE_URL` | Override the Supervisor Core API base URL. Defaults to `http://supervisor/core/api`. |
+| `HA_NATIVE_MCP_TIMEOUT_MS` | Request timeout for the native MCP proxy. Defaults to `60000`. |
 
 ## Version History
 
