@@ -239,6 +239,323 @@ function decodeBody(buffer, contentEncoding) {
   throw new Error(`Unsupported content encoding: ${contentEncoding}`);
 }
 
+// Provider OAuth loopback bridge.
+//
+// OpenCode's browser sign-in methods (for example "ChatGPT Pro/Plus (browser)")
+// start a callback HTTP server on a loopback port *inside this container* and
+// send the browser to http://localhost:<port>/auth/callback. That works when the
+// browser runs on the same machine as OpenCode; behind Home Assistant Ingress the
+// browser is on the user's own device, so the redirect lands on their machine,
+// nothing answers, and the authorization code never reaches the listener. The
+// pending POST /provider/<id>/oauth/callback then waits on that listener forever
+// -- the pasted code is ignored for these "auto" methods -- so OpenChamber sits
+// on "Saving..." until the request deadline expires (issue #54).
+//
+// Bridge it locally instead: remember the loopback redirect URI and state from
+// the authorize response, and when the user pastes the code, replay the redirect
+// to the in-container listener before forwarding the callback request. The
+// listener resolves, OpenCode exchanges the code, and the pending request
+// completes normally. The replay is best effort and never changes what is
+// forwarded upstream, so providers that do not use a loopback callback -- and
+// methods that consume the pasted code themselves -- are unaffected.
+const OAUTH_AUTHORIZE_PATTERN = /^\/api\/provider\/([^/?#]+)\/oauth\/authorize(?:[?#]|$)/;
+const OAUTH_CALLBACK_PATTERN = /^\/api\/provider\/([^/?#]+)\/oauth\/callback(?:[?#]|$)/;
+const OAUTH_BRIDGE_TTL_MS = 15 * 60 * 1000;
+const OAUTH_BRIDGE_TIMEOUT_MS = 10000;
+// A callback payload is a small JSON object ({ method, code }); anything beyond
+// this is not something we should be buffering.
+const OAUTH_CALLBACK_BODY_LIMIT = 256 * 1024;
+
+const pendingOauthRedirects = new Map();
+
+function matchProviderOauth(upstreamPath, pattern) {
+  const match = upstreamPath.match(pattern);
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+function isLoopbackHostname(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "::1" || host === "::ffff:127.0.0.1" || /^127\./.test(host);
+}
+
+function loopbackHostCandidates(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+  // Node binds "localhost" to whichever address family the resolver returns
+  // first, so try both loopback literals instead of guessing which one won.
+  return host === "localhost" ? ["127.0.0.1", "::1"] : [host];
+}
+
+function oauthAuthorizationPayload(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  if (payload.data && typeof payload.data === "object") return payload.data;
+  return payload;
+}
+
+function rememberOauthRedirect(providerID, payload) {
+  const body = oauthAuthorizationPayload(payload);
+  if (!body || typeof body.url !== "string" || !body.url) return null;
+
+  // "code" methods hand the pasted code to the provider themselves and need no
+  // bridging. Anything else is treated as a candidate, and the loopback check
+  // below decides: a provider that redirects somewhere reachable never arms.
+  const mode = typeof body.method === "string" ? body.method : typeof body.mode === "string" ? body.mode : "";
+  if (mode === "code") return null;
+
+  let authorizeUrl;
+  try {
+    authorizeUrl = new URL(body.url);
+  } catch {
+    return null;
+  }
+
+  const redirectValue = authorizeUrl.searchParams.get("redirect_uri");
+  if (!redirectValue) return null;
+
+  let redirect;
+  try {
+    redirect = new URL(redirectValue);
+  } catch {
+    return null;
+  }
+
+  // Loopback OAuth callbacks are plain HTTP; keeping this to http:// also keeps
+  // the replay below on the http module.
+  if (redirect.protocol !== "http:" || !isLoopbackHostname(redirect.hostname)) return null;
+
+  const entry = {
+    redirectUri: redirect.toString(),
+    label: `${redirect.origin}${redirect.pathname}`,
+    state: authorizeUrl.searchParams.get("state") || "",
+    expires: Date.now() + OAUTH_BRIDGE_TTL_MS,
+  };
+  pendingOauthRedirects.set(providerID, entry);
+  console.log(`OAuth loopback bridge armed for provider "${providerID}" (${entry.label})`);
+  return entry;
+}
+
+function oauthBridgeInstructions(entry) {
+  return `Complete the sign-in in your browser. The redirect to ${entry.label} cannot reach this`
+    + " add-on, so that page will fail to load. Copy the whole URL from your browser's address bar,"
+    + " paste it below, then select Complete.";
+}
+
+// Returns the rewritten authorize response body when the bridge was armed, or
+// null to forward the upstream bytes untouched.
+function armOauthBridge(providerID, decoded) {
+  // A new authorization supersedes whatever was pending for this provider, even
+  // when it turns out not to need bridging -- never replay a stale redirect.
+  pendingOauthRedirects.delete(providerID);
+
+  let payload;
+  try {
+    payload = JSON.parse(decoded.toString("utf8"));
+  } catch {
+    return null;
+  }
+
+  const entry = rememberOauthRedirect(providerID, payload);
+  if (!entry) return null;
+
+  // Upstream's copy ("this window will close automatically") describes the
+  // same-machine flow. Tell the user what actually happens behind Ingress.
+  const body = oauthAuthorizationPayload(payload);
+  body.instructions = oauthBridgeInstructions(entry);
+  try {
+    return Buffer.from(JSON.stringify(payload));
+  } catch {
+    return null;
+  }
+}
+
+function readCallbackCode(body) {
+  try {
+    const payload = JSON.parse(body.toString("utf8"));
+    return payload && typeof payload === "object" ? payload.code : null;
+  } catch {
+    return null;
+  }
+}
+
+function searchParamsFrom(value) {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    try {
+      return new URL(value).searchParams;
+    } catch {
+      return null;
+    }
+  }
+  if (/(^|[?&])code=/.test(value)) {
+    try {
+      return new URLSearchParams(value.startsWith("?") ? value.slice(1) : value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+// Accepts the bare authorization code or the whole redirect URL the browser
+// failed to open, so users do not have to dig the code out of the address bar.
+function parsePastedCode(raw) {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  if (!value) return null;
+  const params = searchParamsFrom(value);
+  const code = params ? params.get("code") : null;
+  if (code) return { code, state: params.get("state") || "" };
+  return { code: value, state: "" };
+}
+
+function requestLoopback(target) {
+  const port = Number.parseInt(target.port, 10) || 80;
+  const path = `${target.pathname}${target.search}`;
+  const attempt = (host) => new Promise((resolve) => {
+    const request = http.request(
+      { host, port, path, method: "GET", headers: { host: target.host } },
+      (response) => {
+        response.resume();
+        resolve(true);
+      },
+    );
+    request.setTimeout(OAUTH_BRIDGE_TIMEOUT_MS, () => request.destroy());
+    request.on("error", () => resolve(false));
+    request.end();
+  });
+
+  return loopbackHostCandidates(target.hostname).reduce(
+    (chain, host) => chain.then((delivered) => (delivered ? true : attempt(host))),
+    Promise.resolve(false),
+  );
+}
+
+// Resolves to "skipped" (nothing armed for this provider), "expired",
+// "delivered", or "failed" (armed, but the listener could not be reached).
+function deliverOauthCode(providerID, pasted) {
+  const entry = pendingOauthRedirects.get(providerID);
+  if (!entry) return Promise.resolve("skipped");
+  if (entry.expires <= Date.now()) {
+    pendingOauthRedirects.delete(providerID);
+    return Promise.resolve("expired");
+  }
+
+  let target;
+  try {
+    target = new URL(entry.redirectUri);
+  } catch {
+    return Promise.resolve("skipped");
+  }
+
+  target.searchParams.set("code", pasted.code);
+  const state = pasted.state || entry.state;
+  if (state) target.searchParams.set("state", state);
+
+  return requestLoopback(target).then((delivered) => (delivered ? "delivered" : "failed"));
+}
+
+function bridgeOauthCallback(req, res, ingressPath, upstreamPath, providerID) {
+  const chunks = [];
+  let size = 0;
+  let rejected = false;
+
+  const reject = (statusCode, message) => {
+    rejected = true;
+    if (res.headersSent) return;
+    res.writeHead(statusCode, { "content-type": "text/plain; charset=utf-8" });
+    res.once("finish", () => req.destroy());
+    res.end(`${message}\n`);
+  };
+
+  req.on("data", (chunk) => {
+    if (rejected) return;
+    size += chunk.length;
+    if (size > OAUTH_CALLBACK_BODY_LIMIT) {
+      reject(413, "OAuth callback payload too large");
+      return;
+    }
+    chunks.push(chunk);
+  });
+
+  req.on("error", () => {
+    if (rejected) return;
+    reject(400, "Malformed OAuth callback request");
+  });
+
+  req.on("end", () => {
+    if (rejected) return;
+    const body = Buffer.concat(chunks);
+    const forward = () => forwardRequest(req, res, { ingressPath, upstreamPath, body });
+    const pasted = parsePastedCode(readCallbackCode(body));
+    if (!pasted) {
+      forward();
+      return;
+    }
+
+    deliverOauthCode(providerID, pasted)
+      .then((result) => {
+        if (result === "delivered") {
+          console.log(`OAuth loopback bridge delivered the authorization code for provider "${providerID}"`);
+          return;
+        }
+        if (result === "expired") {
+          console.error(
+            `OAuth loopback bridge expired for provider "${providerID}"; start the sign-in again.`,
+          );
+          return;
+        }
+        if (result === "failed") {
+          const entry = pendingOauthRedirects.get(providerID);
+          console.error(
+            `OAuth loopback bridge could not reach ${entry ? entry.label : "the callback listener"}`
+            + ` for provider "${providerID}"; sign-in will not complete.`,
+          );
+        }
+      })
+      .catch((error) => {
+        console.error(`OAuth loopback bridge failed for provider "${providerID}": ${error.message}`);
+      })
+      .then(forward)
+      .catch((error) => {
+        console.error(`OAuth loopback bridge could not forward the callback: ${error.message}`);
+        if (res.headersSent) return;
+        res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+        res.end("OpenChamber upstream unavailable\n");
+      });
+  });
+}
+
+function relayOauthAuthorizeResponse(upstreamRes, res, responseHeaders, providerID) {
+  const chunks = [];
+  upstreamRes.on("data", (chunk) => chunks.push(chunk));
+  upstreamRes.on("end", () => {
+    const raw = Buffer.concat(chunks);
+    const statusCode = upstreamRes.statusCode || 200;
+    let rewritten = null;
+    if (statusCode < 400) {
+      try {
+        rewritten = armOauthBridge(providerID, decodeBody(raw, responseHeaders["content-encoding"]));
+      } catch (error) {
+        console.error(`OAuth loopback bridge could not read the authorize response: ${error.message}`);
+      }
+    }
+
+    if (!rewritten) {
+      res.writeHead(statusCode, responseHeaders);
+      res.end(raw);
+      return;
+    }
+
+    delete responseHeaders["content-length"];
+    delete responseHeaders["content-encoding"];
+    delete responseHeaders.etag;
+    res.writeHead(statusCode, responseHeaders);
+    res.end(rewritten);
+  });
+}
+
 function proxyRequest(req, res) {
   const remoteAddress = normalizeRemoteAddress(req.socket.remoteAddress || "");
   if (!isAllowedRemote(remoteAddress)) {
@@ -309,6 +626,25 @@ function proxyRequest(req, res) {
     return;
   }
 
+  const oauthCallbackProviderID = req.method === "POST"
+    ? matchProviderOauth(upstreamPath, OAUTH_CALLBACK_PATTERN)
+    : "";
+  if (oauthCallbackProviderID) {
+    bridgeOauthCallback(req, res, ingressPath, upstreamPath, oauthCallbackProviderID);
+    return;
+  }
+
+  forwardRequest(req, res, {
+    ingressPath,
+    upstreamPath,
+    oauthAuthorizeProviderID: req.method === "POST"
+      ? matchProviderOauth(upstreamPath, OAUTH_AUTHORIZE_PATTERN)
+      : "",
+  });
+}
+
+function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oauthAuthorizeProviderID = "" }) {
+  const remoteAddress = normalizeRemoteAddress(req.socket.remoteAddress || "");
   const headers = { ...req.headers };
   headers.host = `${UPSTREAM_HOST}:${UPSTREAM_PORT}`;
   headers["accept-encoding"] = "identity";
@@ -331,6 +667,11 @@ function proxyRequest(req, res) {
     }
 
     const contentType = String(upstreamRes.headers["content-type"] || "");
+    if (oauthAuthorizeProviderID && contentType.includes("application/json")) {
+      relayOauthAuthorizeResponse(upstreamRes, res, responseHeaders, oauthAuthorizeProviderID);
+      return;
+    }
+
     const isHtml = contentType.includes("text/html");
     const isJavaScript = /(?:application|text)\/javascript|\bmodule\b/.test(contentType);
     const isCss = contentType.includes("text/css");
@@ -360,11 +701,19 @@ function proxyRequest(req, res) {
   });
 
   upstreamReq.on("error", (error) => {
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
     res.end(`OpenChamber upstream unavailable: ${error.message}\n`);
   });
 
-  req.pipe(upstreamReq);
+  if (body === null) {
+    req.pipe(upstreamReq);
+    return;
+  }
+  upstreamReq.end(body);
 }
 
 function proxyUpgrade(req, socket, head) {

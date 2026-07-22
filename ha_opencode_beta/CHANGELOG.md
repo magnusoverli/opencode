@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.6b6
+
+- **Browser provider sign-in no longer hangs on "Saving..." ([issue #54](https://github.com/magnusoverli/opencode/issues/54))** — connecting a provider from the OpenChamber UI with a browser OAuth method (for example **ChatGPT Pro/Plus (browser)**) never finished. OpenCode's browser methods start a callback listener on a loopback port *inside* the add-on container and send the browser to `http://localhost:<port>/auth/callback`; behind Home Assistant Ingress the browser runs on your own device, so that redirect lands nowhere and the pending sign-in request waits on the listener indefinitely — the pasted code is ignored for these methods. The ingress proxy now remembers the loopback redirect from the authorization step and replays it to the in-container listener when you paste the code, so the exchange completes and the provider is saved. Paste either the authorization code or the whole `http://localhost:...` URL your browser failed to open; the on-screen instructions now describe what actually happens instead of promising the window will close by itself. Providers that do not use a loopback callback are unaffected. In `terminal` mode, keep using the provider's **headless** method, which needs no redirect. Thanks to [@DennisSDUSA](https://github.com/DennisSDUSA) for the detailed report and to [@matrix2669](https://github.com/matrix2669) for the headless workaround.
+
 ## 2.3.6b5
 
 - **Quieter add-on log** — ttyd logged every accepted HTTP connection at libwebsockets NOTICE level, so the container health check (which probes `http://127.0.0.1:8099/` every 30 seconds) produced a repeating three-line burst (`__lws_lc_tag` / `HTTP /` / `__lws_lc_untag`) — roughly 4,300 lines a day of noise that buried real messages. ttyd now runs at log level `ERR|WARN` (`-d 3`), so genuine errors and warnings still surface while the per-probe chatter is gone.

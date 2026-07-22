@@ -28,6 +28,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **OpenCode update policy**: Use only the image-bundled OpenCode (`bundled`, default, lowest memory use) or keep OpenCode updated to the newest release in the background (`latest`, skipped automatically on low-memory systems).
 - **Sensitive file protection**: New **Restrict access to sensitive files** option (default on) denies the AI read access to `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, and `*.key`/`*.pem` files so their contents can't reach the model. Set it to `false` to restore fully unrestricted file access. See [Sensitive File Protection](#sensitive-file-protection).
 - **Focus-friendly response mode**: Optional action-first, concise, progress-aware response guidance for users who find long or unstructured responses difficult to act on. Disabled by default and available in both terminal and OpenChamber modes.
+- **Browser provider sign-in in OpenChamber**: Providers whose browser OAuth method redirects to a loopback address (for example **ChatGPT Pro/Plus (browser)**) can now be connected from the OpenChamber UI. See [Connecting a provider with browser sign-in](#connecting-a-provider-with-browser-sign-in).
 
 ## Focus-Friendly Response Mode (Beta)
 
@@ -104,6 +105,12 @@ Security and networking notes:
 Known beta risk: OpenChamber is a root-hosted web app, so this beta includes a pinned bundle patch for Home Assistant's `/api/hassio_ingress/...` path. If the page loads but actions fail, switch **Interface mode** back to `terminal`, restart the add-on, and include logs when reporting the issue.
 
 OpenChamber's own built-in update check is disabled in this add-on. OpenChamber is pinned and patched for Home Assistant Ingress when the add-on image is built, so an in-app self-update cannot persist or stay patched and would only hang the UI. OpenChamber is updated by updating the add-on — no "update available" prompt appears inside OpenChamber, and the Update button in **Settings → OpenChamber → About** reports no update.
+
+### Connecting a provider with browser sign-in
+
+Some providers offer a **browser** sign-in method (for example **ChatGPT Pro/Plus (browser)**) that sends you back to `http://localhost:<port>/auth/callback` after you sign in. That address is the add-on container, not the computer you are browsing from, so the final redirect always fails to load with a connection error. That is expected and does not mean the sign-in failed.
+
+In **Settings → Providers**, copy the whole `http://localhost:...` URL from your browser's address bar, paste it into the **Paste authorization code** field, and select **Complete** — the add-on delivers it to OpenCode locally so the sign-in finishes. Pasting only the `code=` value from that URL works too. In `terminal` mode, use the provider's **headless** method instead, which shows a short code to enter on the provider's device-authorization page and needs no redirect at all.
 
 ## Zigbee2MQTT URL
 

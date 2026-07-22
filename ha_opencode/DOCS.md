@@ -268,6 +268,15 @@ Follow the prompts to authenticate with your preferred provider:
 - **OpenCode Zen** - Curated models optimized for coding
 - And many more...
 
+#### Browser Sign-In (ChatGPT and Other OAuth Providers)
+
+Some providers offer a **browser** sign-in method that sends you back to `http://localhost:<port>/auth/callback` once you have signed in. That address is the add-on container, not the computer you are browsing from, so the final redirect always fails to load with a connection error. That is expected here and does not mean the sign-in failed.
+
+- **OpenChamber interface**: after signing in, copy the whole `http://localhost:...` URL from your browser's address bar, paste it into the **Paste authorization code** field, and select **Complete**. The add-on hands it to OpenCode locally so the sign-in finishes. Pasting only the `code=` value from that URL works too.
+- **Terminal interface**: use the provider's **headless** method instead (for example **ChatGPT Pro/Plus (headless)**). It shows a short code to enter on the provider's device-authorization page and needs no redirect at all.
+
+If a browser sign-in still does not complete, check the add-on log for `OAuth loopback bridge` lines and include them when reporting the issue.
+
 ### 3. Start Coding!
 
 Once connected, you can ask OpenCode to help with your Home Assistant configuration:
