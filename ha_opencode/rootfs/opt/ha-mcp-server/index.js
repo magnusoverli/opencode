@@ -3079,8 +3079,13 @@ async function probeNativeHaMcpReadiness() {
 
   return {
     upstream: {
-      llm_docs_pr: "home-assistant/developers.home-assistant#3236",
+      llm_integration_pr: "home-assistant/core#174253",
+      assist_api_pr: "home-assistant/core#175659",
       keyed_endpoint_pr: "home-assistant/core#175570",
+      tool_schema_fix_pr: "home-assistant/core#176814",
+      llm_docs_pr: "home-assistant/developers.home-assistant#3236",
+      tool_platform_docs_pr: "home-assistant/developers.home-assistant#3201",
+      first_release: "2026.8.0",
       endpoint_pattern: "/api/mcp/<API ID>",
       configured_endpoint: "/api/mcp",
       assist_api_id: NATIVE_MCP_ASSIST_API_ID,
