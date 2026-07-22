@@ -133,8 +133,14 @@ bashio::log.info "Starting ttyd on port 8099 (Home Assistant ingress)..."
 # macOptionClickForcesSelection lets macOS users select text with Option+drag
 # while OpenCode has mouse reporting enabled (the Shift+drag override is
 # Windows/Linux-only in xterm.js).
+# -d 3 sets the libwebsockets log level to ERR|WARN only. ttyd's default is 7
+# (ERR|WARN|NOTICE), which logs every accepted HTTP connection at NOTICE — so
+# the container health check (curl http://127.0.0.1:8099/ every 30s) produced a
+# repeating three-line burst (__lws_lc_tag / HTTP / / __lws_lc_untag) that
+# spammed the add-on log ~4300 lines a day. Errors and warnings still surface.
 exec ttyd \
     -W \
+    -d 3 \
     -p 8099 \
     -I /opt/ttyd/index.html \
     -t fontSize="${FONT_SIZE}" \
