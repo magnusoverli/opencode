@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.6b4
+
+- **Terminal now fits the Home Assistant iframe ([issue #56](https://github.com/magnusoverli/opencode/issues/56))** — the ingress terminal kept its initial oversized dimensions and overflowed on the right and top (for example, `Ctrl+P`'s "Session" header sat above the visible area), and toggling the HA sidebar did not reflow it. ttyd 1.7.7 re-fits the terminal only from a window `resize` event, but Home Assistant resizes the add-on iframe from its own JavaScript without ever firing one. A small injected browser-side script now watches the viewport with a `ResizeObserver` and calls ttyd's `window.term.fit()` on the iframe-driven size changes that `resize` misses, so the terminal reflows to the available space on load and when the sidebar toggles. Thanks to [@fmjensen](https://github.com/fmjensen) for the detailed report and root-cause analysis.
+
 ## 2.3.6b3
 
 - **Supervisor-safe Home Assistant logs ([issue #57](https://github.com/magnusoverli/opencode/issues/57))** — `ha-logs error` and the MCP `get_error_log` tool returned a 404 on Home Assistant instances running under Supervisor, which disables the file-backed `/api/error_log` endpoint in favor of journald. Both now fall back to Core's journal logs when the file-backed endpoint is unavailable. Thanks to [@GuiPoM](https://github.com/GuiPoM) for reporting it.
