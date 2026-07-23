@@ -8,6 +8,13 @@ const LISTEN_PORT = Number.parseInt(process.env.OPENCHAMBER_INGRESS_PORT || "809
 const UPSTREAM_HOST = process.env.OPENCHAMBER_UPSTREAM_HOST || "127.0.0.1";
 const UPSTREAM_PORT = Number.parseInt(process.env.OPENCHAMBER_UPSTREAM_PORT || "3010", 10);
 const SUPERVISOR_INGRESS_IP = process.env.HA_INGRESS_PROXY_IP || "172.30.32.2";
+// When true, the proxy accepts connections from any remote address. This is
+// used by the optional LAN OpenChamber instance, which is published on a
+// mappable network port and therefore has no Home Assistant Ingress session in
+// front of it. The default Ingress instance keeps the strict allowlist.
+const ALLOW_ANY_REMOTE = String(process.env.OPENCHAMBER_ALLOW_ANY_REMOTE || "")
+  .trim()
+  .toLowerCase() === "true";
 
 function normalizeRemoteAddress(address) {
   if (!address) return "";
@@ -17,6 +24,7 @@ function normalizeRemoteAddress(address) {
 }
 
 function isAllowedRemote(address) {
+  if (ALLOW_ANY_REMOTE) return true;
   const normalized = normalizeRemoteAddress(address);
   return normalized === "127.0.0.1"
     || normalized === SUPERVISOR_INGRESS_IP

@@ -19,8 +19,10 @@ panel_icon: mdi:robot
 panel_title: OpenCode
 ports:
   4096/tcp: null
+  4097/tcp: null
 ports_description:
   4096/tcp: "OpenCode LAN server"
+  4097/tcp: "OpenChamber LAN web UI (requires interface_mode: openchamber)"
 
 # File access - Home Assistant config directory
 map:
@@ -103,6 +105,13 @@ options:
   # Warning: If you map 4096/tcp in Network settings, this exposes an OpenCode server on your LAN.
   enable_server: false
 
+  # Optional LAN access to the OpenChamber web UI (only used when
+  # interface_mode is openchamber). Serves OpenChamber at the root path on a
+  # mappable network port so reverse proxies / tunnels can point straight at it.
+  # Warning: If you map 4097/tcp in Network settings, this exposes the
+  # OpenChamber UI on your LAN with no Home Assistant Ingress auth in front.
+  enable_openchamber_lan: false
+
   # Advanced
   # Add-on development guidance for the mounted /addons and /addon_configs folders.
   addon_access_enabled: false
@@ -144,6 +153,9 @@ schema:
 
   # OpenCode LAN server mode
   enable_server: bool
+
+  # OpenChamber LAN web UI mode
+  enable_openchamber_lan: bool
 
   # Advanced
   addon_access_enabled: bool

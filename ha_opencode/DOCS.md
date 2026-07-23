@@ -228,6 +228,41 @@ The add-on log shows the current Home Assistant port mapping when the server sta
 
 Security warning: enabling this service and mapping the port exposes an OpenCode server on your LAN. Only use this on trusted networks, restrict access with your network/firewall controls, and never expose the port to the internet or untrusted networks.
 
+### OpenChamber LAN Web UI
+
+By default the OpenChamber web UI (`interface_mode: openchamber`) is served **only** through Home Assistant Ingress at `/api/hassio_ingress/<token>/`. That is the recommended path because Home Assistant provides the authentication layer.
+
+If you instead want a clean root URL for a reverse proxy or tunnel — for example so `https://openchamber.example.com/` maps straight to a backend without an ingress-path redirect — enable the OpenChamber LAN web UI. It publishes OpenChamber on a mappable network port and serves it at the root path `/`.
+
+To enable it:
+
+1. Set **Interface mode** to `openchamber`.
+2. Set **Enable OpenChamber LAN web UI** to `true`.
+3. In the add-on **Network** settings, map `4097/tcp` to the host port you want to use.
+4. Save and restart the add-on.
+
+Then open the UI at:
+
+```text
+http://<home-assistant-host>:<mapped-host-port>/
+```
+
+Behind a Cloudflare Tunnel, point a public hostname straight at it (no redirect rule needed because it already serves at `/`):
+
+```yaml
+additional_hosts:
+  - hostname: openchamber.example.com
+    service: http://<home-assistant-host>:<mapped-host-port>
+```
+
+How it works:
+
+- A second instance of the OpenChamber ingress proxy binds to `0.0.0.0:4097` and forwards to the same OpenChamber process on `127.0.0.1:3010`.
+- Because the mapped port has no Home Assistant Ingress session, the proxy runs with `OPENCHAMBER_ALLOW_ANY_REMOTE=true` and serves the UI with an empty ingress path (root `/`).
+- The default Ingress instance on `8099` is unchanged and keeps its strict `127.0.0.1` / Supervisor-only allowlist.
+
+Security warning: there is **no Home Assistant login** in front of the mapped `4097/tcp` port. Anyone who can reach it can use OpenChamber, which has read/write access to your configuration. Only map it on trusted networks, and put it behind a reverse proxy, Cloudflare Access, or equivalent authentication before any remote exposure. Never expose the raw port directly to the internet.
+
 ### Theme Previews
 
 - **Breeze** - KDE Konsole default, clean and professional

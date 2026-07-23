@@ -21,6 +21,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **Native LLM provider development guide**: New `get_ha_llm_development_guide` MCP tool helps custom integration authors build `<integration>/llm.py` tool providers aligned with Home Assistant's upstream architecture.
 - **Serial device access**: Selected host UART/serial devices can be mapped into the add-on for USB flashing and adapter inspection workflows. Full Supervisor `uart` and `udev` manifest flags remain disabled by default because they are static permissions, not runtime user options.
 - **Optional LAN server mode**: You can now enable an OpenCode server bound to `0.0.0.0` so other computers on your local network can connect directly.
+- **Optional OpenChamber LAN web UI**: When using `interface_mode: openchamber`, you can optionally publish OpenChamber on a mapped LAN port (`4097/tcp`) at the root path `/` for reverse proxies and tunnels.
 - **LAN server CORS origins**: The LAN server can now allow-list specific browser origins (`--cors`), so browser-based OpenCode clients — not just the CLI — can connect to it directly. See [LAN Server Mode (Beta)](#lan-server-mode-beta) below.
 - **PPQ private TEE models**: Opt-in encrypted proxy for PPQ private models running in remote TEEs. The proxy is internal-only and binds to `127.0.0.1` inside the add-on container.
 - **Web terminal clipboard fixes**: Copying inside OpenCode now reaches the browser clipboard, plain `Ctrl+V` paste works, and macOS users can use `Option+drag` to select text while full-screen terminal apps capture the mouse.
@@ -141,6 +142,41 @@ opencode attach http://192.168.1.50:4096
 The add-on log shows the current Home Assistant port mapping when the server starts, for example `Home Assistant port mapping: 4096/tcp -> 3443`. If OpenCode also prints `opencode server listening on http://0.0.0.0:4096`, that is the internal container listener, not the URL to use from another computer. Use your Home Assistant host and the mapped host port instead.
 
 Security warning: enabling this service and mapping the port exposes an OpenCode server on your LAN. Only use this on trusted networks, restrict access with your network/firewall controls, and never expose the port to the internet or untrusted networks.
+
+## OpenChamber LAN Web UI (Beta)
+
+By default the OpenChamber web UI (`interface_mode: openchamber`) is served **only** through Home Assistant Ingress at `/api/hassio_ingress/<token>/`. That is the recommended path because Home Assistant provides the authentication layer.
+
+If you instead want a clean root URL for a reverse proxy or tunnel — for example so `https://openchamber.example.com/` maps straight to a backend without an ingress-path redirect/rewrite — enable the OpenChamber LAN web UI. It publishes OpenChamber on a mappable network port and serves it at the root path `/`.
+
+To enable it:
+
+1. Set **Interface mode** to `openchamber`.
+2. Set **Enable OpenChamber LAN web UI** to `true`.
+3. In the add-on **Network** settings, map `4097/tcp` to the host port you want to use.
+4. Save and restart the add-on.
+
+Then open the UI at:
+
+```text
+http://<home-assistant-host>:<mapped-host-port>/
+```
+
+Behind a Cloudflare Tunnel, point a public hostname straight at it (no redirect rule needed because it already serves at `/`):
+
+```yaml
+additional_hosts:
+  - hostname: openchamber.example.com
+    service: http://<home-assistant-host>:<mapped-host-port>
+```
+
+How it works:
+
+- A second instance of the OpenChamber ingress proxy binds to `0.0.0.0:4097` and forwards to the same OpenChamber process on `127.0.0.1:3010`.
+- Because the mapped port has no Home Assistant Ingress session, the proxy runs with `OPENCHAMBER_ALLOW_ANY_REMOTE=true` and serves the UI with an empty ingress path (root `/`).
+- The default Ingress instance on `8099` is unchanged and keeps its strict `127.0.0.1` / Supervisor-only allowlist.
+
+Security warning: there is **no Home Assistant login** in front of the mapped `4097/tcp` port. Anyone who can reach it can use OpenChamber, which has read/write access to your configuration. Only map it on trusted networks, and put it behind a reverse proxy, Cloudflare Access, or equivalent authentication before any remote exposure. Never expose the raw port directly to the internet.
 
 ### Connecting a browser-based client (CORS)
 

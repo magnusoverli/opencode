@@ -17,6 +17,10 @@ if [ -f /data/.env_vars_discovered ]; then
     source /data/.env_vars_discovered
 fi
 
+# Keep the default Ingress proxy strict even when users define custom env vars.
+# The LAN-only bypass is enabled exclusively by the ha-openchamber-lan service.
+export OPENCHAMBER_ALLOW_ANY_REMOTE="false"
+
 # Keep the Supervisor token process-only. Tools that expect HA_TOKEN receive it
 # from the live environment instead of a persisted /data/.env_vars entry.
 if [ -n "${SUPERVISOR_TOKEN:-}" ]; then

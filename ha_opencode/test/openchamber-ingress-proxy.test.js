@@ -360,3 +360,90 @@ describe("openchamber ingress proxy: provider OAuth loopback bridge", () => {
     }
   });
 });
+
+describe("openchamber ingress proxy: remote allowlist", () => {
+  let proxy;
+  let proxyPort;
+  let upstream;
+  let upstreamPort;
+
+  before(async () => {
+    upstream = http.createServer((req, res) => {
+      const payload = Buffer.from("ok");
+      res.writeHead(200, { "content-type": "text/plain", "content-length": String(payload.length) });
+      res.end(payload);
+    });
+    upstreamPort = await freePort();
+    await listen(upstream, upstreamPort);
+  });
+
+  after(async () => {
+    if (proxy) proxy.kill();
+    await close(upstream);
+  });
+
+  const startProxy = async (extraEnv = {}) => {
+    if (proxy) {
+      proxy.kill();
+      proxy = null;
+    }
+
+    proxyPort = await freePort();
+    proxy = spawn(process.execPath, [PROXY_SCRIPT], {
+      env: {
+        ...process.env,
+        OPENCHAMBER_INGRESS_HOST: "127.0.0.1",
+        OPENCHAMBER_INGRESS_PORT: String(proxyPort),
+        OPENCHAMBER_UPSTREAM_HOST: "127.0.0.1",
+        OPENCHAMBER_UPSTREAM_PORT: String(upstreamPort),
+        ...extraEnv,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    proxy.stderr.resume();
+
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("proxy did not start")), 10000);
+      proxy.stdout.on("data", (chunk) => {
+        if (String(chunk).includes("listening")) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      proxy.once("error", reject);
+    });
+    proxy.stdout.resume();
+  };
+
+  it("blocks non-allowlisted remotes by default", async () => {
+    await startProxy();
+
+    const response = await request(proxyPort, {
+      method: "GET",
+      path: "/api/provider",
+      headers: {
+        host: "example.invalid",
+      },
+      localAddress: "127.0.0.2",
+    });
+
+    assert.equal(response.statusCode, 403);
+    assert.match(response.body, /Forbidden/);
+  });
+
+  it("allows non-allowlisted remotes only when OPENCHAMBER_ALLOW_ANY_REMOTE=true", async () => {
+    await startProxy({ OPENCHAMBER_ALLOW_ANY_REMOTE: "true" });
+
+    const response = await request(proxyPort, {
+      method: "GET",
+      path: "/api/provider",
+      headers: {
+        host: "example.invalid",
+      },
+      localAddress: "127.0.0.2",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body, "ok");
+  });
+});
