@@ -3,7 +3,7 @@
 // driven over real HTTP against a fake OpenChamber upstream and a fake
 // in-container OAuth callback listener.
 //
-// Run with: node --test ha_opencode/test/
+// Run with: node --test ha_opencode/test/openchamber-ingress-proxy.test.js
 //
 // This directory is outside rootfs/, so it is not copied into the add-on image.
 
@@ -12,6 +12,7 @@ const { after, before, beforeEach, describe, it } = require("node:test");
 const { spawn } = require("node:child_process");
 const http = require("node:http");
 const net = require("node:net");
+const os = require("node:os");
 const path = require("node:path");
 
 const PROXY_SCRIPT = path.join(__dirname, "..", "rootfs", "usr", "local", "bin", "openchamber-ingress-proxy.js");
@@ -45,6 +46,16 @@ function close(server) {
   });
 }
 
+function nonLoopbackIPv4Addresses() {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((details) => details
+      && (details.family === "IPv4" || details.family === 4)
+      && !details.internal
+      && !details.address.startsWith("169.254."))
+    .map((details) => details.address);
+}
+
 function request(port, options, body) {
   return new Promise((resolve, reject) => {
     const req = http.request({ host: "127.0.0.1", port, ...options }, (res) => {
@@ -59,6 +70,19 @@ function request(port, options, body) {
     req.on("error", reject);
     req.end(body);
   });
+}
+
+async function requestFromNonLoopback(port, options) {
+  for (const address of nonLoopbackIPv4Addresses()) {
+    try {
+      return await request(port, { ...options, host: address, localAddress: address });
+    } catch (error) {
+      if (!["EADDRNOTAVAIL", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ETIMEDOUT"].includes(error.code)) {
+        throw error;
+      }
+    }
+  }
+  return null;
 }
 
 function postJson(port, urlPath, payload) {
@@ -358,5 +382,101 @@ describe("openchamber ingress proxy: provider OAuth loopback bridge", () => {
     } finally {
       await close(ipv6Listener);
     }
+  });
+});
+
+describe("openchamber ingress proxy: remote allowlist", () => {
+  let proxy;
+  let proxyPort;
+  let upstream;
+  let upstreamPort;
+
+  before(async () => {
+    upstream = http.createServer((req, res) => {
+      const payload = Buffer.from("ok");
+      res.writeHead(200, { "content-type": "text/plain", "content-length": String(payload.length) });
+      res.end(payload);
+    });
+    upstreamPort = await freePort();
+    await listen(upstream, upstreamPort);
+  });
+
+  after(async () => {
+    if (proxy) proxy.kill();
+    await close(upstream);
+  });
+
+  const startProxy = async (extraEnv = {}) => {
+    if (proxy) {
+      proxy.kill();
+      proxy = null;
+    }
+
+    proxyPort = await freePort();
+    proxy = spawn(process.execPath, [PROXY_SCRIPT], {
+      env: {
+        ...process.env,
+        OPENCHAMBER_INGRESS_HOST: "0.0.0.0",
+        OPENCHAMBER_INGRESS_PORT: String(proxyPort),
+        OPENCHAMBER_UPSTREAM_HOST: "127.0.0.1",
+        OPENCHAMBER_UPSTREAM_PORT: String(upstreamPort),
+        OPENCHAMBER_ALLOW_ANY_REMOTE: "false",
+        ...extraEnv,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    proxy.stderr.resume();
+
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("proxy did not start")), 10000);
+      proxy.stdout.on("data", (chunk) => {
+        if (String(chunk).includes("listening")) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      proxy.once("error", reject);
+    });
+    proxy.stdout.resume();
+  };
+
+  it("blocks non-allowlisted remotes by default", async (t) => {
+    await startProxy();
+
+    const response = await requestFromNonLoopback(proxyPort, {
+      method: "GET",
+      path: "/api/provider",
+      headers: {
+        host: "example.invalid",
+      },
+    });
+
+    if (!response) {
+      t.skip("no usable non-loopback IPv4 interface available");
+      return;
+    }
+
+    assert.equal(response.statusCode, 403);
+    assert.match(response.body, /Forbidden/);
+  });
+
+  it("allows non-allowlisted remotes only when OPENCHAMBER_ALLOW_ANY_REMOTE=true", async (t) => {
+    await startProxy({ OPENCHAMBER_ALLOW_ANY_REMOTE: "true" });
+
+    const response = await requestFromNonLoopback(proxyPort, {
+      method: "GET",
+      path: "/api/provider",
+      headers: {
+        host: "example.invalid",
+      },
+    });
+
+    if (!response) {
+      t.skip("no usable non-loopback IPv4 interface available");
+      return;
+    }
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body, "ok");
   });
 });

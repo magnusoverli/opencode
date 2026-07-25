@@ -98,6 +98,10 @@ configuration:
     name: "Zigbee2MQTT base topic"
     description: "MQTT base topic that Zigbee2MQTT publishes on. Change this only if you changed it in Zigbee2MQTT itself; the default is 'zigbee2mqtt'."
 
+  enable_openchamber_lan:
+    name: "Enable OpenChamber LAN web UI"
+    description: "Publish the OpenChamber web UI on internal port 4097 so a reverse proxy or tunnel can point straight at the root path. Only works when Interface mode is 'openchamber'. To reach it, also map 4097/tcp in the Network settings. There is no Home Assistant login in front of this port, so only use it on trusted networks and put it behind a reverse proxy or Cloudflare Access before any remote exposure."
+
   serial_devices:
     name: "Serial devices"
     description: "Host serial/UART devices to map into the add-on, for work that needs direct serial access such as local USB flashing or adapter inspection. Nothing is mapped unless you add a device here, for example /dev/ttyUSB0 or a /dev/serial/by-id/... path."

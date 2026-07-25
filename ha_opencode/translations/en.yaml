@@ -72,6 +72,10 @@ configuration:
     name: "Enable OpenCode LAN server"
     description: "Start an OpenCode server on internal port 4096. To access it from another computer, also map 4096/tcp in the Network settings. Only use this on trusted networks and never expose it to the internet."
 
+  enable_openchamber_lan:
+    name: "Enable OpenChamber LAN web UI"
+    description: "Publish the OpenChamber web UI on internal port 4097 so a reverse proxy or tunnel can point straight at the root path. Only works when Interface mode is 'openchamber'. To reach it, also map 4097/tcp in the Network settings. There is no Home Assistant login in front of this port, so only use it on trusted networks and put it behind a reverse proxy or Cloudflare Access before any remote exposure."
+
   addon_access_enabled:
     name: "Enable add-on folder guidance"
     description: "Show guidance for working with Home Assistant add-on folders. Security note: /addons and /addon_configs are mounted into this add-on for development access, and /addon_configs may contain sensitive add-on data. This is guidance only, not a hard filesystem permission boundary."
