@@ -21,7 +21,7 @@ ports:
   4096/tcp: null
   4097/tcp: null
 ports_description:
-  4096/tcp: "OpenCode LAN server"
+  4096/tcp: "OpenCode LAN server — only serves traffic when the 'OpenCode LAN server' option is enabled"
   4097/tcp: "OpenChamber LAN web UI (requires interface_mode: openchamber)"
 
 # File access - Home Assistant config directory
@@ -42,34 +42,36 @@ homeassistant_api: true
 # Security and hardware access - keep permissions minimal
 host_network: false
 privileged: []
-apparmor: true
 # Static Supervisor hardware mappings. Keep default-off; users can opt into
 # specific serial devices via the serial_devices option below.
 uart: false
 udev: false
 
 # User-configurable options.
-# Note: the key order of the schema block below is the exact order the
-# Home Assistant Configuration tab renders the fields in — keep options
-# and schema in the same, deliberately grouped order.
+#
+# The Home Assistant Configuration tab renders one flat list of fields in the
+# exact key order of the schema block below — it supports no headings, no
+# collapsible sections, and no conditional visibility. Order is therefore the
+# only grouping mechanism available, so the sequence below is deliberate.
+#
+# Keep options and schema in the same order. Experimental options remain
+# explicitly marked beta in the Configuration tab and documentation.
 options:
+  # --- 1. Presentation ---------------------------------------------------
   # Interface served through Home Assistant Ingress.
   # terminal is the classic ttyd shell; openchamber is the OpenChamber web UI.
   interface_mode: "terminal"
-
-  # Terminal appearance
+  # Terminal appearance. No effect when interface_mode is openchamber.
   terminal_theme: "breeze"
   font_size: 14
   cursor_style: "block"
   cursor_blink: false
+  # Action-first response formatting for easier scanning and execution.
+  focus_mode: false
 
-  # Home Assistant integration
+  # --- 2. Home Assistant integration -------------------------------------
   mcp_enabled: true
   lsp_enabled: true
-  # Security: deny the AI read access to secret files (secrets.yaml, .storage,
-  # .cloud, ssl, *.key, *.pem) so their contents cannot reach the model. Set to
-  # false to restore fully unrestricted file access (the previous behavior).
-  restrict_sensitive_files: true
   # Screenshot tool: visual verification of dashboards and UI changes.
   # Requires the access token below to authenticate with the HA frontend.
   screenshot_enabled: false
@@ -77,16 +79,45 @@ options:
   # Required for ESPHome ingress and the screenshot tool
   # (create at: Profile → Long-lived access tokens).
   access_token: ""
+  # Optional bridge to Home Assistant Core's native /api/mcp/<API ID> endpoint.
+  # Requires a Home Assistant version that includes the native MCP keyed endpoint.
+  native_ha_mcp_enabled: false
+  native_ha_mcp_api_id: "assist"
 
-  # OpenCode runtime
+  # --- 3. Access control -------------------------------------------------
+  # Deny OpenCode read access to secret files (secrets.yaml, .storage, .cloud,
+  # ssl, *.key, *.pem) so their contents cannot reach the model. Set to false
+  # for fully unrestricted file access.
+  restrict_sensitive_files: true
+  # Add-on development guidance for the mounted /addons and /addon_configs
+  # folders. Guidance only — the mounts are static add-on metadata.
+  addon_access_enabled: false
+
+  # --- 4. OpenCode runtime -----------------------------------------------
   # Update policy: bundled (use the OpenCode shipped in the add-on image;
   # default, lowest resource use) or latest (keep OpenCode updated to the newest
   # release in the background — the update is skipped automatically on low-memory
   # systems and never blocks start-up)
   opencode_update_policy: "bundled"
-  # CPU mode: auto (detect), baseline (for older CPUs), regular (force AVX2)
+  # CPU mode: auto (detect), baseline (for older CPUs without AVX2 support), or
+  # regular (force the standard binary).
   cpu_mode: "auto"
 
+  # --- 5. Network exposure -----------------------------------------------
+  # Optional LAN server mode for remote OpenCode clients.
+  # Warning: If you map 4096/tcp in Network settings, this exposes an OpenCode server on your LAN.
+  enable_server: false
+  # Browser origin(s) allowed to call the LAN server directly (CORS).
+  # Only needed for browser-based clients; the OpenCode CLI does not need this.
+  cors_origins: []
+
+  # --- 6. Model providers ------------------------------------------------
+  # PPQ private mode (beta): routes OpenCode through a local encryption proxy
+  # for TEE-backed models. Requires a PPQ API key.
+  ppq_private_enabled: false
+  ppq_api_key: ""
+
+  # --- 7. Optional hardware ----------------------------------------------
   # Zigbee2MQTT configuration (optional — only needed for zigporter Z2M commands)
   # Include http:// or https://. Host/IP-only values are treated as http://.
   z2m_url: ""
@@ -95,70 +126,60 @@ options:
   # Add paths such as /dev/ttyUSB0, /dev/ttyACM0, or /dev/serial/by-id/...
   serial_devices: []
 
-  # PPQ private mode (beta): routes OpenCode through a local encryption proxy
-  # for TEE-backed models. Requires a PPQ API key. The proxy binds to
-  # 127.0.0.1 inside the container only.
-  ppq_private_enabled: false
-  ppq_api_key: ""
-
-  # Optional LAN server mode for remote OpenCode clients.
-  # Warning: If you map 4096/tcp in Network settings, this exposes an OpenCode server on your LAN.
-  enable_server: false
-
+  # --- 8. Advanced -------------------------------------------------------
   # Optional LAN access to the OpenChamber web UI (only used when
   # interface_mode is openchamber). Serves OpenChamber at the root path on a
   # mappable network port so reverse proxies / tunnels can point straight at it.
   # Warning: If you map 4097/tcp in Network settings, this exposes the
   # OpenChamber UI on your LAN with no Home Assistant Ingress auth in front.
   enable_openchamber_lan: false
-
-  # Advanced
-  # Add-on development guidance for the mounted /addons and /addon_configs folders.
-  addon_access_enabled: false
   # Environment variables to inject into the container
   env_vars: []
   # Custom OpenCode configuration (JSON)
   opencode_config: ""
 
 schema:
-  # Interface
+  # --- 1. Presentation ---------------------------------------------------
   interface_mode: list(terminal|openchamber)
-
-  # Terminal appearance
   terminal_theme: list(breeze|catppuccin_mocha|catppuccin_latte|dracula|nord|tokyo_night|one_dark|solarized_dark|solarized_light|gruvbox_dark)
   font_size: int(10,24)
   cursor_style: list(block|underline|bar)
   cursor_blink: bool
+  focus_mode: bool
 
-  # Home Assistant integration
+  # --- 2. Home Assistant integration -------------------------------------
   mcp_enabled: bool
   lsp_enabled: bool
-  restrict_sensitive_files: bool
   screenshot_enabled: bool
   access_token: password
+  native_ha_mcp_enabled: bool
+  native_ha_mcp_api_id: str?
 
-  # OpenCode runtime
+  # --- 3. Access control -------------------------------------------------
+  restrict_sensitive_files: bool
+  addon_access_enabled: bool
+
+  # --- 4. OpenCode runtime -----------------------------------------------
   opencode_update_policy: list(latest|bundled)
   cpu_mode: list(auto|baseline|regular)
 
-  # Zigbee2MQTT and serial devices (optional)
+  # --- 5. Network exposure -----------------------------------------------
+  enable_server: bool
+  cors_origins:
+    - str
+
+  # --- 6. Model providers ------------------------------------------------
+  ppq_private_enabled: bool
+  ppq_api_key: password
+
+  # --- 7. Optional hardware ----------------------------------------------
   z2m_url: str?
   z2m_mqtt_topic: str?
   serial_devices:
     - device(subsystem=tty)?
 
-  # PPQ private TEE models (beta)
-  ppq_private_enabled: bool
-  ppq_api_key: password
-
-  # OpenCode LAN server mode
-  enable_server: bool
-
-  # OpenChamber LAN web UI mode
+  # --- 8. Advanced -------------------------------------------------------
   enable_openchamber_lan: bool
-
-  # Advanced
-  addon_access_enabled: bool
   env_vars:
     - name: str
       value: str

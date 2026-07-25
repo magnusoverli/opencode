@@ -1,89 +1,115 @@
 ---
+# Field order here is cosmetic — the Home Assistant Configuration tab renders
+# fields in the order of the schema block in config.yaml. This file is kept in
+# that same order so the two stay easy to diff.
+#
+# House style for these strings:
+#   - Sentence case labels; no "Enable" prefix (a toggle already means that).
+#   - The subject is always "OpenCode", never "the AI" or "the model".
+#   - State a dependency in the first sentence, naming the option it depends on.
+#   - Two sentences where possible, three at most.
+#   - No restart instructions (every option needs one) and no changelog voice.
 configuration:
   interface_mode:
     name: "Interface mode"
-    description: "Choose the browser interface shown in the Home Assistant sidebar. 'terminal' is the classic ttyd terminal. 'openchamber' serves the OpenChamber web UI through Home Assistant Ingress. If OpenChamber misbehaves, switch back to 'terminal' and restart the add-on."
+    description: "Which interface OpenCode shows in the Home Assistant sidebar. 'terminal' is the classic ttyd terminal; 'openchamber' serves the OpenChamber web UI through Home Assistant Ingress."
 
   terminal_theme:
     name: "Terminal theme"
-    description: "Color scheme for the terminal. Choose a theme that's easy on your eyes."
+    description: "Color scheme for the terminal. All ten themes are previewed in the Documentation tab. Applies to the terminal interface only."
 
   font_size:
     name: "Font size"
-    description: "Terminal font size in pixels. Larger sizes improve readability, smaller sizes show more content."
+    description: "Font size in pixels. Larger values are easier to read, smaller values fit more on screen. Applies to the terminal interface only."
 
   cursor_style:
     name: "Cursor style"
-    description: "The appearance of the terminal cursor."
+    description: "Shape of the cursor: block, underline, or bar. Applies to the terminal interface only."
 
   cursor_blink:
     name: "Cursor blinking"
-    description: "Whether the terminal cursor should blink."
+    description: "Blink the cursor instead of showing it solid. Applies to the terminal interface only."
+
+  focus_mode:
+    name: "Focus-friendly responses (beta)"
+    description: "Ask OpenCode for action-first, concise, progress-aware replies that are quicker to scan and act on. Changes response wording only — it does not change permissions or safety confirmations."
 
   mcp_enabled:
-    name: "Enable MCP integration"
-    description: "Enable the Model Context Protocol (MCP) server that lets OpenCode query entities and call services directly, so you can ask for things like turning on the living room lights or checking the bedroom temperature."
+    name: "MCP integration"
+    description: "Let OpenCode query your entities and call services through its built-in Model Context Protocol (MCP) server, so you can ask it to turn on the living room lights or check the bedroom temperature."
 
   lsp_enabled:
-    name: "Enable LSP integration"
-    description: "Enable Language Server Protocol (LSP) support for intelligent code assistance. Provides real-time diagnostics, auto-completion, and validation for Home Assistant YAML configuration files."
-
-  restrict_sensitive_files:
-    name: "Restrict access to sensitive files"
-    description: "When enabled (default), the AI is denied read access to secret and credential files in your configuration — secrets.yaml, the .storage and .cloud directories, the ssl folder, and any .key or .pem files — so their contents cannot be sent to the AI model. Everything else stays readable. Turn this off to restore fully unrestricted file access. Note: this protects OpenCode's file read/edit tools; it does not restrict shell commands."
+    name: "LSP integration"
+    description: "Give OpenCode live diagnostics, entity and service auto-completion, and validation while it edits Home Assistant YAML, through the Language Server Protocol (LSP)."
 
   screenshot_enabled:
-    name: "Enable screenshot tool"
-    description: "Enable visual verification of dashboards and UI pages. When enabled, the AI can take screenshots of Home Assistant pages using a headless browser to verify the result of dashboard changes. Requires a Home Assistant access token (below). Each screenshot takes approximately 5-10 seconds."
+    name: "Screenshot tool"
+    description: "Requires the Home Assistant access token below. Lets OpenCode photograph Home Assistant pages in a headless browser to check the result of dashboard changes; each capture takes about 5-10 seconds."
 
   access_token:
     name: "Home Assistant access token"
-    description: "A long-lived access token for direct communication with Home Assistant Core. Required for ESPHome integration and the screenshot tool. Create one in the Home Assistant UI under Profile → Long-lived access tokens. Leave empty if you don't use ESPHome or screenshot tools."
+    description: "Long-lived access token for talking to Home Assistant Core directly. Required by the screenshot tool above and by the ESPHome commands — leave empty if you use neither. Create one in Home Assistant under Profile → Long-lived access tokens."
+
+  native_ha_mcp_enabled:
+    name: "Native Home Assistant MCP bridge (beta)"
+    description: "Adds a second MCP server that proxies to Home Assistant Core's own native LLM MCP endpoint (/api/mcp/<API ID>), on Home Assistant versions that provide it. This complements the MCP integration above rather than replacing it; leave it off unless you are testing Home Assistant's native LLM platform."
+
+  native_ha_mcp_api_id:
+    name: "Native MCP API ID"
+    description: "Applies only when the native bridge above is on. The default 'assist' targets /api/mcp/assist; leave it empty to use Home Assistant's configured /api/mcp endpoint instead. Home Assistant requires admin access for keyed API IDs other than 'assist', so a custom ID may not be reachable from an add-on."
+
+  restrict_sensitive_files:
+    name: "Restrict access to sensitive files"
+    description: "Denies OpenCode read access to secrets.yaml, the .storage and .cloud directories, the ssl folder, and any .key or .pem file, so their contents cannot be sent to the model. Everything else stays readable, and OpenCode can still edit config that references secrets with !secret. This covers OpenCode's file read and edit tools, not shell commands."
+
+  addon_access_enabled:
+    name: "Add-on folder guidance"
+    description: "Shows guidance for working in the mounted /addons and /addon_configs folders. Both are mounted whatever this is set to, and /addon_configs may hold other add-ons' credentials — this is guidance, not a filesystem permission boundary."
 
   opencode_update_policy:
     name: "OpenCode update policy"
-    description: "Controls how OpenCode itself is updated. 'bundled' (default) uses the OpenCode version shipped in the add-on image — the lowest-memory option, recommended for systems with 4 GB RAM or limited free memory. 'latest' keeps OpenCode updated to the newest upstream release in persistent add-on data; the update now runs in the background so it never delays start-up, and it is skipped automatically when available memory is low."
+    description: "How OpenCode itself is updated. 'bundled' uses the version shipped in the add-on image — the lowest-memory option, recommended on systems with 4 GB RAM or little free memory. 'latest' follows upstream releases in the background, so it never delays start-up and is skipped automatically when free memory is low."
 
   cpu_mode:
     name: "CPU mode"
-    description: "Controls which OpenCode binary is used. 'auto' detects your CPU capabilities automatically (recommended). 'baseline' forces the baseline binary for older CPUs without AVX2 support. 'regular' forces the standard binary."
+    description: "Which OpenCode binary to run. 'auto' detects your CPU (recommended), 'baseline' forces the build for older CPUs without AVX2, and 'regular' forces the standard build."
 
-  z2m_url:
-    name: "Zigbee2MQTT URL"
-    description: "Optional URL for Zigbee2MQTT, used by zigporter commands such as 'list-z2m' and 'network-map'. Include http:// or https://, for example 'http://homeassistant.local:8099'. Host/IP-only values are treated as http://."
+  enable_server:
+    name: "OpenCode LAN server"
+    description: "Starts an OpenCode server on internal port 4096 so other computers can attach to this session with the OpenCode CLI. To reach it, also map 4096/tcp in the Network section below. Use this on trusted networks only, and never expose it to the internet."
 
-  z2m_mqtt_topic:
-    name: "Zigbee2MQTT base topic"
-    description: "MQTT base topic used by Zigbee2MQTT. The default is 'zigbee2mqtt'."
-
-  serial_devices:
-    name: "Serial devices"
-    description: "Optional host UART/serial devices to map into the add-on for direct serial access. Use this for local USB flashing or adapter inspection workflows."
+  cors_origins:
+    name: "LAN server CORS origins"
+    description: "Applies only when the LAN server above is on, and only to browser-based clients such as a web or VS Code UI — 'opencode attach' does not need it. Each entry is an exact origin: scheme, host, and port, with no path, for example 'http://192.168.1.20:8080'. Without a matching entry a browser client may list providers and models but never receive replies."
 
   ppq_private_enabled:
-    name: "Enable PPQ private TEE models (beta)"
-    description: "Start an internal PPQ private-mode encryption proxy and add it as an OpenCode provider. The proxy binds only to 127.0.0.1 inside the add-on container and is not exposed on your network. Requires a PPQ API key. This feature should still be considered beta."
+    name: "PPQ private TEE models (beta)"
+    description: "Requires the PPQ API key below. Starts an internal PPQ private-mode encryption proxy and adds it to OpenCode as a provider for TEE-backed models; the proxy binds to 127.0.0.1 inside the container and is not reachable from your network."
 
   ppq_api_key:
     name: "PPQ API key"
-    description: "API key for PPQ private-mode models. Stored as a masked add-on option and exported only to the internal PPQ proxy service. Leave empty unless PPQ private mode is enabled."
+    description: "API key for PPQ private-mode models. Stored as a masked add-on option and exported only to the internal PPQ proxy. Leave empty unless the option above is on."
 
-  enable_server:
-    name: "Enable OpenCode LAN server"
-    description: "Start an OpenCode server on internal port 4096. To access it from another computer, also map 4096/tcp in the Network settings. Only use this on trusted networks and never expose it to the internet."
+  z2m_url:
+    name: "Zigbee2MQTT URL"
+    description: "Address of your Zigbee2MQTT frontend, used by zigporter commands such as 'list-z2m' and 'network-map'. Only needed when the Zigbee2MQTT add-on is not discovered automatically — use the same address and port you open its UI on. Include http:// or https://; a bare host or IP is treated as http://."
+
+  z2m_mqtt_topic:
+    name: "Zigbee2MQTT base topic"
+    description: "MQTT base topic that Zigbee2MQTT publishes on. Change this only if you changed it in Zigbee2MQTT itself; the default is 'zigbee2mqtt'."
+
+  serial_devices:
+    name: "Serial devices"
+    description: "Host serial/UART devices to map into the add-on, for work that needs direct serial access such as local USB flashing or adapter inspection. Nothing is mapped unless you add a device here, for example /dev/ttyUSB0 or a /dev/serial/by-id/... path."
 
   enable_openchamber_lan:
-    name: "Enable OpenChamber LAN web UI"
+    name: "OpenChamber LAN web UI"
     description: "Publish the OpenChamber web UI on internal port 4097 so a reverse proxy or tunnel can point straight at the root path. Only works when Interface mode is 'openchamber'. To reach it, also map 4097/tcp in the Network settings. There is no Home Assistant login in front of this port, so only use it on trusted networks and put it behind a reverse proxy or Cloudflare Access before any remote exposure."
-
-  addon_access_enabled:
-    name: "Enable add-on folder guidance"
-    description: "Show guidance for working with Home Assistant add-on folders. Security note: /addons and /addon_configs are mounted into this add-on for development access, and /addon_configs may contain sensitive add-on data. This is guidance only, not a hard filesystem permission boundary."
 
   env_vars:
     name: "Environment variables"
-    description: "Define custom environment variables that are available to OpenCode and the terminal shell. Useful for provider credentials and configuration that must be set as environment variables, for example 'AZURE_RESOURCE_NAME' or 'OPENAI_API_KEY'. Each entry needs a variable name and value."
+    description: "Extra environment variables for OpenCode and the terminal shell, each with a name and a value. Useful for providers that are configured through the environment, such as AZURE_RESOURCE_NAME or OPENAI_API_KEY — most providers are set up inside the app with '/connect' instead. Critical system variables such as HOME, PATH and SUPERVISOR_TOKEN cannot be overridden."
 
   opencode_config:
     name: "Custom OpenCode configuration"
-    description: "Paste a JSON object to customize OpenCode's own configuration (providers, keybindings, etc.). This is merged with the add-on's built-in config. Leave empty for defaults. See https://opencode.ai/docs/config for the full schema."
+    description: "A JSON object merged into OpenCode's own configuration, for providers, keybindings, permission rules and similar. Leave empty for the defaults; the full schema is at https://opencode.ai/docs/config."

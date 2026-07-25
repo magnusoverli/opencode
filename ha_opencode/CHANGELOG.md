@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 ## 2.3.7
 
 - **Optional OpenChamber LAN web UI** — a new `enable_openchamber_lan` option (only active when `interface_mode: openchamber`) publishes the OpenChamber UI on a mappable network port (`4097/tcp`), mirroring the existing OpenCode LAN server on `4096/tcp`. It runs a second instance of the ingress proxy bound to `0.0.0.0` with the remote-address allowlist relaxed (via `OPENCHAMBER_ALLOW_ANY_REMOTE`) and serves the UI at the root path `/`, so reverse proxies and tunnels (e.g. Cloudflare Tunnel) can point straight at a backend without an ingress-path redirect/rewrite. Off by default; requires both enabling the option and mapping `4097/tcp` in Network settings. No Home Assistant Ingress auth sits in front of the mapped port, so it is intended for trusted networks or behind a reverse proxy / access control.
+- **Configuration page promoted from beta** — reorganized the Configuration tab into clear presentation, Home Assistant integration, access-control, runtime, network, provider, hardware, and advanced groups; aligned labels and descriptions with the actual option order; and promoted the opt-in focus-friendly responses, native Home Assistant MCP bridge, and LAN CORS settings while keeping experimental features explicitly marked beta.
 
 ## 2.3.6
 

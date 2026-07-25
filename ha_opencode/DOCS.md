@@ -21,6 +21,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **Provider Agnostic**: Works with Anthropic, OpenAI, Google, and 70+ other AI providers
 - **MCP Integration**: Deep Home Assistant integration with Tools, Resources, Prompts, and Intelligence
 - **Home Assistant Native LLM Readiness**: Detects HA's emerging native `llm` component and documents how OpenCode will adopt HA-native agent capabilities as they become available
+- **Focus-friendly responses (Beta)**: Optional action-first, concise, progress-aware response guidance
 - **Visual Verification**: Screenshot tool for verifying dashboard changes with AI vision
 - **LSP Integration**: Intelligent YAML editing with entity autocomplete, hover info, and diagnostics
 - **PPQ Private TEE Models (Beta)**: Optional encrypted proxy for PPQ private models running in remote TEEs. Included in stable releases, but still considered beta.
@@ -58,7 +59,7 @@ Security and networking notes:
 - The OpenChamber process binds to `127.0.0.1` inside the container.
 - A small first-party ingress proxy binds to internal port `8099`, accepts Home Assistant Ingress traffic, and forwards to OpenChamber locally.
 - Home Assistant Ingress provides the browser authentication layer, so no separate OpenChamber UI password is needed.
-- LAN access remains the separate opt-in **Enable OpenCode LAN server** feature on port `4096`.
+- LAN access remains the separate opt-in **OpenCode LAN server** feature on port `4096`.
 
 If OpenChamber misbehaves (for example after an update), switch **Interface mode** back to `terminal`, restart the add-on, and include logs when reporting the issue.
 
@@ -77,11 +78,23 @@ OpenChamber's own built-in update check is disabled in this add-on. OpenChamber 
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| **Enable MCP integration** | `true` | Enable the Model Context Protocol (MCP) server for deep Home Assistant integration. Includes 37 tools, 14 resources, 6 guided prompts, and an intelligence layer for anomaly detection, config validation, and automation suggestions. |
-| **Enable LSP integration** | `true` | Enable the Language Server Protocol (LSP) server for intelligent YAML editing. Provides entity/service autocomplete, hover documentation, diagnostics for unknown entities, and go-to-definition for !include tags. |
-| **Restrict access to sensitive files** | `true` | Deny the AI read access to secret/credential files (`secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, `*.key`, `*.pem`) so their contents cannot reach the model. Everything else stays readable. Set to `false` to restore fully unrestricted file access. See [Sensitive File Protection](#sensitive-file-protection). |
-| **Enable screenshot tool** | `false` | Enable visual verification of dashboards and UI pages. Uses headless Chromium to capture screenshots that vision-capable AI models can analyze. Requires the access token below. See [Visual Verification](#visual-verification-screenshots). |
-| **Home Assistant access token** | `""` | A long-lived access token for direct communication with Home Assistant Core. Required for ESPHome integration and the screenshot tool. Create one in the Home Assistant UI under Profile → Long-lived access tokens. |
+| **MCP integration** | `true` | Let OpenCode query entities and call services through its built-in Model Context Protocol server. |
+| **LSP integration** | `true` | Give OpenCode live diagnostics, entity and service auto-completion, and validation while it edits Home Assistant YAML. |
+| **Screenshot tool** | `false` | Requires the access token below. Lets OpenCode photograph Home Assistant pages in a headless browser to check dashboard changes. |
+| **Home Assistant access token** | `""` | Long-lived access token for Home Assistant Core. Required by the screenshot tool and ESPHome commands. |
+| **Native Home Assistant MCP bridge (beta)** | `false` | Adds an optional second MCP server for Home Assistant's native LLM MCP endpoint when the running Home Assistant version provides it. |
+| **Native MCP API ID** | `assist` | Applies only when the native bridge is on. The default `assist` targets `/api/mcp/assist`; leave empty to use the configured `/api/mcp` endpoint. |
+
+### Access Control
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| **Restrict access to sensitive files** | `true` | Deny OpenCode read access to secret and credential files so their contents cannot reach the model. See [Sensitive File Protection](#sensitive-file-protection). |
+| **Add-on folder guidance** | `false` | Show guidance for working in the mounted `/addons` and `/addon_configs` folders. This is guidance only, not a filesystem permission boundary. |
+
+### Focus-Friendly Responses (Beta)
+
+Turn on **Focus-friendly responses (beta)** in the add-on **Configuration** tab to ask OpenCode for action-first, concise, progress-aware replies. This changes response wording only; it does not change permissions or safety confirmations.
 
 ### Sensitive File Protection
 
@@ -105,29 +118,35 @@ Everything else stays fully readable, and this doesn't change how the agent edit
 | **OpenCode update policy** | `bundled` | Controls how OpenCode itself is updated. `bundled` (default) uses the OpenCode version shipped in the add-on image — the lowest-memory option. `latest` follows upstream OpenCode releases, refreshed in the background so it never delays start-up and skipped automatically on low-memory systems. See [OpenCode Updates](#opencode-updates). |
 | **CPU mode** | `auto` | Controls which OpenCode binary is used. `auto` detects your CPU capabilities automatically (recommended). `baseline` forces the baseline binary for older CPUs without AVX2 support. `regular` forces the standard binary. |
 
-### Zigbee2MQTT and Serial Devices
+### Network Exposure
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| **Zigbee2MQTT URL** | `""` | Optional URL for Zigbee2MQTT, used by zigporter commands such as `list-z2m` and `network-map --backend z2m`. Include `http://` or `https://`, for example `http://homeassistant.local:8099`. Host/IP-only values are treated as `http://`. |
-| **Zigbee2MQTT base topic** | `zigbee2mqtt` | MQTT base topic used by Zigbee2MQTT. |
+| **OpenCode LAN server** | `false` | Start an OpenCode server on internal port `4096` for clients on your local network. Map `4096/tcp` in the add-on Network settings. |
+| **LAN server CORS origins** | `[]` | Exact browser origins allowed to call the LAN server directly. `opencode attach` does not need this. |
+| **OpenChamber LAN web UI** | `false` | Publish OpenChamber on internal port `4097` at the root path. Only works with `interface_mode: openchamber`; map `4097/tcp` to reach it. |
+
+### Model Providers
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| **PPQ private TEE models (beta)** | `false` | Start the internal PPQ private-mode encryption proxy. Requires **PPQ API key**. |
+| **PPQ API key** | `""` | API key for PPQ private-mode models. Stored as a masked add-on option. |
+
+### Optional Hardware
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| **Zigbee2MQTT URL** | `""` | Address of your Zigbee2MQTT frontend. Only needed when the Zigbee2MQTT add-on is not discovered automatically. |
+| **Zigbee2MQTT base topic** | `zigbee2mqtt` | MQTT base topic that Zigbee2MQTT publishes on. |
 | **Serial devices** | `[]` | Optional list of host UART/serial devices to map into the add-on. Use this for workflows that need direct serial access, such as local USB flashing or adapter inspection. See [Serial Devices](#serial-devices). |
-
-### Privacy and Remote Access
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| **Enable PPQ private TEE models (beta)** | `false` | Start an internal PPQ private-mode encryption proxy and add it as an OpenCode provider. Requires **PPQ API key**. This feature should still be considered beta. See [PPQ Private TEE Models (Beta)](#ppq-private-tee-models-beta). |
-| **PPQ API key** | `""` | API key for PPQ private-mode models. Stored as a masked add-on option and exported only to the internal PPQ proxy service. Only needed for the PPQ feature. |
-| **Enable OpenCode LAN server** | `false` | Start an OpenCode server on internal port `4096` so clients on your local network can attach with the OpenCode CLI. Also requires mapping `4096/tcp` in the add-on Network settings. See [LAN Server Mode](#lan-server-mode). |
 
 ### Advanced Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| **Enable add-on folder guidance** | `false` | Shows terminal guidance for Home Assistant add-on development folders. The add-on mounts `/addons` and `/addon_configs` for development access; `/addon_configs` may contain sensitive add-on data. This is guidance only, not a hard filesystem permission boundary. |
-| **Environment variables** | `[]` | Define custom environment variables that are available to OpenCode and the terminal shell. Each entry has a `name` and `value`. Useful for provider credentials or configuration that must be set as environment variables (e.g. `AZURE_RESOURCE_NAME`, `OPENAI_API_KEY`). Critical system variables (`HOME`, `PATH`, `SUPERVISOR_TOKEN`, etc.) cannot be overridden. |
-| **Custom OpenCode configuration** | `""` | Paste a JSON object to customize OpenCode's own configuration (providers, keybindings, etc.). This is merged with the add-on's built-in config. Leave empty for defaults. See [OpenCode config docs](https://opencode.ai/docs/config) for the full schema. |
+| **Environment variables** | `[]` | Define extra environment variables for OpenCode and the terminal shell. Critical system variables cannot be overridden. |
+| **Custom OpenCode configuration** | `""` | A JSON object merged into OpenCode's configuration. See [OpenCode config docs](https://opencode.ai/docs/config) for the full schema. |
 
 ### Resource Usage
 
@@ -208,7 +227,7 @@ LAN server mode lets you attach to the Home Assistant-hosted OpenCode session fr
 
 To enable LAN access:
 
-1. In the add-on **Configuration** tab, set **Enable OpenCode LAN server** to `true`.
+1. In the add-on **Configuration** tab, turn on **OpenCode LAN server**.
 2. In the add-on **Network** settings, map `4096/tcp` to the host port you want to use.
 3. Save and restart the add-on.
 
@@ -228,6 +247,18 @@ The add-on log shows the current Home Assistant port mapping when the server sta
 
 Security warning: enabling this service and mapping the port exposes an OpenCode server on your LAN. Only use this on trusted networks, restrict access with your network/firewall controls, and never expose the port to the internet or untrusted networks.
 
+#### Connecting a browser-based client (CORS)
+
+`opencode attach` and other non-browser clients work without extra configuration. Browser-based clients that call the LAN server directly are subject to the browser's CORS policy. Without an allowed origin, a client may list providers and models but fail when sending chat messages or opening the event stream.
+
+To allow a browser client:
+
+1. Find the exact origin it uses, including scheme, host, and port, but no path.
+2. Add that value under **LAN server CORS origins** in the add-on **Configuration** tab.
+3. Save and restart the add-on.
+
+For example: `http://192.168.1.20:8080`.
+
 ### OpenChamber LAN Web UI
 
 By default the OpenChamber web UI (`interface_mode: openchamber`) is served **only** through Home Assistant Ingress at `/api/hassio_ingress/<token>/`. That is the recommended path because Home Assistant provides the authentication layer.
@@ -237,7 +268,7 @@ If you instead want a clean root URL for a reverse proxy or tunnel — for examp
 To enable it:
 
 1. Set **Interface mode** to `openchamber`.
-2. Set **Enable OpenChamber LAN web UI** to `true`.
+2. Turn on **OpenChamber LAN web UI**.
 3. In the add-on **Network** settings, map `4097/tcp` to the host port you want to use.
 4. Save and restart the add-on.
 
@@ -465,7 +496,7 @@ OpenCode supports the transition now by:
 
 - Detecting whether the running Home Assistant instance reports the native `llm` component.
 - Probing native MCP endpoints such as `/api/mcp/<API ID>` when available.
-- Testing an opt-in native MCP bridge first in the beta channel before stable exposure.
+- Providing an opt-in native MCP bridge that remains explicitly marked beta while Home Assistant's API matures.
 - Exposing this status through the `get_agent_capabilities` MCP tool and the `ha://agent/capabilities` resource.
 - Providing `get_home_context` for compact area/domain/entity understanding without dumping every state.
 - Providing `get_ha_llm_development_guide` for custom integration authors building native `<integration>/llm.py` providers.
@@ -478,6 +509,12 @@ Long-term plan:
 - Keep OpenCode MCP focused on add-on-specific and power-user workflows: safe config writing, validation, filesystem-aware edits, admin/dev tasks, screenshots, firmware/update flows, and troubleshooting.
 - Evaluate a companion custom integration or public API bridge if Home Assistant's native LLM platform remains integration-only and does not expose a direct add-on API.
 - Keep the add-on aligned with Home Assistant's architecture decisions so users who want to test agent-focused HA features have a first-class workbench and so OpenCode can become a premium consumer of HA-native LLM capabilities as they become available.
+
+### Native Home Assistant MCP Bridge (Beta)
+
+When **Native Home Assistant MCP bridge (beta)** is enabled, the add-on adds a second OpenCode MCP server named `homeassistant_native` that forwards requests to Home Assistant Core's native MCP endpoint. **Native MCP API ID** defaults to `assist`, which targets `/api/mcp/assist`; leave it empty to use the configured `/api/mcp` endpoint instead.
+
+Use this only with a Home Assistant version that provides the endpoint. The regular `homeassistant` MCP server remains available and is the supported tool surface when native MCP is unavailable.
 
 ### MCP Capabilities Overview
 
@@ -499,7 +536,7 @@ For newer MCP-style structured data, tools return machine-readable JSON text wit
 **Option 1: Via Configuration (Recommended)**
 
 1. Go to the app **Configuration** tab
-2. Enable **"Enable MCP Home Assistant Integration"**
+2. Enable **"MCP integration"**
 3. Save and restart the app
 
 **Option 2: Via Command Line**
@@ -1093,7 +1130,7 @@ action:
 LSP is enabled by default. To disable it:
 
 1. Go to the app **Configuration** tab
-2. Set **"Enable LSP Home Assistant Integration"** to `false`
+2. Set **"LSP integration"** to `false`
 3. Restart the app
 
 ### Technical Notes
