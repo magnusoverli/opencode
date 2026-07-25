@@ -26,6 +26,8 @@ ADDON_ACCESS_ENABLED=$(bashio::config 'addon_access_enabled' || echo "false")
 PPQ_PRIVATE_ENABLED=$(bashio::config 'ppq_private_enabled' || echo "false")
 RESTRICT_SENSITIVE_FILES=$(bashio::config 'restrict_sensitive_files' 2>/dev/null || echo "true")
 FOCUS_MODE=$(bashio::config 'focus_mode' 2>/dev/null || echo "false")
+HOME_BRIEFING_ENABLED=$(bashio::config 'home_briefing_enabled' 2>/dev/null || echo "true")
+DECISION_NOTES_ENABLED=$(bashio::config 'decision_notes_enabled' 2>/dev/null || echo "true")
 
 ACCESS_TOKEN=$(bashio::config 'access_token' || echo "")
 PPQ_API_KEY=$(bashio::config 'ppq_api_key' || echo "")
@@ -47,7 +49,16 @@ if [ "${FOCUS_MODE}" != "true" ]; then
     FOCUS_MODE="false"
 fi
 
-bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE}"
+# Home context features are on by default, so anything other than an explicit
+# "false" (including an option absent from an older options.json) means on.
+if [ "${HOME_BRIEFING_ENABLED}" != "false" ]; then
+    HOME_BRIEFING_ENABLED="true"
+fi
+if [ "${DECISION_NOTES_ENABLED}" != "false" ]; then
+    DECISION_NOTES_ENABLED="true"
+fi
+
+bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED}"
 
 # Set up persistent HOME and npm global prefix for OpenCode runtime updates.
 export HOME="/data"
@@ -269,6 +280,20 @@ if [ "${SCREENSHOT_ENABLED}" = "true" ]; then
 else
     bashio::log.info "Screenshot tool disabled (enable in Configuration tab to use visual verification)"
 fi
+
+# ==============================================================================
+# Export home context flags
+# The MCP server reads OPENCODE_DECISION_NOTES to decide whether to offer the
+# decision-note tools; the context generator reads all of these to describe
+# which add-on capabilities are actually active.
+# ==============================================================================
+
+printf 'export OPENCODE_HOME_BRIEFING=%s\n' "${HOME_BRIEFING_ENABLED}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_DECISION_NOTES=%s\n' "${DECISION_NOTES_ENABLED}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_MCP_ENABLED=%s\n' "${MCP_ENABLED}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_LSP_ENABLED=%s\n' "${LSP_ENABLED}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_RESTRICT_SENSITIVE_FILES=%s\n' "${RESTRICT_SENSITIVE_FILES}" >> "${ENV_VARS_FILE}"
+chmod 600 "${ENV_VARS_FILE}"
 
 # ==============================================================================
 # Background service discovery (Zigbee2MQTT + ESPHome)
@@ -498,29 +523,53 @@ fi
 # ==============================================================================
 # Deploy AGENTS.md to Home Assistant config directory
 # On first install: copy the full file
-# On update: if user hasn't customized it, refresh to get latest instructions
+# On update: refresh only when the deployed copy is byte-for-byte what this
+# add-on last wrote, so user edits are never overwritten.
+#
+# The previous check looked for the "# Home Assistant OpenCode Rules" heading,
+# which every customized file still contained — so following the documented
+# advice to add rules to AGENTS.md lost them at the next add-on update. The
+# supported place for user instructions is now /homeassistant/AGENTS.local.md,
+# which the add-on never writes.
+#
 # A fresh help stamp means the deployed copy already has current help injected,
 # so both the refresh-copy and the injection passes are skipped.
 # ==============================================================================
 
+AGENTS_TARGET="/homeassistant/AGENTS.md"
+AGENTS_HASH_FILE="/data/.agents_md_hash"
 AGENTS_REFRESHED=false
 
-if [ ! -f "/homeassistant/AGENTS.md" ]; then
-    cp /opt/ha-mcp-server/AGENTS.md /homeassistant/AGENTS.md
+agents_md_hash() {
+    sha256sum "$1" 2>/dev/null | cut -d' ' -f1
+}
+
+if [ ! -f "${AGENTS_TARGET}" ]; then
+    cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
     AGENTS_REFRESHED=true
     bashio::log.info "Deployed default AGENTS.md to /homeassistant/"
-    bashio::log.info "You can customize AI instructions by editing AGENTS.md"
+    bashio::log.info "Add your own instructions in /homeassistant/AGENTS.local.md - it is loaded too and never overwritten"
 elif [ "${HELP_STAMP_FRESH}" = "true" ]; then
     bashio::log.info "AGENTS.md is current (addon version unchanged) - skipping refresh"
+elif [ ! -f "${AGENTS_HASH_FILE}" ]; then
+    # First start after the add-on began tracking edits: an edited file and an
+    # untouched one are indistinguishable, so keep a copy before refreshing.
+    cp "${AGENTS_TARGET}" "${AGENTS_TARGET}.bak"
+    cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
+    AGENTS_REFRESHED=true
+    bashio::log.info "Updated AGENTS.md with latest AI instructions"
+    bashio::log.info "Your previous AGENTS.md was saved to ${AGENTS_TARGET}.bak"
+    bashio::log.info "Move any customizations into /homeassistant/AGENTS.local.md - future updates never touch that file"
 else
-    # Check if the user has customized AGENTS.md by comparing a known marker
-    # If it still contains our marker comment, it's safe to update
-    if grep -q "# Home Assistant OpenCode Rules" /homeassistant/AGENTS.md 2>/dev/null; then
-        cp /opt/ha-mcp-server/AGENTS.md /homeassistant/AGENTS.md
+    AGENTS_CURRENT_HASH=$(agents_md_hash "${AGENTS_TARGET}")
+    AGENTS_EXPECTED_HASH=$(cat "${AGENTS_HASH_FILE}" 2>/dev/null || echo "")
+    if [ -n "${AGENTS_CURRENT_HASH}" ] && [ "${AGENTS_CURRENT_HASH}" = "${AGENTS_EXPECTED_HASH}" ]; then
+        cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
         AGENTS_REFRESHED=true
         bashio::log.info "Updated AGENTS.md with latest AI instructions"
     else
-        bashio::log.info "AGENTS.md has been customized by user - skipping update"
+        bashio::log.info "AGENTS.md has your own edits - keeping it and skipping the update"
+        bashio::log.info "Instructions in /homeassistant/AGENTS.local.md are loaded as well and are never overwritten"
     fi
 fi
 
@@ -594,9 +643,27 @@ if [ "${AGENTS_REFRESHED}" = "true" ] && command -v zigporter &>/dev/null && [ -
     fi
 fi
 
+# Remember exactly what we wrote, including any injected help, so the next
+# update can tell an untouched file from one the user has edited.
+if [ "${AGENTS_REFRESHED}" = "true" ] && [ -f "${AGENTS_TARGET}" ]; then
+    agents_md_hash "${AGENTS_TARGET}" > "${AGENTS_HASH_FILE}"
+fi
+
 # Record the stamp so unchanged boots skip the version spawns and re-injection
 if [ "${HELP_STAMP_FRESH}" != "true" ]; then
     printf '%s:%s:%s\n' "${ADDON_VERSION}" "${HAB_VERSION:-unknown}" "${ZIGPORTER_VERSION:-unknown}" > "${HELP_STAMP_FILE}"
+fi
+
+# ==============================================================================
+# Deploy the AGENTS.local.md example (first install only)
+# Shipped as .example so it is inert: an example file cannot be loaded as
+# instructions by accident, and cannot be silently overwritten later. The user
+# renames it to AGENTS.local.md when they want their own rules loaded.
+# ==============================================================================
+
+if [ ! -f "/homeassistant/AGENTS.local.md" ] && [ ! -f "/homeassistant/AGENTS.local.md.example" ]; then
+    cp /opt/ha-mcp-server/AGENTS.local.md.example /homeassistant/AGENTS.local.md.example
+    bashio::log.info "Deployed AGENTS.local.md.example - rename it to AGENTS.local.md to add your own instructions"
 fi
 
 # ==============================================================================
@@ -620,8 +687,10 @@ LSP_DISABLED=$([ "${LSP_ENABLED}" = "true" ] && echo "false" || echo "true")
 PPQ_PROVIDER_ENABLED=$([ "${PPQ_PRIVATE_ENABLED}" = "true" ] && [ "${PPQ_API_KEY_CONFIGURED}" = "true" ] && echo "true" || echo "false")
 RESTRICT_BOOL=$([ "${RESTRICT_SENSITIVE_FILES}" = "true" ] && echo "true" || echo "false")
 FOCUS_BOOL=$([ "${FOCUS_MODE}" = "true" ] && echo "true" || echo "false")
+BRIEFING_BOOL=$([ "${HOME_BRIEFING_ENABLED}" = "true" ] && echo "true" || echo "false")
+NOTES_BOOL=$([ "${DECISION_NOTES_ENABLED}" = "true" ] && echo "true" || echo "false")
 
-jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" --argjson restrict "${RESTRICT_BOOL}" --argjson focus "${FOCUS_BOOL}" '
+jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" --argjson restrict "${RESTRICT_BOOL}" --argjson focus "${FOCUS_BOOL}" --argjson briefing "${BRIEFING_BOOL}" --argjson notes "${NOTES_BOOL}" '
     .mcp.homeassistant.enabled = $mcp |
     .mcp.homeassistant.environment.HA_NATIVE_MCP_API_ID = $native_ha_mcp_api_id |
     .mcp.homeassistant_native.enabled = ($mcp and $native_ha_mcp) |
@@ -642,6 +711,13 @@ jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --argjson mcp "${MCP_BOO
     if $focus then
         .instructions = ((.instructions // []) + ["/opt/ha-mcp-server/FOCUS_MODE.md"])
     else . end |
+    if $briefing then
+        .instructions = ((.instructions // []) + ["/data/context/home-briefing.md"])
+    else . end |
+    if $notes then
+        .instructions = ((.instructions // []) + ["/data/context/decision-notes.md"])
+    else . end |
+    .instructions = ((.instructions // []) + ["/homeassistant/AGENTS.local.md"]) |
     if $ppq then
         .provider = (.provider // {}) |
         .provider["ppq-private"] = {
@@ -687,6 +763,38 @@ jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --argjson mcp "${MCP_BOO
 ' /opt/ha-mcp-server/opencode-ha.json > /data/.config/opencode/opencode.json
 
 bashio::log.info "OpenCode configuration generated successfully"
+
+# ==============================================================================
+# Generate the home context files
+# Writes /data/context/home-briefing.md (what this installation is) and
+# /data/context/decision-notes.md (digest of the user's approved decisions).
+#
+# Fully detached, like service discovery above: the configuration-directory
+# scan lands immediately, and the parts that need Home Assistant are retried in
+# the background because Core is often still starting when the add-on does.
+# Both files are regenerated from scratch every start, so they cannot grow.
+# ==============================================================================
+
+mkdir -p /data/context
+
+if [ "${HOME_BRIEFING_ENABLED}" = "true" ] || [ "${DECISION_NOTES_ENABLED}" = "true" ]; then
+    bashio::log.info "Generating home context in the background (briefing=${HOME_BRIEFING_ENABLED} decision notes=${DECISION_NOTES_ENABLED})..."
+    OPENCODE_HOME_BRIEFING="${HOME_BRIEFING_ENABLED}" \
+    OPENCODE_DECISION_NOTES="${DECISION_NOTES_ENABLED}" \
+    OPENCODE_MCP_ENABLED="${MCP_ENABLED}" \
+    OPENCODE_LSP_ENABLED="${LSP_ENABLED}" \
+    OPENCODE_RESTRICT_SENSITIVE_FILES="${RESTRICT_SENSITIVE_FILES}" \
+    OPENCODE_ADDON_ACCESS_ENABLED="${ADDON_ACCESS_ENABLED}" \
+    SCREENSHOT_ENABLED="${SCREENSHOT_ENABLED}" \
+    Z2M_URL="${Z2M_URL:-}" \
+        setsid node /usr/local/bin/generate-home-context.mjs \
+        >/tmp/home-context.log 2>&1 </dev/null &
+else
+    # Both turned off: clear anything a previous configuration left behind so no
+    # stale context keeps reaching the model.
+    rm -f /data/context/home-briefing.md /data/context/decision-notes.md
+    bashio::log.info "Home context disabled - generated context files removed"
+fi
 
 # ==============================================================================
 # Inject custom OpenCode config.json (optional, for advanced users)

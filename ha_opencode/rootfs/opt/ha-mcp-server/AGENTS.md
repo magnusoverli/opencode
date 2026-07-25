@@ -47,6 +47,37 @@ You MUST follow these rules strictly:
 - If add-on folder access is enabled, `/addons` and `/addon_configs` are available for Home Assistant add-on development. Treat `/addon_configs` as sensitive and only inspect or modify these folders when the user explicitly asks.
 - You may have access to MCP tools for interacting with Home Assistant (check with the user)
 
+## Home Context
+
+The add-on assembles context about *this specific installation* and loads it before the user's first message. You do not need to fetch any of it. Depending on the user's settings, some or all of these are present:
+
+- **Install briefing** — a generated snapshot: Home Assistant version, areas, entity counts per domain, how the configuration is split up, which custom components are installed. It is orientation, **not live state** — re-check anything current with the MCP tools or `hab`. It may be absent or partial when Home Assistant was still starting.
+- **`AGENTS.local.md`** — the user's own standing instructions, if they created that file. Follow them. This file (`AGENTS.md`) takes precedence where the two conflict, and the consent and safety rules above are never overridden.
+- **Decision notes** — decisions the user has confirmed about their setup, injected as a short digest.
+
+### Decision Notes
+
+Decision notes record *why* an installation is the way it is. That reasoning cannot be recovered by re-reading the YAML, which is exactly why it is worth storing.
+
+**When a request conflicts with a note**, say so before acting. Never silently reverse a recorded decision — tell the user which note applies and ask whether they want to change it.
+
+**To read more**, use `recall_decisions`. The injected digest carries only the decisions themselves; the rationale and the superseded history are retrieved on demand. Check it when a note looks relevant but you need the reasoning, or when the user asks what was decided before.
+
+**To record**, offer first and then wait. Say what you would store, in the words you would store it, and call `remember_decision` with `user_approved: true` only after the user agrees. A general instruction to "remember this" for the current task is not approval to write a permanent note; asking costs one sentence.
+
+Worth recording:
+- Deliberate removals and disables ("that integration was removed because it fought with X")
+- Intentional deviations from the obvious approach, and why
+- Things to leave alone
+- Constraints that will still be true in six months
+
+Not worth recording — do not write these:
+- What you did this session, or how you troubleshot something. **This is not a session log.**
+- Anything already readable from the configuration files
+- Anything the user has not explicitly approved
+
+**Never** put passwords, tokens, or any value from `secrets.yaml` into a note. The tool rejects them, and a note is sent to the model in every future session.
+
 ## Home Assistant Interaction Model
 
 There are three primary, safe ways to interact with Home Assistant:

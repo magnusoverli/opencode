@@ -20,6 +20,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **Ingress Support**: Access directly from the Home Assistant sidebar
 - **Provider Agnostic**: Works with Anthropic, OpenAI, Google, and 70+ other AI providers
 - **MCP Integration**: Deep Home Assistant integration with Tools, Resources, Prompts, and Intelligence
+- **Home Context**: Sessions start knowing your installation — a generated briefing of your setup, your own instructions in `AGENTS.local.md`, and lasting decisions you have approved
 - **Home Assistant Native LLM Readiness**: Detects HA's emerging native `llm` component and documents how OpenCode will adopt HA-native agent capabilities as they become available
 - **Focus-friendly responses (Beta)**: Optional action-first, concise, progress-aware response guidance
 - **Visual Verification**: Screenshot tool for verifying dashboard changes with AI vision
@@ -84,6 +85,8 @@ OpenChamber's own built-in update check is disabled in this add-on. OpenChamber 
 | **Home Assistant access token** | `""` | Long-lived access token for Home Assistant Core. Required by the screenshot tool and ESPHome commands. |
 | **Native Home Assistant MCP bridge (beta)** | `false` | Adds an optional second MCP server for Home Assistant's native LLM MCP endpoint when the running Home Assistant version provides it. |
 | **Native MCP API ID** | `assist` | Applies only when the native bridge is on. The default `assist` targets `/api/mcp/assist`; leave empty to use the configured `/api/mcp` endpoint. |
+| **Install briefing** | `true` | Give OpenCode a generated summary of your installation — version, areas, entity counts, configuration layout — so it does not rediscover them each session. See [Home Context](#home-context). |
+| **Decision notes** | `true` | Let OpenCode carry lasting decisions between sessions, recorded only when you approve each one. See [Decision notes](#decision-notes). |
 
 ### Access Control
 
@@ -397,6 +400,10 @@ The app includes helper commands:
 | `ha-mcp disable` | Disable Home Assistant MCP integration |
 | `ha-mcp status` | Check MCP integration status |
 | `ha-mcp test` | Test MCP server connection |
+| `ha-context status` | Show which context files OpenCode is given and what they cost |
+| `ha-context show` | Print the exact context OpenCode receives about your setup |
+| `ha-context refresh` | Regenerate the install briefing and decision-notes digest now |
+| `ha-context reset` | Delete the generated context files (rebuilt on refresh or restart) |
 | `hab --help` | Show hab CLI help (Home Assistant Builder) |
 | `hab entity list` | List all entities via hab CLI |
 | `hab area list` | List all areas via hab CLI |
@@ -551,7 +558,7 @@ Then restart OpenCode (exit and run `opencode` again).
 
 ---
 
-## MCP Tools (37 Available)
+## MCP Tools (41 Available)
 
 ### State Management
 
@@ -643,11 +650,20 @@ Then restart OpenCode (exit and run `opencode` again).
 |------|-------------|
 | `watch_firmware_update` | Monitor or start firmware updates (ESPHome, WLED, Zigbee) with real-time progress |
 
-### hab CLI Gateway
+### Decision Notes
+
+| Tool | Description |
+|------|-------------|
+| `remember_decision` | Record a lasting decision or constraint about your setup so future sessions honor it. Only writes after you explicitly approve. Requires the `decision_notes_enabled` option. |
+| `recall_decisions` | Read the full notes, including the rationale and superseded history that the session digest leaves out |
+| `supersede_decision` | Retire notes that no longer apply. They stay in the file for the record but stop reaching new sessions. |
+
+### CLI Gateways
 
 | Tool | Description |
 |------|-------------|
 | `hab_run` | Run any [hab](https://github.com/balloob/home-assistant-build-cli) CLI command as a native MCP tool. Covers dashboard CRUD, area/floor/zone management, helpers, backups, blueprints, automation CRUD via API, and more. Pass the command without the `hab` prefix (e.g., `area list`, `dashboard list`). |
+| `zigporter_run` | Run any zigporter CLI command as a native MCP tool. Covers Zigbee cascade renames, device inspection, stale-device cleanup, and mesh mapping. Pass the command without the `zigporter` prefix (e.g., `list-devices --json`). |
 
 ### Visual Verification
 
@@ -1155,49 +1171,120 @@ OpenCode starts in the `/homeassistant` directory, which is your Home Assistant 
 
 When add-on folder guidance is enabled, the terminal also highlights `/addons` and `/addon_configs` for Home Assistant add-on development. These folders are mounted into the container for development access. Treat `/addon_configs` as sensitive because it may contain configuration data for other add-ons.
 
-## Customizing AI Instructions (AGENTS.md)
+## Home Context
 
-The app creates an `AGENTS.md` file in your Home Assistant config directory (`/homeassistant/AGENTS.md`) on first install. This file contains instructions that guide how OpenCode behaves when working with your Home Assistant setup.
+Every session starts with OpenCode knowing something about *your* installation, so it does not have to rediscover it from scratch each time. That context comes from four files, and you can read all of them.
 
-### Default Instructions Include:
+| File | What it is | Who writes it |
+|------|-----------|---------------|
+| `/config/AGENTS.md` | The add-on's own instructions: consent rules, Home Assistant knowledge, YAML style | The add-on. Refreshed on update. |
+| `/config/AGENTS.local.md` | **Your** standing instructions | You. The add-on never touches it. |
+| Install briefing | A generated summary of your setup | The add-on, rebuilt on every start |
+| Decision notes | Lasting decisions you have approved | OpenCode, only when you say yes |
 
-- **User consent rules** - The AI won't make changes without your explicit approval
-- **Home Assistant knowledge** - File structure, YAML syntax, automation patterns
-- **Safety guidelines** - Protection for secrets, backup reminders, validation checks
-- **MCP awareness** - How to use MCP tools when available
+Run `ha-context show` in the terminal to see exactly what is being sent, and `ha-context status` for a summary of what each file costs.
 
-### Customizing the Instructions
+### Your own instructions (AGENTS.local.md)
 
-You can edit `AGENTS.md` to add your own rules or context:
+To give OpenCode standing instructions of your own, create `/config/AGENTS.local.md`. It is loaded at the start of every session alongside the add-on's own instructions.
 
-1. Open **File Editor** (or VS Code Server app)
-2. Navigate to `/config/AGENTS.md`
-3. Add your customizations
-
-**Example additions:**
+A commented example is placed at `/config/AGENTS.local.md.example` on first install — rename it (drop the `.example`) and edit.
 
 ```markdown
-## My Home Setup
+## About my setup
 
-- I use Zigbee2MQTT for all Zigbee devices
-- My house has 3 floors: basement, main, upstairs
-- Prefer MQTT automations over native HA automations
-- Always use packages for new configuration
+- All Zigbee devices go through Zigbee2MQTT, not ZHA
+- The house has 3 floors: basement, main, upstairs
+- New configuration goes in packages/, one file per feature
 
-## Coding Preferences
+## How I want you to work
 
-- Use descriptive entity_id names with room prefix
-- Add comments explaining automation logic
-- Prefer template sensors over Node-RED
+- Name entities <area>_<device>_<function>
+- Always show me the diff before writing, even for one-line changes
+
+## Leave these alone
+
+- Anything under custom_components/ — those are managed through HACS
 ```
 
-### Resetting to Default
+Things worth knowing:
 
-If you want to restore the default `AGENTS.md`:
+- **Add-on updates never overwrite it.** This is the supported place for your customizations.
+- **Delete the file to stop loading it.** There is no setting to turn it off.
+- **`AGENTS.md` wins on conflict.** Safety rules and approval requirements stay in force.
+- **It is sent with every request,** so keep it short and specific. Standing preferences are useful; a diary is not.
+- **Never put secrets in it.** Reference them with `!secret` instead.
 
-1. Delete or rename the existing file
+> **Editing `AGENTS.md` itself:** you can, but prefer `AGENTS.local.md`. The add-on refreshes `AGENTS.md` on update to keep its safety and syntax guidance current, and it only skips that refresh when it can see the file is unmodified. If you do edit it, your version is kept and you stop receiving instruction updates.
+
+### Install briefing
+
+**Option: Install briefing** (default on)
+
+At every start, the add-on writes a short summary of your installation and gives it to OpenCode:
+
+- Home Assistant version, installation type, hardware, time zone, and unit system
+- How your configuration is split up — `!include` layout, whether `packages/` is in use, and whether `automations.yaml` is managed by the UI editor
+- Your areas and floors, by name
+- Entity counts per domain (counts, not a dump of every entity)
+- Integrations in use, device stacks (ZHA, Z-Wave JS, ESPHome, Zigbee2MQTT…), and any custom components
+- Which add-on capabilities are actually switched on
+
+This is why OpenCode can answer "which areas do I have?" without a round trip, and why it stops guessing at entity or area names.
+
+Two properties keep it honest:
+
+- **It cannot grow.** The briefing is rebuilt from scratch on every start and capped at roughly 500 tokens. It is not a log, and nothing accumulates in it.
+- **It cannot leak.** It is generated by the add-on, not by the AI. Latitude, longitude, `secrets.yaml` contents, and access tokens are never included — the add-on reads what it needs and discards it.
+
+If Home Assistant Core is still starting when the add-on comes up, the briefing is written from your configuration files alone and enriched a few moments later. It says so when that happens.
+
+### Decision notes
+
+**Option: Decision notes** (default on)
+
+Configuration files record *what* your setup does. They cannot record *why* — that an integration was removed on purpose, that a toggle is inverted deliberately, that some corner should be left alone. That reasoning is what gets lost between sessions, and re-explaining it is the tax this feature removes.
+
+**Nothing is recorded unless you approve it.** OpenCode proposes a note, shows you the exact wording, and writes only after you agree. This matches how the rest of the add-on works — it does not change files behind your back, and this is a file.
+
+Notes live in `/config/opencode/decisions.yaml` as plain YAML:
+
+```yaml
+version: 1
+notes:
+  - id: 2026-07-26-node-red-automations-are-off-limits
+    date: 2026-07-26
+    title: Node-RED automations are off limits
+    decision: Do not migrate or edit the Node-RED flows.
+    rationale: They are maintained outside Home Assistant and would be overwritten.
+    integrations:
+      - nodered
+    status: active
+```
+
+You own that file: read it in File Editor, edit it, or delete it. It is included in your Home Assistant backups and diffs cleanly if you keep `/config` under version control.
+
+**On context cost.** Only the *decision* lines of *active* notes reach the model — the rationale and any retired notes stay in the file and are fetched on demand. Active notes are capped at 40 and the injected digest at roughly 500 tokens. When a decision is replaced, the old note is marked superseded rather than deleted: it disappears from the session digest but stays in the file. That is how the cost stays flat instead of creeping up as notes accumulate.
+
+**On safety.** Notes that contain a password, token, or any value found in your `secrets.yaml` are rejected outright. A note is sent to the model in every future session, so credentials have no business being in one.
+
+To manage them from the terminal:
+
+```bash
+ha-context notes          # print the file
+ha-context reset          # clear the generated context (notes are kept)
+ha-context reset --notes --yes   # also delete your notes
+```
+
+### Turning it off
+
+Both features are on by default and switch off independently in the **Configuration** tab. With **Install briefing** off, no briefing is generated or sent. With **Decision notes** off, the recording tools are not offered to the AI at all and no digest is sent; your existing `decisions.yaml` is left untouched.
+
+### Resetting AGENTS.md to default
+
+1. Delete or rename `/config/AGENTS.md`
 2. Restart the app
-3. A fresh default will be created
+3. A fresh default is created
 
 ## Tips
 
@@ -1269,12 +1356,23 @@ Your OpenCode sessions and API credentials are stored in `/data/` within the app
 - **Persists** across app restarts and updates
 - **Is private** to your Home Assistant instance
 
+Home context is split between the two locations on purpose:
+
+| Location | Contents | Notes |
+|----------|----------|-------|
+| `/data/context/` | The generated install briefing and decision-notes digest | Rebuilt from scratch on every start, so editing them has no effect |
+| `/config/AGENTS.local.md` | Your own instructions | Yours; never written by the add-on |
+| `/config/opencode/decisions.yaml` | Your decision notes | Yours; included in Home Assistant config backups |
+
+Nothing generated by the add-on leaves your Home Assistant instance except as part of the prompt sent to the AI provider you configured — which is exactly what the context is for. Run `ha-context show` to read it first.
+
 ## Security Notes
 
 - This app has access to your Home Assistant configuration files (read/write)
 - This app mounts `/addons` and `/addon_configs` for add-on development access. `/addon_configs` may contain sensitive data from other add-ons.
 - This app can view system logs (Core, Supervisor, Host)
 - When MCP is enabled, OpenCode can query entities and call services
+- The generated home context never includes `secrets.yaml` contents, access tokens, or your latitude and longitude, and decision notes containing a credential are rejected. Run `ha-context show` to read exactly what is sent.
 - Access is protected by Home Assistant authentication via ingress
 - Only users with access to the OpenCode panel can use this app
 

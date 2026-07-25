@@ -46,7 +46,10 @@ Works with **75+ AI providers**: Anthropic, OpenAI, Google, Groq, Ollama, and ma
 <td width="50%">
 
 #### 🔧 **Deep MCP Integration**
-37 tools, 14 resources, and 6 guided prompts for comprehensive Home Assistant interaction.
+41 tools, 14 resources, and 6 guided prompts for comprehensive Home Assistant interaction.
+
+#### 🧠 **Home Context**
+Sessions start knowing your installation instead of rediscovering it. A generated briefing describes your setup, `AGENTS.local.md` holds your own standing instructions, and approved decision notes carry the reasoning behind your configuration between sessions.
 
 #### 💡 **Intelligent LSP Support**
 Smart YAML editing with entity autocomplete, live hover information, deprecation warnings, and go-to-definition support.

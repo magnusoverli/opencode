@@ -25,7 +25,7 @@
  * - HA Alerts feed integration (global integration issue awareness)
  * - Visual verification via headless Chromium screenshots
  * 
- * TOOLS (37):
+ * TOOLS (41):
  * - Entity state management (get, search, history)
  * - Service calls with intelligent targeting
  * - Configuration validation and safe writing
@@ -93,6 +93,19 @@ import {
   probeNativeMcpEndpoint,
 } from "./lib/ha-native-mcp.js";
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
+import { extractSecretValues } from "./lib/context-budget.js";
+import {
+  DECISION_DIGEST_PATH,
+  DECISION_NOTES_DIR,
+  DECISION_NOTES_PATH,
+  LIMITS as DECISION_LIMITS,
+  activeNotes,
+  addNote,
+  parseDecisionNotes,
+  renderDecisionDigest,
+  searchNotes,
+  supersedeNotes,
+} from "./lib/decision-notes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -114,6 +127,17 @@ const ESPHOME_TOKEN_ERROR = "ESPHome tools require a Long-Lived Access Token.\n\
   "3. Go to Settings â†’ Add-ons â†’ OpenCode â†’ Configuration\n" +
   "4. Paste the token into the 'access_token' field\n" +
   "5. Restart the OpenCode add-on (with ESPHome already running)";
+
+// Decision notes: the durable "why" behind this installation's configuration.
+// Recorded only with the user's explicit approval; see lib/decision-notes.js.
+const DECISION_NOTES_ENABLED = process.env.OPENCODE_DECISION_NOTES === "true";
+
+const DECISION_NOTES_DISABLED_ERROR =
+  "Decision notes are turned off.\n\n" +
+  "To enable them:\n" +
+  "1. Go to Settings → Add-ons → OpenCode → Configuration\n" +
+  "2. Enable 'Decision notes'\n" +
+  "3. Restart the add-on";
 
 // Screenshot feature (visual verification of dashboards and UI)
 const SCREENSHOT_ENABLED = process.env.SCREENSHOT_ENABLED === "true";
@@ -1981,6 +2005,91 @@ function setValidationMemo(key, data) {
 // createTextContent, createResourceLink imported from ./lib/helpers.js
 
 // ============================================================================
+// DECISION NOTES STORAGE
+// ============================================================================
+
+// Storage locations, overridable so the write path can be exercised in tests
+// without touching a live Home Assistant configuration directory.
+const DECISION_NOTES_BASE_DIR = process.env.OPENCODE_DECISION_NOTES_DIR || DECISION_NOTES_DIR;
+const DECISION_NOTES_FILE = DECISION_NOTES_BASE_DIR === DECISION_NOTES_DIR
+  ? DECISION_NOTES_PATH
+  : join(DECISION_NOTES_BASE_DIR, "decisions.yaml");
+const DECISION_DIGEST_FILE = process.env.OPENCODE_DECISION_DIGEST_PATH || DECISION_DIGEST_PATH;
+
+/**
+ * Read the user's decision notes.
+ *
+ * A missing file is the normal starting state, not an error — notes only exist
+ * once the user has approved recording one.
+ */
+function readDecisionNotes() {
+  if (!existsSync(DECISION_NOTES_FILE)) {
+    return { ok: true, version: 1, notes: [], errors: [], exists: false };
+  }
+  const parsed = parseDecisionNotes(readFileSync(DECISION_NOTES_FILE, "utf8"));
+  return { ...parsed, exists: true };
+}
+
+/**
+ * Values from `secrets.yaml`, used only to reject notes that would leak one.
+ *
+ * The MCP server can read this file even when OpenCode's own read tool is
+ * blocked from it, which is precisely why the check belongs here rather than in
+ * a prompt instruction. The values are compared and discarded, never stored.
+ */
+function readSecretValues() {
+  try {
+    const path = join(HA_CONFIG_DIR, "secrets.yaml");
+    if (!existsSync(path)) return [];
+    return extractSecretValues(readFileSync(path, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Persist notes and refresh the injected digest in one step.
+ *
+ * The digest is what the next session actually sees, so letting the two drift
+ * would mean a recorded decision silently failing to take effect.
+ */
+function writeDecisionNotes(serialized, notes) {
+  mkdirSync(DECISION_NOTES_BASE_DIR, { recursive: true });
+  writeFileSync(DECISION_NOTES_FILE, serialized, "utf8");
+
+  const digest = renderDecisionDigest(notes);
+  mkdirSync(dirname(DECISION_DIGEST_FILE), { recursive: true });
+  if (digest.markdown) {
+    writeFileSync(DECISION_DIGEST_FILE, digest.markdown, "utf8");
+  } else if (existsSync(DECISION_DIGEST_FILE)) {
+    unlinkSync(DECISION_DIGEST_FILE);
+  }
+  return digest;
+}
+
+/** Shared refusal when the notes file cannot be parsed, so nothing is clobbered. */
+function decisionNotesParseError(parsed) {
+  return (
+    `# Decision notes — cannot write\n\n` +
+    `\`${DECISION_NOTES_FILE}\` could not be fully parsed, so it will not be overwritten:\n\n` +
+    parsed.errors.map((error) => `- ${error}`).join("\n") +
+    `\n\nAsk the user to fix or remove those entries, then try again. ` +
+    `The notes that do parse are still readable with \`recall_decisions\`.`
+  );
+}
+
+function formatNoteForDisplay(note) {
+  const lines = [`### ${note.title}`, `- id: \`${note.id}\``, `- date: ${note.date}`, `- status: ${note.status}`];
+  lines.push(`- decision: ${note.decision}`);
+  if (note.rationale) lines.push(`- rationale: ${note.rationale}`);
+  for (const field of ["entities", "files", "integrations"]) {
+    if (note[field]?.length) lines.push(`- ${field}: ${note[field].join(", ")}`);
+  }
+  if (note.superseded_by) lines.push(`- superseded by: \`${note.superseded_by}\``);
+  return lines.join("\n");
+}
+
+// ============================================================================
 // MCP SERVER SETUP
 // ============================================================================
 
@@ -2594,6 +2703,138 @@ const TOOLS = [
     },
   },
   
+  // === DECISION NOTES ===
+  {
+    name: "remember_decision",
+    title: "Remember a Decision",
+    description:
+      "Record a lasting decision or constraint about this Home Assistant installation so future sessions honor it — " +
+      "for example 'this integration was removed deliberately', 'the privacy toggle is inverted on purpose', or " +
+      "'leave the Node-RED automations alone'. " +
+      "ASK THE USER FIRST and only call this after they agree; set user_approved=true to confirm they did. " +
+      "Record durable reasoning, not activity: what was decided and why it should stay that way. Do not log routine " +
+      "actions, troubleshooting steps, or anything already visible in the configuration files. " +
+      "Never include passwords, tokens, or any value from secrets.yaml — such notes are rejected. " +
+      `At most ${DECISION_LIMITS.maxActive} active notes are kept; supersede one to make room.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: `Short claim, up to ${DECISION_LIMITS.title} characters (e.g. 'Node-RED automations are off limits').`,
+        },
+        decision: {
+          type: "string",
+          description:
+            `What was decided, up to ${DECISION_LIMITS.decision} characters. This text is injected into every ` +
+            "future session, so keep it to the decision itself.",
+        },
+        rationale: {
+          type: "string",
+          description:
+            `Why, up to ${DECISION_LIMITS.rationale} characters. Stored but not injected — it is retrieved on ` +
+            "demand with recall_decisions.",
+        },
+        entities: {
+          type: "array",
+          items: { type: "string" },
+          description: "Entity IDs this decision concerns.",
+        },
+        files: {
+          type: "array",
+          items: { type: "string" },
+          description: "Configuration files this decision concerns, relative to /homeassistant.",
+        },
+        integrations: {
+          type: "array",
+          items: { type: "string" },
+          description: "Integration domains this decision concerns.",
+        },
+        supersedes: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Ids of existing notes this one replaces. They are marked superseded rather than deleted, which is how " +
+            "the digest is kept small.",
+        },
+        user_approved: {
+          type: "boolean",
+          description:
+            "Set to true only after the user has explicitly agreed to record this note. Ask them first; do not " +
+            "assume approval from a general request.",
+        },
+      },
+      required: ["title", "decision", "user_approved"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: false,
+      destructive: false,
+    },
+  },
+  {
+    name: "recall_decisions",
+    title: "Recall Decisions",
+    description:
+      "Read the full decision notes for this installation, including the rationale and superseded history that the " +
+      "session digest leaves out. Use this when you need the reasoning behind a note, when a request appears to " +
+      "conflict with one, or when the user asks what has been decided before.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Case-insensitive substring matched against title, decision, rationale, and references.",
+        },
+        include_superseded: {
+          type: "boolean",
+          description: "Include notes that have been superseded (default: false).",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum notes to return (default: 20, max: 100).",
+          minimum: 1,
+          maximum: 100,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "supersede_decision",
+    title: "Supersede a Decision",
+    description:
+      "Retire decision notes that no longer apply. They are marked superseded rather than deleted, so the history " +
+      "stays in decisions.yaml while dropping out of the session digest. " +
+      "ASK THE USER FIRST — retiring a note changes how future sessions behave.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Note ids to supersede, as reported by recall_decisions.",
+        },
+        user_approved: {
+          type: "boolean",
+          description: "Set to true only after the user has explicitly agreed to retire these notes.",
+        },
+      },
+      required: ["ids", "user_approved"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: true,
+      destructive: false,
+    },
+  },
+
   // === UPDATE MANAGEMENT ===
   {
     name: "get_available_updates",
@@ -3151,15 +3392,21 @@ server.setRequestHandler(SetLevelRequestSchema, async (request) => {
 });
 
 // --- List Tools ---
+// Tools for features the user has turned off are not advertised at all, so
+// they neither cost tool-list tokens nor invite calls that can only fail.
+const DECISION_NOTE_TOOLS = new Set(["remember_decision", "recall_decisions", "supersede_decision"]);
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   sendLog("debug", "mcp-server", { action: "list_tools" });
   // Strip newer MCP spec fields that some clients may not support
   // Keep only: name, description, inputSchema (standard fields)
-  const compatibleTools = TOOLS.map(tool => ({
-    name: tool.name,
-    description: tool.description,
-    inputSchema: tool.inputSchema,
-  }));
+  const compatibleTools = TOOLS
+    .filter(tool => DECISION_NOTES_ENABLED || !DECISION_NOTE_TOOLS.has(tool.name))
+    .map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    }));
   return { tools: compatibleTools };
 });
 
@@ -4383,6 +4630,158 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return makeCompatibleResponse({
           content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 1.0 })],
           ...((!success) && { isError: true }),
+        });
+      }
+
+      // === DECISION NOTES ===
+      case "remember_decision": {
+        if (!DECISION_NOTES_ENABLED) {
+          return makeCompatibleResponse({
+            content: [createTextContent(DECISION_NOTES_DISABLED_ERROR, { audience: ["user"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        if (args?.user_approved !== true) {
+          return makeCompatibleResponse({
+            content: [createTextContent(
+              "# Decision note not recorded\n\n" +
+              "`user_approved` was not set. Ask the user whether they want this recorded — quote the exact note you " +
+              "propose to store — and call this tool again only after they agree.",
+              { audience: ["assistant"], priority: 1.0 }
+            )],
+            isError: true,
+          });
+        }
+
+        const existing = readDecisionNotes();
+        if (!existing.ok) {
+          return makeCompatibleResponse({
+            content: [createTextContent(decisionNotesParseError(existing), { audience: ["user", "assistant"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        const result = addNote(
+          { version: existing.version, notes: existing.notes },
+          args,
+          { now: new Date(), secretValues: readSecretValues() },
+        );
+
+        if (result.error) {
+          sendLog("info", "decision-notes", { action: "rejected" });
+          return makeCompatibleResponse({
+            content: [createTextContent(`# Decision note not recorded\n\n${result.error}`, { audience: ["user", "assistant"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        const digest = writeDecisionNotes(result.serialized, result.state.notes);
+        sendLog("info", "decision-notes", { action: "recorded", id: result.note.id });
+
+        const active = activeNotes(result.state.notes).length;
+        return makeCompatibleResponse({
+          content: [createTextContent(
+            `# Decision recorded\n\n` +
+            `**${result.note.title}**\n\n` +
+            `Saved to \`${DECISION_NOTES_FILE}\` as \`${result.note.id}\`. ` +
+            `Future sessions will see it automatically.\n\n` +
+            `Active notes: ${active}/${DECISION_LIMITS.maxActive} · session digest: ${digest.bytes} bytes\n\n` +
+            `The user can read, edit, or delete this file at any time, or run \`ha-context notes\` in the terminal.`,
+            { audience: ["user", "assistant"], priority: 0.8 }
+          )],
+        });
+      }
+
+      case "recall_decisions": {
+        if (!DECISION_NOTES_ENABLED) {
+          return makeCompatibleResponse({
+            content: [createTextContent(DECISION_NOTES_DISABLED_ERROR, { audience: ["user"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        const existing = readDecisionNotes();
+        if (!existing.exists) {
+          return makeCompatibleResponse({
+            content: [createTextContent(
+              "No decision notes have been recorded for this installation yet. " +
+              "When a lasting decision is made, offer to record it with `remember_decision`.",
+              { audience: ["assistant"], priority: 0.5 }
+            )],
+          });
+        }
+
+        const matches = searchNotes(existing.notes, {
+          query: args?.query,
+          includeSuperseded: args?.include_superseded,
+          limit: args?.limit,
+        });
+
+        const header = args?.query
+          ? `# Decision notes matching "${args.query}" (${matches.length})`
+          : `# Decision notes (${matches.length})`;
+        const warning = existing.ok
+          ? ""
+          : `\n\n> Some entries in \`${DECISION_NOTES_FILE}\` could not be parsed and are not shown:\n` +
+            existing.errors.map((error) => `> - ${error}`).join("\n");
+        const body = matches.length
+          ? matches.map(formatNoteForDisplay).join("\n\n")
+          : "_No matching notes._";
+
+        return makeCompatibleResponse({
+          content: [createTextContent(`${header}${warning}\n\n${body}`, { audience: ["assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "supersede_decision": {
+        if (!DECISION_NOTES_ENABLED) {
+          return makeCompatibleResponse({
+            content: [createTextContent(DECISION_NOTES_DISABLED_ERROR, { audience: ["user"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        if (args?.user_approved !== true) {
+          return makeCompatibleResponse({
+            content: [createTextContent(
+              "# Nothing retired\n\n" +
+              "`user_approved` was not set. Retiring a note changes how future sessions behave — confirm with the " +
+              "user first, naming the notes involved.",
+              { audience: ["assistant"], priority: 1.0 }
+            )],
+            isError: true,
+          });
+        }
+
+        const existing = readDecisionNotes();
+        if (!existing.ok) {
+          return makeCompatibleResponse({
+            content: [createTextContent(decisionNotesParseError(existing), { audience: ["user", "assistant"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        const result = supersedeNotes({ version: existing.version, notes: existing.notes }, args?.ids);
+        if (result.error) {
+          return makeCompatibleResponse({
+            content: [createTextContent(`# Nothing retired\n\n${result.error}`, { audience: ["user", "assistant"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        const digest = writeDecisionNotes(result.serialized, result.state.notes);
+        sendLog("info", "decision-notes", { action: "superseded", ids: result.superseded });
+
+        return makeCompatibleResponse({
+          content: [createTextContent(
+            `# Decision notes retired\n\n` +
+            `Marked superseded: ${result.superseded.map((id) => `\`${id}\``).join(", ")}.\n\n` +
+            `They stay in \`${DECISION_NOTES_FILE}\` for the record but no longer reach future sessions. ` +
+            `Active notes: ${activeNotes(result.state.notes).length}/${DECISION_LIMITS.maxActive} · ` +
+            `session digest: ${digest.bytes} bytes`,
+            { audience: ["user", "assistant"], priority: 0.8 }
+          )],
         });
       }
 

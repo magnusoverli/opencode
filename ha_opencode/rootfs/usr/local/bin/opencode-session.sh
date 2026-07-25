@@ -101,6 +101,7 @@ show_shell_help() {
     echo -e "  ${GREEN}opencode${NC}          Restart the AI coding agent"
     echo -e "  ${GREEN}ha-logs${NC} ${GRAY}<type>${NC}    View logs (core, error, supervisor, host)"
     echo -e "  ${GREEN}ha-mcp${NC} ${GRAY}<cmd>${NC}     MCP integration (enable, disable, status)"
+    echo -e "  ${GREEN}ha-context${NC} ${GRAY}<cmd>${NC} What OpenCode knows about your setup (show, refresh, reset)"
     echo -e "  ${GREEN}hab${NC} ${GRAY}<cmd>${NC}         HA admin CLI (entities, areas, dashboards, backups)"
     echo -e "  ${GREEN}zigporter${NC} ${GRAY}<cmd>${NC}   Zigbee tools (rename, inspect, stale, mesh)"
     echo ""
@@ -114,7 +115,7 @@ if [ "${ADDON_ACCESS_ENABLED}" = "true" ]; then
     echo -e "${WHITE}Add-on development:${NC} ${CYAN}/addons${NC} ${GRAY}and${NC} ${CYAN}/addon_configs${NC} ${YELLOW}(sensitive)${NC}"
 fi
 echo -e "${GRAY}First time? Use ${NC}${GREEN}/connect${NC} ${GRAY}inside OpenCode to add your AI provider${NC}"
-echo -e "${GRAY}Customize AI behavior by editing ${NC}${GREEN}AGENTS.md${NC} ${GRAY}in your config folder${NC}"
+echo -e "${GRAY}Add your own instructions in ${NC}${GREEN}AGENTS.local.md${NC} ${GRAY}— add-on updates never overwrite it${NC}"
 echo -e "${GRAY}Copy: select text (auto-copies) · Paste: ${NC}${GREEN}Ctrl+V${NC}${GRAY} or right-click${NC}"
 echo ""
 

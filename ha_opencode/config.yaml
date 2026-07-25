@@ -83,6 +83,11 @@ options:
   # Requires a Home Assistant version that includes the native MCP keyed endpoint.
   native_ha_mcp_enabled: false
   native_ha_mcp_api_id: "assist"
+  # Home context: what OpenCode knows about this installation before you type.
+  # The briefing is regenerated on every start (never appended to) and the
+  # decision-notes digest is capped, so neither grows over time.
+  home_briefing_enabled: true
+  decision_notes_enabled: true
 
   # --- 3. Access control -------------------------------------------------
   # Deny OpenCode read access to secret files (secrets.yaml, .storage, .cloud,
@@ -154,6 +159,8 @@ schema:
   access_token: password
   native_ha_mcp_enabled: bool
   native_ha_mcp_api_id: str?
+  home_briefing_enabled: bool
+  decision_notes_enabled: bool
 
   # --- 3. Access control -------------------------------------------------
   restrict_sensitive_files: bool
@@ -193,3 +200,6 @@ backup_exclude:
   - ".local/share/opencode/cache/*"
   - ".env_vars"
   - ".env_vars_discovered"
+  # Generated home context is rebuilt at every start; restoring a stale copy
+  # would describe a different installation.
+  - "context/*"

@@ -15,6 +15,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 
 ## Current Beta Changes
 
+- **Home context**: Sessions now start knowing your installation. A generated **Install briefing** describes your setup (version, areas, entity counts, configuration layout, integrations), **decision notes** carry lasting decisions between sessions once you approve them, and `AGENTS.local.md` holds your own instructions where add-on updates cannot overwrite them. Both options default on and switch off independently. See [Home Context (Beta)](#home-context-beta).
 - **OpenChamber interface mode**: New experimental `openchamber` interface mode starts the OpenChamber web UI behind Home Assistant Ingress, while the default `terminal` mode keeps the existing ttyd terminal unchanged.
 - **Native Home Assistant MCP bridge**: Optional bridge from OpenCode to Home Assistant Core's native LLM MCP endpoint (`/api/mcp/<API ID>`, default `assist`) for testing the new native LLM/MCP platform when the running Home Assistant version supports it.
 - **Compact Home Assistant context**: New `get_home_context` MCP tool gives agents focused area/domain/entity context with area and device metadata instead of broad state dumps.
@@ -30,6 +31,27 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **Sensitive file protection**: New **Restrict access to sensitive files** option (default on) denies the AI read access to `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, and `*.key`/`*.pem` files so their contents can't reach the model. Set it to `false` to restore fully unrestricted file access. See [Sensitive File Protection](#sensitive-file-protection).
 - **Focus-friendly responses**: Optional action-first, concise, progress-aware response guidance for users who find long or unstructured responses difficult to act on. Disabled by default and available in both terminal and OpenChamber modes.
 - **Browser provider sign-in in OpenChamber**: Providers whose browser OAuth method redirects to a loopback address (for example **ChatGPT Pro/Plus (browser)**) can now be connected from the OpenChamber UI. See [Connecting a provider with browser sign-in](#connecting-a-provider-with-browser-sign-in).
+
+## Home Context (Beta)
+
+Four files decide what OpenCode knows about your installation before you type anything. Run `ha-context show` in the terminal to read every one of them, and `ha-context status` to see what each costs.
+
+| File | What it is | Who writes it |
+|------|-----------|---------------|
+| `/config/AGENTS.md` | The add-on's own instructions | The add-on, refreshed on update |
+| `/config/AGENTS.local.md` | **Your** standing instructions | You; the add-on never touches it |
+| `/data/context/home-briefing.md` | Generated summary of your setup | The add-on, rebuilt on every start |
+| `/config/opencode/decisions.yaml` | Lasting decisions you approved | OpenCode, only when you say yes |
+
+**Your own instructions.** Create `/config/AGENTS.local.md` for standing preferences — "all Zigbee goes through Zigbee2MQTT", "new config goes in `packages/`", "always show me the diff first". A commented example lands at `/config/AGENTS.local.md.example` on first install. Add-on updates never overwrite it, `AGENTS.md` still wins on conflict, and deleting the file turns it off.
+
+This also fixes a real problem: `AGENTS.md` used to be refreshed on every add-on update whenever it still carried its original heading, which quietly discarded customizations added to it. The add-on now compares the file against what it last wrote and leaves edited copies alone, keeping a `.bak` copy the first time it cannot tell.
+
+**Install briefing** (option, default on). Regenerated at every start: Home Assistant version and installation type, how your configuration is split up (including whether `automations.yaml` is UI-managed), your areas and floors by name, entity counts per domain, integrations and device stacks, and your custom components. It is rebuilt rather than appended to and capped at roughly 500 tokens, so it cannot grow. It is produced by the add-on, not the AI, and never contains `secrets.yaml` values, tokens, or your coordinates.
+
+**Decision notes** (option, default on). Configuration records *what*; notes record *why* — that an integration was removed deliberately, that a toggle is inverted on purpose, that some corner should be left alone. OpenCode proposes a note and writes it only after you approve. Notes are plain YAML in `/config/opencode/decisions.yaml`. Only the decision lines of active notes are injected; rationale and retired notes stay in the file and are fetched on demand via `recall_decisions`. Active notes are capped at 40 and the digest at roughly 500 tokens, and replaced notes are marked superseded rather than deleted — so the per-request cost stays flat. Notes containing a credential or a value from your `secrets.yaml` are rejected.
+
+Adds three MCP tools: `remember_decision`, `recall_decisions`, `supersede_decision`. With the option off, they are not offered to the AI at all and your existing notes file is left untouched.
 
 ## Focus-Friendly Response Mode (Beta)
 

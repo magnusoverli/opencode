@@ -58,6 +58,14 @@ configuration:
     name: "Native MCP API ID"
     description: "Applies only when the native bridge above is on. The default 'assist' targets /api/mcp/assist; leave it empty to use Home Assistant's configured /api/mcp endpoint instead. Home Assistant requires admin access for keyed API IDs other than 'assist', so a custom ID may not be reachable from an add-on."
 
+  home_briefing_enabled:
+    name: "Install briefing"
+    description: "Give OpenCode a short summary of this installation — Home Assistant version, areas, entity counts per domain, and how your configuration files are split up — so it does not rediscover them in every session. The summary is rebuilt from scratch on every start and capped at roughly 500 tokens, so it cannot grow over time. Run 'ha-context show' in the terminal to read exactly what is sent."
+
+  decision_notes_enabled:
+    name: "Decision notes"
+    description: "Let OpenCode carry lasting decisions between sessions — an integration you removed on purpose, a file it should leave alone — instead of re-deciding them each time. Nothing is recorded without your explicit approval, and the notes are plain YAML in /config/opencode/decisions.yaml that you can read, edit, or delete."
+
   restrict_sensitive_files:
     name: "Restrict access to sensitive files"
     description: "Denies OpenCode read access to secrets.yaml, the .storage and .cloud directories, the ssl folder, and any .key or .pem file, so their contents cannot be sent to the model. Everything else stays readable, and OpenCode can still edit config that references secrets with !secret. This covers OpenCode's file read and edit tools, not shell commands."
