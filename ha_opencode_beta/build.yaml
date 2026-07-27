@@ -1,13 +1,22 @@
 ---
+# NOTE: only OPENCHAMBER_VERSION below is actually read by CI
+# (.github/workflows/build-beta.yaml scrapes it with sed). Every other value
+# here is inert — the image is built from ha_opencode/Dockerfile, and the
+# remaining pins resolve from its ARG defaults. Home Assistant does not read
+# this file either, because config.yaml sets `image:`. To change a pinned
+# version for real, edit ha_opencode/Dockerfile. See RELEASING.md.
 build_from:
   aarch64: ghcr.io/home-assistant/base-debian:trixie
   amd64: ghcr.io/home-assistant/base-debian:trixie
 args:
   OPENCODE_VERSION: "latest"
+  # The one genuine per-channel pin: beta builds from dev, so this can lead
+  # stable while a new OpenChamber soaks.
   OPENCHAMBER_VERSION: "1.16.2"
   PPQ_PROXY_VERSION: "0.1.0"
   TSX_VERSION: "4.20.6"
   TTYD_VERSION: "1.7.7"
+  YQ_VERSION: "v4.53.3"
 labels:
   org.opencontainers.image.title: "OpenCode Beta"
   org.opencontainers.image.description: "Beta channel for OpenCode - AI coding agent for Home Assistant"

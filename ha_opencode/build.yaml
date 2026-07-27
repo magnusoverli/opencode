@@ -1,4 +1,12 @@
 ---
+# NOTE: nothing in this file reaches a published stable image. CI
+# (.github/workflows/build.yaml) passes only BUILD_FROM, BUILD_VERSION and
+# BUILD_ARCH; every pin below resolves from the ARG defaults in
+# ha_opencode/Dockerfile instead. Home Assistant does not read this file
+# either, because config.yaml sets `image:`. The values are kept in sync with
+# the Dockerfile for documentation only — to change one for real, edit
+# ha_opencode/Dockerfile. See RELEASING.md.
+#
 # Using Debian Trixie base for latest packages and glibc compatibility
 # (opencode-ai ships pre-compiled native binaries that require glibc)
 # Includes: S6-Overlay, Bashio, TempIO
@@ -6,14 +14,15 @@ build_from:
   aarch64: ghcr.io/home-assistant/base-debian:trixie
   amd64: ghcr.io/home-assistant/base-debian:trixie
 args:
-  # Pin versions for reproducible builds (use 'latest' for auto-updates)
+  # Mirrors ha_opencode/Dockerfile — see the note above.
   OPENCODE_VERSION: "latest"
   OPENCHAMBER_VERSION: "1.16.2"
   PPQ_PROXY_VERSION: "0.1.0"
   TSX_VERSION: "4.20.6"
   TTYD_VERSION: "1.7.7"
   YQ_VERSION: "v4.53.3"
-  # hab CLI is built from source (main branch) in a multi-stage Docker build
+  # hab CLI is cloned at the HAB_VERSION tag in a multi-stage Docker build
+  # (ha_opencode/Dockerfile) — it cannot be expressed here at all.
 labels:
   org.opencontainers.image.title: "OpenCode"
   org.opencontainers.image.description: "AI coding agent for Home Assistant"

@@ -259,6 +259,17 @@ We love contributions! Here's how you can help:
 
 Contributions of all kinds are welcome — feel free to open a PR!
 
+### Branches and release channels
+
+- **`main`** — the stable channel. Tagged `v*`, published as the **OpenCode**
+  add-on.
+- **`dev`** — the beta channel. `main` plus work still soaking. Tagged
+  `beta-v*`, published as the **OpenCode Beta** add-on.
+
+Target `dev` for anything experimental; target `main` only for fixes that
+should ship to stable users right away. Full details in
+[RELEASING.md](RELEASING.md).
+
 ---
 
 ## 👏 Authors & Contributors

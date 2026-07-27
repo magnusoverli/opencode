@@ -6,6 +6,11 @@ on:
     tags:
       - 'beta-v*'
 
+# Shares the group with release.yaml — see the comment there.
+concurrency:
+  group: push-to-main
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Create Beta Release
@@ -28,6 +33,49 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
+      - name: Verify the tag was cut from dev
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Beta ships from dev. This job runs with main checked out (that is
+          # where Home Assistant reads add-on metadata from), so fetch dev
+          # explicitly before asking whether the tag is on it.
+          git fetch origin dev --quiet
+
+          if ! git merge-base --is-ancestor "${TAG}^{commit}" origin/dev; then
+            echo "::error::Beta tag ${TAG} is not reachable from dev."
+            echo "::error::Beta releases must be cut from dev; main carries stable."
+            echo "::error::Delete the tag, push the work to dev, and tag again."
+            exit 1
+          fi
+
+          if git merge-base --is-ancestor "${TAG}^{commit}" origin/main; then
+            echo "::notice::${TAG} is also on main — this beta contains no dev-only work."
+          fi
+
+          echo "OK: ${TAG} is on dev."
+
+      - name: Guard against publishing a downgrade
+        env:
+          NEW: ${{ steps.version.outputs.version }}
+        run: |
+          # Supervisor's update check is `version != latest_version`, not `>`.
+          CURRENT=$(sed -n 's/^version: "\(.*\)"$/\1/p' ha_opencode_beta/config.yaml)
+          echo "main currently advertises beta: ${CURRENT}"
+          echo "this release would set:        ${NEW}"
+
+          if [ "${CURRENT}" = "${NEW}" ]; then
+            echo "Version unchanged — nothing to guard."
+            exit 0
+          fi
+
+          HIGHEST=$(printf '%s\n%s\n' "${CURRENT}" "${NEW}" | sort -V | tail -1)
+          if [ "${HIGHEST}" != "${NEW}" ]; then
+            echo "::error::Refusing to publish ${NEW}: main already advertises ${CURRENT}."
+            echo "::error::A lower version is offered to every beta user as an update."
+            exit 1
+          fi
+
       - name: Sync entire beta addon directory from dev to main
         run: |
           VERSION="${{ steps.version.outputs.version }}"
@@ -36,22 +84,68 @@ jobs:
           # from the tagged commit (on dev). This syncs everything HA reads
           # from the repo: config.yaml (schema, options), translations,
           # CHANGELOG.md, DOCS.md, icons, build.yaml, etc.
-          git checkout ${{ github.ref_name }} -- ha_opencode_beta/
+          #
+          # rm -rf first: `git checkout <tag> -- <dir>` is additive only.
+          # Without it, a file deleted on dev is silently restored from main
+          # and lives on forever, and HA keeps serving it to beta users.
+          rm -rf ha_opencode_beta
+          git checkout "${{ github.ref_name }}" -- ha_opencode_beta/
+
+          test -f ha_opencode_beta/config.yaml || {
+            echo "::error::ha_opencode_beta/config.yaml missing after sync from ${{ github.ref_name }}."
+            exit 1
+          }
 
           # Set the release version (dev's config.yaml may show the previous
           # beta version since the version bump happens here, not on dev)
           sed -i "s/^version: .*/version: \"${VERSION}\"/" ha_opencode_beta/config.yaml
           sed -i 's|^image: .*|image: "ghcr.io/magnusoverli/ha_opencode_beta"|' ha_opencode_beta/config.yaml
-          grep "version:" ha_opencode_beta/config.yaml
-          grep "image:" ha_opencode_beta/config.yaml
+
+          grep -qx "version: \"${VERSION}\"" ha_opencode_beta/config.yaml || {
+            echo "::error::version: line was not rewritten to \"${VERSION}\"."
+            grep -n "^version:" ha_opencode_beta/config.yaml
+            exit 1
+          }
+          grep -qx 'image: "ghcr.io/magnusoverli/ha_opencode_beta"' ha_opencode_beta/config.yaml || {
+            echo "::error::image: line was not rewritten."
+            grep -n "^image:" ha_opencode_beta/config.yaml
+            exit 1
+          }
+
+          # The beta storefront must never advertise the stable slug.
+          grep -qx 'slug: "ha_opencode_beta"' ha_opencode_beta/config.yaml || {
+            echo "::error::ha_opencode_beta/config.yaml does not declare slug ha_opencode_beta."
+            grep -n "^slug:" ha_opencode_beta/config.yaml
+            exit 1
+          }
 
       - name: Commit metadata update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ha_opencode_beta/
-          git commit -m "chore: bump beta to ${{ steps.version.outputs.version }} — sync metadata from dev" || echo "No changes to commit"
-          git push origin main
+          git add -A ha_opencode_beta/
+
+          if git diff --cached --quiet; then
+            echo "main already carries this beta metadata — nothing to commit."
+          else
+            git commit -m "chore: bump beta to ${{ steps.version.outputs.version }} — sync metadata from dev"
+          fi
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "Pushed to main on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected (attempt ${attempt}); rebasing on origin/main and retrying."
+            git fetch origin main
+            git rebase origin/main || {
+              echo "::error::Rebase onto origin/main conflicted. Resolve by hand."
+              exit 1
+            }
+          done
+
+          echo "::error::Could not push the beta metadata sync to main after 3 attempts."
+          exit 1
 
       - name: Extract changelog
         id: changelog
@@ -63,6 +157,10 @@ jobs:
             found && /^## / { exit }
             found { print }
           " ha_opencode_beta/CHANGELOG.md)
+
+          if [ -z "${CHANGELOG}" ]; then
+            echo "::warning::No '## ${VERSION}' section found in ha_opencode_beta/CHANGELOG.md — the release body will be empty."
+          fi
 
           echo "content<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT

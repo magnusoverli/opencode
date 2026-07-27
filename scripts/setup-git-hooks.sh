@@ -1,27 +1,32 @@
 #!/bin/bash
 # Setup git hooks for the repository
+#
+# Points git at the tracked hooks/ directory instead of copying into
+# .git/hooks. Copying meant later edits to hooks/pre-commit silently never
+# took effect, and the copy had to be re-run after every clone.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-HOOKS_DIR="$REPO_ROOT/hooks"
-GIT_HOOKS_DIR="$REPO_ROOT/.git/hooks"
 
-if [ ! -d "$GIT_HOOKS_DIR" ]; then
-    echo "Error: .git/hooks directory not found. Are you in a git repository?"
+cd "$REPO_ROOT"
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "Error: not inside a git repository."
     exit 1
 fi
 
-echo "Installing git hooks..."
-
-# Copy pre-commit hook
-if [ -f "$HOOKS_DIR/pre-commit" ]; then
-    cp "$HOOKS_DIR/pre-commit" "$GIT_HOOKS_DIR/pre-commit"
-    chmod +x "$GIT_HOOKS_DIR/pre-commit"
-    echo "✓ Installed pre-commit hook"
-else
-    echo "Warning: pre-commit hook not found in hooks/ directory"
+if [ ! -f "hooks/pre-commit" ]; then
+    echo "Error: hooks/pre-commit not found."
+    exit 1
 fi
 
-echo "Git hooks installed successfully!"
+chmod +x hooks/* 2>/dev/null || true
+git config core.hooksPath hooks
+
+echo "✓ core.hooksPath set to 'hooks'"
+echo "  Active hooks: $(ls hooks | tr '\n' ' ')"
+echo
+echo "Edits to files in hooks/ now take effect immediately."
+echo "To undo: git config --unset core.hooksPath"
