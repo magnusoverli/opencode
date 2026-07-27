@@ -34,6 +34,7 @@ import { dirname } from "path";
 import { buildBriefingFacts, scanConfigLayout, DEFAULT_CONFIG_DIR } from "/opt/ha-mcp-server/lib/home-facts.js";
 import { CONTEXT_DIR, HOME_BRIEFING_PATH, renderHomeBriefing } from "/opt/ha-mcp-server/lib/home-briefing.js";
 import { collectLiveFacts } from "/opt/ha-mcp-server/lib/ha-live.js";
+import { extractSecretValues } from "/opt/ha-mcp-server/lib/context-budget.js";
 import {
   DECISION_DIGEST_PATH,
   DECISION_NOTES_PATH,
@@ -75,7 +76,9 @@ function log(message) {
 
 async function writeFileAtomic(path, contents) {
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
+  // Unique per process: the boot generator and a hand-run `ha-context refresh`
+  // can overlap, and a shared temp path would let them corrupt each other.
+  const temporary = `${path}.${process.pid}.tmp`;
   await writeFile(temporary, contents, "utf8");
   // Rename is atomic on the same filesystem, so a reader never sees a partial
   // file — OpenCode may read these at any moment.
@@ -128,7 +131,37 @@ async function generateDecisionDigest() {
     log(`decisions.yaml could not be fully parsed (${parsed.errors.length} problem(s)); using the notes that are readable`);
   }
 
-  const digest = renderDecisionDigest(parsed.notes);
+  // The notes file is the user's and is meant to be hand-edited, so the digest
+  // is screened as it is built rather than trusting what was written earlier.
+  const secretsYaml = await readTextOrNull(`${CONFIG_DIR}/secrets.yaml`);
+  const digest = renderDecisionDigest(parsed.notes, {
+    secretValues: secretsYaml ? extractSecretValues(secretsYaml) : [],
+    // Entries the parser had to skip are still decisions the user made; the
+    // digest has to say they are missing rather than imply they never existed.
+    unreadable: parsed.rejected,
+  });
+
+  // A file that exists but yields nothing readable must not silently remove the
+  // digest — this runs at every session start, so that would quietly drop the
+  // user's standing context and leave the model believing nothing was decided.
+  if (!digest.markdown && !parsed.ok) {
+    const notice =
+      "# Decision notes\n\n" +
+      `\`/config/opencode/decisions.yaml\` exists but could not be read (${parsed.errors.length} problem(s)), so ` +
+      "the decisions it holds are not available this session. Tell the user, and do not treat this as an absence " +
+      "of decisions — offer to help fix the file.\n";
+    await writeFileAtomic(DIGEST_OUT, notice);
+    log("decisions.yaml is unreadable; wrote a notice instead of removing the digest");
+    return;
+  }
+
+  if (digest.withheldNotes.length) {
+    log(
+      `withheld ${digest.withheldNotes.length} note(s) from the session context because they contain ` +
+        `credential-shaped text: ${digest.withheldNotes.join(", ")}`,
+    );
+  }
+
   if (!digest.markdown) {
     await removeIfPresent(DIGEST_OUT);
     return;
@@ -160,17 +193,33 @@ async function generateBriefing() {
 
   const layout = await scanConfigLayout(FS_API, CONFIG_DIR);
 
+  // At boot there is nothing on disk, so a configuration-only briefing is
+  // written immediately and enriched when Core answers. On a manual refresh the
+  // existing briefing is usually *better* than what a first pass can produce, so
+  // it is left alone until there is something better to replace it with.
+  const singlePass = process.env.HOME_CONTEXT_SINGLE_PASS === "true";
+  const existing = await readTextOrNull(BRIEFING_OUT);
+
   const token = process.env.SUPERVISOR_TOKEN;
   if (!token) {
+    // Same rule as below: without a token nothing better can be produced, so an
+    // existing briefing is worth more than the one this pass could write.
+    if (singlePass && existing) {
+      log("no Supervisor token; kept the previous briefing rather than replacing it with a configuration-only one");
+      return;
+    }
     const briefing = await writeBriefing(layout, null);
     log(`briefing written from the configuration directory only (no Supervisor token), ${briefing.bytes} bytes`);
     return;
   }
 
-  // First pass: something useful on disk immediately.
-  const initial = await writeBriefing(layout, null);
-  log(`briefing written from the configuration directory, ${initial.bytes} bytes; waiting for Home Assistant`);
+  if (!singlePass || !existing) {
+    const initial = await writeBriefing(layout, null);
+    const next = singlePass ? "checking Home Assistant once" : "waiting for Home Assistant";
+    log(`briefing written from the configuration directory, ${initial.bytes} bytes; ${next}`);
+  }
 
+  const lastAttempt = LIVE_RETRY_SCHEDULE_MS.length - 1;
   for (const [attempt, delayMs] of LIVE_RETRY_SCHEDULE_MS.entries()) {
     if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
 
@@ -180,17 +229,40 @@ async function generateBriefing() {
       continue;
     }
 
+    // Core reports STARTING until its integrations have finished loading, and a
+    // snapshot taken then has entity counts that are simply wrong. Waiting is
+    // better than baking a half-loaded picture into every session — but not
+    // forever, so the last attempt takes what it can get.
+    const state = live.config?.state;
+    if (state && state !== "RUNNING" && attempt < lastAttempt) {
+      log(`Home Assistant is still starting (state: ${state}); waiting before taking the snapshot`);
+      continue;
+    }
+
     const briefing = await writeBriefing(layout, live);
     const missing = live.degraded.length ? ` (missing: ${live.degraded.join(", ")})` : "";
-    log(`briefing enriched with live Home Assistant data, ${briefing.bytes} bytes${missing}`);
+    const partial = state && state !== "RUNNING" ? ` (Core state: ${state})` : "";
+    log(`briefing enriched with live Home Assistant data, ${briefing.bytes} bytes${missing}${partial}`);
     return;
   }
 
+  if (singlePass && existing) {
+    log("Home Assistant is not reachable; kept the previous briefing rather than replacing it with a poorer one");
+    return;
+  }
   log("Home Assistant stayed unreachable; keeping the configuration-only briefing");
 }
 
 async function main() {
   await mkdir(OUTPUT_DIR, { recursive: true });
+
+  // `digest` is the cheap, offline half. Session start runs it on its own so a
+  // note the user edited or deleted by hand takes effect at the next session
+  // instead of waiting for an add-on restart.
+  if (process.env.HOME_CONTEXT_ONLY === "digest") {
+    await generateDecisionDigest();
+    return;
+  }
 
   // Independent artifacts: a failure in one must not take out the other.
   const results = await Promise.allSettled([generateDecisionDigest(), generateBriefing()]);

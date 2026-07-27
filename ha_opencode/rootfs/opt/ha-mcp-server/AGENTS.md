@@ -61,6 +61,8 @@ Decision notes record *why* an installation is the way it is. That reasoning can
 
 **When a request conflicts with a note**, say so before acting. Never silently reverse a recorded decision — tell the user which note applies and ask whether they want to change it.
 
+**The digest is a summary, not the whole record.** It states how many active notes it is showing; when that is fewer than the total, the notes it left out are still in force. `recall_decisions` is the authority. Before changing something that looks deliberate, odd, or redundant — an inverted switch, a disabled integration, a duplicate-looking entity — check there first. An empty search result means *that query* found nothing, never that nothing was decided; search again in different words, or with no query at all, before concluding a thing is safe to "fix".
+
 **To read more**, use `recall_decisions`. The injected digest carries only the decisions themselves; the rationale and the superseded history are retrieved on demand. Check it when a note looks relevant but you need the reasoning, or when the user asks what was decided before.
 
 **To record**, offer first and then wait. Say what you would store, in the words you would store it, and call `remember_decision` with `user_approved: true` only after the user agrees. A general instruction to "remember this" for the current task is not approval to write a permanent note; asking costs one sentence.
@@ -75,6 +77,8 @@ Not worth recording — do not write these:
 - What you did this session, or how you troubleshot something. **This is not a session log.**
 - Anything already readable from the configuration files
 - Anything the user has not explicitly approved
+
+**Pinning** (`pin: true`) keeps a note in the digest when older notes stop fitting. It is for the small number of constraints where being forgotten causes real damage — something deliberately removed, something that must be left alone. Ask for the pin as well as for the note, and use it rarely: pinning everything pins nothing.
 
 **Never** put passwords, tokens, or any value from `secrets.yaml` into a note. The tool rejects them, and a note is sent to the model in every future session.
 

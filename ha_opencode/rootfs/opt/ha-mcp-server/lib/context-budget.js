@@ -50,30 +50,99 @@ export function clampToBytes(text, maxBytes, options = {}) {
 }
 
 /**
+ * Fit a list of values into a byte budget, reporting what did not make it.
+ *
+ * "+N more" is measured before packing rather than appended afterwards, so the
+ * count is never the thing that gets cut — a list that silently ends early reads
+ * as a complete list.
+ *
+ * @param {string[]} items
+ * @param {number} budgetBytes
+ * @returns {{text: string, shown: number, omitted: number}}
+ */
+export function fitList(items, budgetBytes, options = {}) {
+  const separator = options.separator ?? ", ";
+  const values = (items ?? []).filter(Boolean).map(String);
+  if (!values.length) return { text: "", shown: 0, omitted: 0 };
+
+  const pack = (reserve) => {
+    const shown = [];
+    let used = 0;
+    for (const value of values) {
+      const cost = byteLength(value) + (shown.length ? byteLength(separator) : 0);
+      if (used + cost > budgetBytes - reserve) break;
+      shown.push(value);
+      used += cost;
+    }
+    return shown;
+  };
+
+  const all = pack(0);
+  if (all.length === values.length) {
+    return { text: all.join(separator), shown: all.length, omitted: 0 };
+  }
+
+  // Reserve against the widest the suffix could be, so it always fits.
+  const suffix = (omitted) => `${separator}+${omitted} more`;
+  const shown = pack(byteLength(suffix(values.length)));
+  const omitted = values.length - shown.length;
+  if (!shown.length) return { text: "", shown: 0, omitted: values.length };
+
+  return { text: `${shown.join(separator)}${suffix(omitted)}`, shown: shown.length, omitted };
+}
+
+/**
  * Assemble prioritized sections into a single document within a byte budget.
  *
- * Sections are emitted in priority order (lower number first). A section that
- * does not fit is skipped rather than truncated, and lower-priority sections
- * are still considered — a small trailing section should not be lost because
- * one large section ahead of it overflowed.
+ * Sections are emitted in priority order (lower number first). A section may
+ * supply `render(availableBytes)` instead of fixed `text`, which lets a list
+ * shrink to fit rather than disappearing whole — dropping every area name
+ * because one more would not fit costs far more than showing twelve of eighteen.
  *
- * @param {Array<{id: string, priority: number, text: string, required?: boolean}>} sections
+ * Space is reserved for the sections that follow, so an early greedy section
+ * cannot starve the ones behind it, and anything still dropped is reported.
+ *
+ * @param {Array<{id: string, priority: number, text?: string, render?: (bytes: number) => string, min?: number, required?: boolean}>} sections
  * @param {number} budgetBytes
  */
 export function assembleSections(sections, budgetBytes) {
   const ordered = [...sections]
     .map((section, index) => ({ ...section, index }))
-    .filter((section) => String(section.text ?? "").trim().length > 0)
+    .filter((section) => section.render || String(section.text ?? "").trim().length > 0)
     .sort((a, b) => a.priority - b.priority || a.index - b.index);
 
   const separator = "\n\n";
+  const separatorBytes = byteLength(separator);
+
+  // What each section needs at minimum, used to hold space for later ones.
+  const minBytes = ordered.map((section) =>
+    typeof section.min === "number" ? section.min : byteLength(String(section.text ?? "").trim()),
+  );
+  const reserveAfter = new Array(ordered.length).fill(0);
+  for (let i = ordered.length - 2; i >= 0; i -= 1) {
+    reserveAfter[i] = reserveAfter[i + 1] + minBytes[i + 1] + separatorBytes;
+  }
+
   const included = [];
   const dropped = [];
   let used = 0;
 
-  for (const section of ordered) {
-    const text = String(section.text).trim();
-    const cost = byteLength(text) + (included.length ? byteLength(separator) : 0);
+  for (let i = 0; i < ordered.length; i += 1) {
+    const section = ordered[i];
+    const separatorCost = included.length ? separatorBytes : 0;
+    const room = budgetBytes - used - separatorCost - reserveAfter[i];
+
+    const rendered = section.render ? section.render(Math.max(0, room)) : section.text;
+    const text = String(rendered ?? "").trim();
+    if (!text) {
+      // Empty because there was nothing to say is not the same as empty because
+      // it did not fit. Reporting "omitted for space" for a home that simply has
+      // no areas inverts the very distinction this budgeting is meant to keep.
+      if (!section.required && section.hasData !== false) dropped.push(section.id);
+      continue;
+    }
+
+    const cost = byteLength(text) + separatorCost;
     if (!section.required && used + cost > budgetBytes) {
       dropped.push(section.id);
       continue;
@@ -158,9 +227,33 @@ export function extractSecretValues(secretsYamlText, options = {}) {
   const minLength = options.minLength ?? 6;
   const values = new Set();
 
-  for (const rawLine of String(secretsYamlText ?? "").split("\n")) {
+  const lines = String(secretsYamlText ?? "").split("\n");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
+
+    // Block scalars (`cert: |`) hold certificates and private keys — the very
+    // things that must never be echoed back — and a line scan that only reads
+    // `key: value` would not see a single byte of them.
+    const block = line.match(/^[^:#]+:\s*[|>][-+]?\d*\s*$/);
+    if (block) {
+      const body = [];
+      for (let next = index + 1; next < lines.length; next += 1) {
+        const candidate = lines[next];
+        if (candidate.trim() && !/^\s/.test(candidate)) break; // dedented: block ended
+        if (candidate.trim()) body.push(candidate.trim());
+        index = next;
+      }
+      for (const value of body) {
+        if (value.length >= minLength) values.add(value);
+      }
+      // The joined form matters too: a token wrapped across lines is one secret.
+      const joined = body.join("\n");
+      if (joined.length >= minLength) values.add(joined);
+      continue;
+    }
 
     const match = line.match(/^[^:#]+:\s*(.+)$/);
     if (!match) continue;
@@ -179,6 +272,32 @@ export function extractSecretValues(secretsYamlText, options = {}) {
   }
 
   return [...values];
+}
+
+/**
+ * Narrow `secrets.yaml` values to the ones worth matching on the read path.
+ *
+ * Every value in that file is compared as a plain substring, and plenty of them
+ * are not credentials: `mqtt_user: homeassistant`, a hostname, a directory name.
+ * "homeassistant" appears in every path this add-on works with, so matching it
+ * would withhold ordinary notes from the model — and a decision that silently
+ * stops reaching the model is the failure this whole area exists to prevent.
+ *
+ * The write path stays stricter: there, a false positive is an error the model
+ * can see and rephrase, so nothing is lost by over-blocking.
+ */
+export function plausibleSecretValues(values = []) {
+  return (values ?? []).filter((value) => {
+    const candidate = String(value ?? "");
+    if (candidate.length < 12) return false;
+    // Long enough to be a passphrase, or mixed enough to be a generated secret.
+    return (
+      candidate.length >= 16 ||
+      /\d/.test(candidate) ||
+      /[^A-Za-z0-9]/.test(candidate) ||
+      (/[a-z]/.test(candidate) && /[A-Z]/.test(candidate))
+    );
+  });
 }
 
 /**

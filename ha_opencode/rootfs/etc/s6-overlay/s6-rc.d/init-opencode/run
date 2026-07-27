@@ -554,11 +554,19 @@ elif [ "${HELP_STAMP_FRESH}" = "true" ]; then
 elif [ ! -f "${AGENTS_HASH_FILE}" ]; then
     # First start after the add-on began tracking edits: an edited file and an
     # untouched one are indistinguishable, so keep a copy before refreshing.
-    cp "${AGENTS_TARGET}" "${AGENTS_TARGET}.bak"
+    #
+    # Never overwrite an existing .bak - it may be the user's only copy of rules
+    # they wrote, and losing it is exactly the failure this backup exists to
+    # prevent. Fall back to a dated name instead.
+    AGENTS_BACKUP="${AGENTS_TARGET}.bak"
+    if [ -f "${AGENTS_BACKUP}" ]; then
+        AGENTS_BACKUP="${AGENTS_TARGET}.$(date +%Y%m%d%H%M%S).bak"
+    fi
+    cp "${AGENTS_TARGET}" "${AGENTS_BACKUP}"
     cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
     AGENTS_REFRESHED=true
     bashio::log.info "Updated AGENTS.md with latest AI instructions"
-    bashio::log.info "Your previous AGENTS.md was saved to ${AGENTS_TARGET}.bak"
+    bashio::log.info "Your previous AGENTS.md was saved to ${AGENTS_BACKUP}"
     bashio::log.info "Move any customizations into /homeassistant/AGENTS.local.md - future updates never touch that file"
 else
     AGENTS_CURRENT_HASH=$(agents_md_hash "${AGENTS_TARGET}")

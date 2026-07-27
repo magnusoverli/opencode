@@ -99,6 +99,36 @@ describe("assembleSections", () => {
 // ---------------------------------------------------------------------------
 
 describe("extractSecretValues", () => {
+  // Certificates and private keys live in block scalars, and a scan that only
+  // reads `key: value` lines cannot see a single byte of them.
+  it("reads block scalars, where certificates and private keys actually live", () => {
+    const secrets = [
+      "wifi_password: hunter2hunter2",
+      "client_cert: |",
+      "  -----BEGIN PRIVATE KEY-----",
+      "  MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ",
+      "  -----END PRIVATE KEY-----",
+      "api_base: https://example.invalid",
+    ].join("\n");
+
+    const values = extractSecretValues(secrets);
+
+    expect(values).toContain("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ");
+    expect(values).toContain("hunter2hunter2");
+    expect(values).toContain("https://example.invalid");
+  });
+
+  it("catches a note that quotes a value taken from a block scalar", () => {
+    const secrets = ["cert: |", "  MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ"].join("\n");
+    const note = "Reuse MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ for the broker.";
+    expect(findSecrets(note, extractSecretValues(secrets))).not.toHaveLength(0);
+  });
+
+  it("does not swallow the key that follows a block scalar", () => {
+    const secrets = ["cert: |", "  line-one-of-the-key", "next_secret: plainvalue123"].join("\n");
+    expect(extractSecretValues(secrets)).toContain("plainvalue123");
+  });
+
   it("reads values from a flat secrets.yaml", () => {
     const secrets = [
       "# My secrets",
