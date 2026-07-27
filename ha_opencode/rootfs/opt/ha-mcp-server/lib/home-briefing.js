@@ -266,7 +266,7 @@ function renderAddon(addon) {
 
   flag("Home Assistant MCP tools", addon.mcp);
   flag("YAML language server", addon.lsp);
-  flag("screenshot tool", addon.screenshot);
+  flag("screenshot tool (needs a model that accepts image input)", addon.screenshot);
   flag("add-on folder access (`/addons`, `/addon_configs`)", addon.addonAccess);
   flag("sensitive-file read protection", addon.restrictSensitiveFiles);
 

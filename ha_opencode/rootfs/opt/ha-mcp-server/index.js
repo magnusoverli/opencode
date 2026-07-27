@@ -3157,7 +3157,7 @@ const TOOLS = [
   {
     name: "screenshot_url",
     title: "Screenshot Home Assistant Page",
-    description: "Take a screenshot of any Home Assistant page for visual verification. Use this after making dashboard changes, creating views or cards via hab, or any time you need to visually verify a result. Returns a PNG image that vision-capable AI models can analyze. Requires the 'screenshot_enabled' option and a Long-Lived Access Token. Examples: '/lovelace/0' (default dashboard), '/energy' (energy panel), '/config/dashboard' (settings), '/dashboard-custom/my-view' (custom dashboard).",
+    description: "Take a screenshot of any Home Assistant page for visual verification. Use this after making dashboard changes, creating views or cards via hab, or any time you need to visually verify a result. Requires a model that accepts image input: the PNG comes back as an image part in the tool result, and a model without image input receives a short rejection notice in place of the picture. If that happens, say plainly that your current model cannot see images and suggest switching to one that can - do not describe the page, and do not claim the screenshot was saved anywhere, because nothing is written to disk. Requires the 'screenshot_enabled' option and a Long-Lived Access Token. Examples: '/lovelace/0' (default dashboard), '/energy' (energy panel), '/config/dashboard' (settings), '/dashboard-custom/my-view' (custom dashboard).",
     inputSchema: {
       type: "object",
       properties: {
@@ -3476,6 +3476,10 @@ server.setRequestHandler(SetLevelRequestSchema, async (request) => {
 // Tools for features the user has turned off are not advertised at all, so
 // they neither cost tool-list tokens nor invite calls that can only fail.
 const DECISION_NOTE_TOOLS = new Set(["remember_decision", "recall_decisions", "supersede_decision"]);
+// screenshot_url needs both the option and a token; without either it could only
+// ever return the setup error, so it is not advertised at all.
+const SCREENSHOT_TOOLS = new Set(["screenshot_url"]);
+const SCREENSHOT_AVAILABLE = SCREENSHOT_ENABLED && Boolean(HA_ACCESS_TOKEN);
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   sendLog("debug", "mcp-server", { action: "list_tools" });
@@ -3483,6 +3487,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   // Keep only: name, description, inputSchema (standard fields)
   const compatibleTools = TOOLS
     .filter(tool => DECISION_NOTES_ENABLED || !DECISION_NOTE_TOOLS.has(tool.name))
+    .filter(tool => SCREENSHOT_AVAILABLE || !SCREENSHOT_TOOLS.has(tool.name))
     .map(tool => ({
       name: tool.name,
       description: tool.description,
@@ -5777,7 +5782,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return makeCompatibleResponse({
           content: [
             createTextContent(
-              `Screenshot of ${normalizedPath} (${width}x${height}) captured successfully.`,
+              `Rendered ${normalizedPath} at ${width}x${height} in a headless browser and attached it to this same tool result as an image part. ` +
+                `Nothing was written to disk - there is no saved file and nothing to open in the Home Assistant UI. ` +
+                `If the image part was replaced by a notice that this model cannot read images, tell the user that directly and suggest a model that accepts image input; do not describe the page and do not claim anything was saved.`,
               { audience: ["user", "assistant"], priority: 0.5 }
             ),
             createImageContent(base64Screenshot, "image/png", {

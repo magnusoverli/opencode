@@ -33,7 +33,7 @@
       "type": "local",
       "command": ["node", "/opt/ha-mcp-server/index.js"],
       "enabled": true,
-      "timeout": 10000,
+      "timeout": 60000,
       "environment": {
         "SUPERVISOR_TOKEN": "{env:SUPERVISOR_TOKEN}",
         "HA_NATIVE_MCP_API_ID": "assist"

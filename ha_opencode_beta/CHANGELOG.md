@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.3.8b2
+
+Fixes for the screenshot tool, prompted by [issue #72](https://github.com/magnusoverli/opencode/issues/72), where a screenshot taken with a text-only model produced a reply that both declined to look at the picture and claimed it had been saved for later. The second half of that was our fault.
+
+- **The tool no longer claims a screenshot was saved** — it reported *"captured successfully"* while writing nothing to disk, and the model repeated that back as advice to go and find the file in the Home Assistant UI. There is no file: the PNG exists only inside the tool result. The tool now says so, and tells the model what to do if the picture was withheld because the selected model cannot read images — say so plainly rather than describing a page it never saw. The tool description carries the same requirement up front, so a model can know before calling that the result depends on its own ability to accept images.
+- **`private/qwen3-vl-30b` can finally receive images** — the add-on's own vision model for PPQ private mode was declared with `attachment: true`, which OpenCode does not read; image input is gated on a `modalities` field that was missing entirely, so the gate was shut and every screenshot reached the model as a rejection notice instead of a picture. All five private models now declare their modalities explicitly, so the block states what each model can actually do rather than relying on defaults.
+- **Screenshots are no longer cut off by a 10-second deadline** — the Home Assistant MCP server's timeout applies to every tool call, not just the initial connection, while a screenshot costs a browser launch (1-4 seconds) plus page load plus the render wait, which the documentation itself put at 5-10 seconds. On slower hardware the call could lose that race and surface as an opaque timeout. The allowance is now 60 seconds.
+- **The screenshot tool is hidden unless it can work** — it was advertised to the model even with the feature switched off or no access token set, so the model could call it and receive only setup instructions. It is now offered only when both are present, matching how the decision-note tools already behave.
+- **Documentation and the option description now state the model requirement** — whether a screenshot is usable depends on the model you select, and no add-on setting changes that. The documentation now gives the current split (52 of 85 OpenCode Zen models accept image input; 33 do not, including every DeepSeek V4 model), names free alternatives that do work, and explains what a withheld image looks like.
+
 ## 2.3.8b1
 
 Hardening pass over the home-context feature introduced in 2.3.8b0, prompted by testing feedback in [issue #63](https://github.com/magnusoverli/opencode/issues/63) and a full audit of the feature. One theme runs through most of it: **OpenCode must never be able to mistake a gap in its context for an absence in your installation** — a decision dropped for space, or a note a search failed to find, previously looked exactly like a decision that was never made, which is how a deliberate configuration gets "fixed".

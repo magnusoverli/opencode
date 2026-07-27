@@ -671,7 +671,7 @@ Then restart OpenCode (exit and run `opencode` again).
 
 | Tool | Description |
 |------|-------------|
-| `screenshot_url` | Take a screenshot of any Home Assistant page for visual verification. Use after making dashboard changes via hab to verify the result. Requires the `screenshot_enabled` option and a Long-Lived Access Token. Returns a PNG image that vision-capable AI models can analyze. |
+| `screenshot_url` | Take a screenshot of any Home Assistant page for visual verification. Use after making dashboard changes via hab to verify the result. Requires the `screenshot_enabled` option and a Long-Lived Access Token, and a model that accepts image input — see [Visual Verification](#visual-verification-screenshots). |
 
 ---
 
@@ -836,8 +836,26 @@ The `screenshot_url` MCP tool lets the AI visually verify changes to dashboards 
 1. A headless Chromium browser launches inside the add-on container
 2. It authenticates with the HA frontend using your Long-Lived Access Token
 3. Navigates to the requested page and waits for it to render
-4. Captures a PNG screenshot and returns it to the AI model
-5. Vision-capable AI models (Claude, GPT-4o, Gemini, etc.) can analyze the image
+4. Captures a PNG screenshot and returns it as an image part in the tool result
+5. Only a model that accepts image input can actually see it — see below
+
+Nothing is written to disk. The screenshot exists only inside that tool result; there is no file to open in the Home Assistant UI afterwards.
+
+### Model requirements
+
+**The screenshot is only useful if the model you have selected accepts image input.** This is a property of the model itself, not an add-on setting — no option here can give a text-only model sight.
+
+As of 2026-07-27, **52 of the 85 OpenCode Zen models accept image input, and 33 do not**. The ones that cannot are mostly the fast and cheap tier, including every DeepSeek V4 model (Flash and Pro), the GLM family, MiniMax M2.x, Kimi K2, Qwen3 Coder and Grok Code.
+
+If you want screenshots to work, select a model that accepts images. All Claude, GPT-5.x and Gemini models qualify, as do these free Zen models:
+
+- `kimi-k2.5-free`
+- `minimax-m3-free`
+- `qwen3.6-plus-free`
+- `mimo-v2.5-free`
+- `mimo-v2-omni-free`
+
+When a text-only model calls the tool, OpenCode replaces the image with a short notice saying the model cannot read images, so the model is told what happened rather than left guessing. If you see a reply that describes your dashboard anyway, or claims the screenshot was saved somewhere, that reply is not based on the picture — switch models and try again.
 
 ### Setup
 
@@ -873,7 +891,8 @@ Add a weather card to the overview and verify it looks right
 ### Notes
 
 - The screenshot tool adds Chromium to the container image, increasing its size
-- Each screenshot takes approximately 5-10 seconds (browser launch + page load + render wait)
+- Each screenshot takes approximately 5-10 seconds (browser launch + page load + render wait), and longer on slower hardware such as a Raspberry Pi; the tool is allowed up to 60 seconds before it is timed out
+- The tool is only offered to the model when **Screenshot tool** is enabled *and* a Long-Lived Access Token is set — with either missing it is not advertised at all
 - Screenshots are only taken when the AI explicitly calls the tool — no background processes
 - The Long-Lived Access Token is the same one used for ESPHome tools
 

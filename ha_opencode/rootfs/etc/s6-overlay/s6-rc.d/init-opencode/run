@@ -741,28 +741,33 @@ jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --argjson mcp "${MCP_BOO
                 "private/kimi-k2-5": {
                     "id": "private/kimi-k2-5",
                     "name": "Kimi K2.5 (Private)",
+                    "modalities": { "input": ["text"], "output": ["text"] },
                     "limit": { "context": 262144, "output": 8192 }
                 },
                 "private/deepseek-r1-0528": {
                     "id": "private/deepseek-r1-0528",
                     "name": "DeepSeek R1 (Private)",
                     "reasoning": true,
+                    "modalities": { "input": ["text"], "output": ["text"] },
                     "limit": { "context": 131072, "output": 8192 }
                 },
                 "private/gpt-oss-120b": {
                     "id": "private/gpt-oss-120b",
                     "name": "GPT-OSS 120B (Private)",
+                    "modalities": { "input": ["text"], "output": ["text"] },
                     "limit": { "context": 131072, "output": 8192 }
                 },
                 "private/llama3-3-70b": {
                     "id": "private/llama3-3-70b",
                     "name": "Llama 3.3 70B (Private)",
+                    "modalities": { "input": ["text"], "output": ["text"] },
                     "limit": { "context": 131072, "output": 8192 }
                 },
                 "private/qwen3-vl-30b": {
                     "id": "private/qwen3-vl-30b",
                     "name": "Qwen3-VL 30B (Private)",
                     "attachment": true,
+                    "modalities": { "input": ["text", "image"], "output": ["text"] },
                     "limit": { "context": 262144, "output": 8192 }
                 }
             }
