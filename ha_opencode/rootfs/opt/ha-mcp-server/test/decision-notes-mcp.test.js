@@ -250,18 +250,24 @@ describe("recording a decision end to end", () => {
   }, STARTUP_TIMEOUT_MS + 5000);
 
   it("records, recalls, and supersedes across calls", async () => {
-    const [, recalled, superseded] = await converse(env, [
+    const [recorded] = await converse(env, [
       callTool("remember_decision", {
         title: "Packages hold all new configuration",
         decision: "New integrations go in packages/, not configuration.yaml.",
         rationale: "Keeps configuration.yaml readable.",
         user_approved: true,
       }),
+    ]);
+
+    // Ids are date-derived, so the id has to come from the response. Hard-coding
+    // one makes the supersede below succeed through its "unknown id" branch on
+    // every day but the one the test was written.
+    const recordedId = textOf(recorded).match(/as `([^`]+)`/)?.[1];
+    expect(recordedId).toBeTruthy();
+
+    const [recalled, superseded] = await converse(env, [
       callTool("recall_decisions", { query: "packages" }),
-      callTool("supersede_decision", {
-        ids: ["2026-07-26-packages-hold-all-new-configuration"],
-        user_approved: true,
-      }),
+      callTool("supersede_decision", { ids: [recordedId], user_approved: true }),
     ]);
 
     const recalledText = textOf(recalled);
@@ -269,10 +275,91 @@ describe("recording a decision end to end", () => {
     // recall_decisions is where the rationale becomes available
     expect(recalledText).toContain("Keeps configuration.yaml readable");
 
-    // The id is date-derived, so the supersede call only matches on the day the
-    // note was written; either outcome is a valid, explained response.
     const supersededText = textOf(superseded);
-    expect(supersededText).toMatch(/Decision notes retired|Unknown note id/);
+    expect(superseded.isError).toBeFalsy();
+    expect(supersededText).toContain("Decision notes retired");
+    expect(supersededText).toContain(recordedId);
+  }, STARTUP_TIMEOUT_MS + 5000);
+
+  it("tells the user which query missed rather than implying nothing was decided", async () => {
+    const [, missed] = await converse(env, [
+      callTool("remember_decision", {
+        title: "TC71 privacy toggle is inverted",
+        decision: "switch.tc71_privacy_mode inverts switch.tc71_cam_1 on purpose.",
+        user_approved: true,
+      }),
+      callTool("recall_decisions", { query: "dishwasher rinse aid" }),
+    ]);
+
+    const text = textOf(missed);
+    expect(text).toContain("No note matched that query");
+    expect(text).toContain("1 active note");
+    expect(text).toContain("without a `query`");
+  }, STARTUP_TIMEOUT_MS + 5000);
+
+  it("finds a note from a plain question", async () => {
+    const [, recalled] = await converse(env, [
+      callTool("remember_decision", {
+        title: "TC71 privacy toggle is inverted",
+        decision: "switch.tc71_privacy_mode inverts switch.tc71_cam_1 so ON means privacy engaged.",
+        rationale: "Matches the Tapo app.",
+        entities: ["switch.tc71_cam_1"],
+        user_approved: true,
+      }),
+      callTool("recall_decisions", { query: "why is the camera privacy toggle backwards" }),
+    ]);
+
+    expect(textOf(recalled)).toContain("TC71 privacy toggle is inverted");
+  }, STARTUP_TIMEOUT_MS + 5000);
+
+  // "Nothing was ever recorded" is the one sentence that must never be said
+  // while the file holds decisions — retired ones included.
+  it("does not claim nothing was recorded when every note is superseded", async () => {
+    const [recorded] = await converse(env, [
+      callTool("remember_decision", {
+        title: "Old approach to the heating schedule",
+        decision: "Use the thermostat schedule, not automations.",
+        user_approved: true,
+      }),
+    ]);
+    const id = textOf(recorded).match(/as `([^`]+)`/)?.[1];
+
+    const [, recalled] = await converse(env, [
+      callTool("supersede_decision", { ids: [id], user_approved: true }),
+      callTool("recall_decisions", {}),
+    ]);
+
+    const text = textOf(recalled);
+    expect(text).not.toContain("No decision notes have been recorded");
+    expect(text).toContain("1 recorded note");
+    expect(text).toContain("include_superseded");
+  }, STARTUP_TIMEOUT_MS + 5000);
+
+  it("records a pin and reports it", async () => {
+    const [recorded] = await converse(env, [
+      callTool("remember_decision", {
+        title: "Z-Wave stick was retired deliberately",
+        decision: "Do not re-add the Z-Wave integration.",
+        pin: true,
+        user_approved: true,
+      }),
+    ]);
+
+    expect(recorded.isError).toBeFalsy();
+    expect(textOf(recorded)).toContain("(pinned)");
+    expect(await readFile(join(notesDir, "decisions.yaml"), "utf8")).toContain("pin: true");
+  }, STARTUP_TIMEOUT_MS + 5000);
+
+  it("states digest coverage when recording", async () => {
+    const [recorded] = await converse(env, [
+      callTool("remember_decision", {
+        title: "Packages hold all new configuration",
+        decision: "New integrations go in packages/.",
+        user_approved: true,
+      }),
+    ]);
+
+    expect(textOf(recorded)).toContain("fit the session digest");
   }, STARTUP_TIMEOUT_MS + 5000);
 
   it("rejects a note containing a credential", async () => {

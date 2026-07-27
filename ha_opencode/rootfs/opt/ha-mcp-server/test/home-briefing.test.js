@@ -65,7 +65,118 @@ describe("renderHomeBriefing", () => {
 
   it("stays inside the byte budget", () => {
     const result = renderHomeBriefing(facts());
-    expect(result.bytes).toBeLessThanOrEqual(HOME_BRIEFING_BUDGET_BYTES + 1); // +1 for the trailing newline
+    expect(result.bytes).toBeLessThanOrEqual(HOME_BRIEFING_BUDGET_BYTES);
+  });
+
+  /**
+   * The fixture above is a small installation, so it fits trivially and proves
+   * little. A perfectly ordinary mid-size home used to lose Areas, Integrations
+   * and Add-on capabilities outright — with a third of the budget unspent and no
+   * mention that anything was missing.
+   */
+  describe("a mid-size installation", () => {
+    const midSize = () =>
+      facts({
+        areas: Array.from({ length: 18 }, (_, i) => ({
+          name: `Area ${i + 1}`,
+          floor: i < 9 ? "Ground floor" : "First floor",
+        })),
+        integrations: Array.from({ length: 34 }, (_, i) => `integration_${i}`),
+        stacks: ["zha", "esphome", "matter"],
+        entityCounts: [
+          { domain: "sensor", count: 412 },
+          { domain: "binary_sensor", count: 188 },
+          { domain: "light", count: 64 },
+          { domain: "switch", count: 52 },
+          { domain: "automation", count: 87 },
+          { domain: "button", count: 44 },
+        ],
+        layout: {
+          ...facts().layout,
+          topLevelKeys: Array.from({ length: 20 }, (_, i) => `key_${i}`),
+          customComponents: ["hacs", "alarmo", "browser_mod", "frigate", "powercalc", "scheduler", "spook"],
+          automations: { count: 87, uiManaged: true },
+        },
+      });
+
+    it("keeps every section", () => {
+      const result = renderHomeBriefing(midSize());
+      expect(result.droppedSections).toEqual([]);
+      for (const id of ["core", "layout", "areas", "entities", "integrations", "addon"]) {
+        expect(result.includedSections).toContain(id);
+      }
+    });
+
+    it("still names the areas rather than dropping the list", () => {
+      const markdown = renderHomeBriefing(midSize()).markdown;
+      expect(markdown).toContain("## Areas (18)");
+      expect(markdown).toContain("Area 1 (Ground floor)");
+      expect(markdown).toContain("do not invent or guess them");
+    });
+
+    it("tells the model what it can do, so it does not offer what it cannot", () => {
+      expect(renderHomeBriefing(midSize()).markdown).toContain("## Add-on capabilities");
+    });
+  });
+
+  // A section that vanishes silently reads as "this installation has none of
+  // those", and the model acts on that.
+  it("names what it left out when the budget forces a section out", () => {
+    const result = renderHomeBriefing(facts(), { budgetBytes: 900 });
+    expect(result.droppedSections.length).toBeGreaterThan(0);
+    expect(result.markdown).toContain("Omitted for space");
+    expect(result.markdown).toContain("Absent here does not mean absent from the installation");
+    for (const id of result.droppedSections) {
+      const label = { entities: "entity counts", addon: "add-on capabilities", integrations: "integrations", areas: "areas", core: "Home Assistant version and settings", layout: "configuration layout" }[id];
+      expect(result.markdown).toContain(label);
+    }
+    expect(result.bytes).toBeLessThanOrEqual(900);
+  });
+
+  // "Omitted for space" for a home that simply has no areas inverts the very
+  // distinction the notice exists to make.
+  it("does not report an absent section as omitted for space", () => {
+    const bare = facts({ areas: null, integrations: null, stacks: null });
+    const result = renderHomeBriefing(bare);
+    expect(result.droppedSections).not.toContain("areas");
+    expect(result.droppedSections).not.toContain("integrations");
+    expect(result.markdown).not.toContain("Omitted for space");
+  });
+
+  it("says when layout bullets were trimmed rather than dropping them quietly", () => {
+    const result = renderHomeBriefing(facts(), { budgetBytes: 900 });
+    const layout = result.markdown.includes("## Configuration layout");
+    if (layout) {
+      const trimmed = /further layout detail/.test(result.markdown);
+      const complete = result.markdown.includes("top-level keys");
+      expect(trimmed || complete).toBe(true);
+    }
+  });
+
+  it("counts every integration the list leaves out", () => {
+    const many = facts({ integrations: Array.from({ length: 90 }, (_, i) => `integration_${i}`) });
+    const markdown = renderHomeBriefing(many).markdown;
+    const match = markdown.match(/\+(\d+) more/);
+    expect(match).toBeTruthy();
+    const shown = (markdown.match(/integration_\d+/g) ?? []).length;
+    expect(shown + Number(match[1])).toBe(90);
+  });
+
+  it("shrinks a long list instead of dropping the whole section", () => {
+    const many = facts({ areas: Array.from({ length: 60 }, (_, i) => ({ name: `Area ${i}`, floor: null })) });
+    const result = renderHomeBriefing(many);
+    expect(result.includedSections).toContain("areas");
+    expect(result.markdown).toContain("## Areas (60)");
+    expect(result.markdown).toMatch(/\+\d+ more/);
+    expect(result.bytes).toBeLessThanOrEqual(HOME_BRIEFING_BUDGET_BYTES);
+  });
+
+  it.each([256, 512, 900, 1400, 2048, 4096])("never exceeds a %i-byte budget", (budgetBytes) => {
+    const big = facts({
+      areas: Array.from({ length: 200 }, (_, i) => ({ name: `Area ${i}`, floor: `Floor ${i % 4}` })),
+      integrations: Array.from({ length: 150 }, (_, i) => `integration_${i}`),
+    });
+    expect(renderHomeBriefing(big, { budgetBytes }).bytes).toBeLessThanOrEqual(budgetBytes);
   });
 
   it("stays inside the budget for a very large installation", () => {

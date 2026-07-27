@@ -60,6 +60,20 @@ if [ "${CPU_MODE}" = "baseline" ]; then
     CPU_INFO=" ${YELLOW}(baseline CPU mode)${NC}"
 fi
 
+# Refresh the decision-notes digest before the terminal session starts.
+#
+# The digest is otherwise only built at add-on start, but decisions.yaml belongs
+# to the user and can be edited or deleted at any time. This catches those edits
+# whenever the terminal session is created — note that ttyd runs this through
+# `tmux new-session -A`, so reconnecting to a running session reattaches instead
+# of re-running it; `ha-context refresh` is the way to apply an edit mid-session.
+# Offline and file-local, so it costs milliseconds and cannot block start-up.
+if [ -x /usr/local/bin/generate-home-context.mjs ] || [ -f /usr/local/bin/generate-home-context.mjs ]; then
+    HOME_CONTEXT_ONLY=digest \
+    OPENCODE_DECISION_NOTES="${OPENCODE_DECISION_NOTES:-true}" \
+        node /usr/local/bin/generate-home-context.mjs >/dev/null 2>&1 || true
+fi
+
 # Change to Home Assistant config directory
 cd /homeassistant
 

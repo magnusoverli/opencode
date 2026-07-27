@@ -202,7 +202,13 @@ export async function scanConfigLayout(fsApi, configDir = DEFAULT_CONFIG_DIR) {
       const parsed = parseConfigurationYaml(text);
       layout.topLevelKeys = parsed.keys;
       layout.includes = parsed.includes;
-      if (parsed.inlinePackages) layout.packages = { configured: true };
+      if (parsed.inlinePackages) {
+        // The directory is whatever the include points at — telling the model to
+        // put new configuration in `packages/` when the user calls it something
+        // else sends it to write in a directory Home Assistant does not read.
+        const include = parsed.includes.find((entry) => entry.key === "homeassistant.packages");
+        layout.packages = { configured: true, directory: include?.target || "packages" };
+      }
     }
   }
 
@@ -319,6 +325,14 @@ export function detectStacks(integrations = [], options = {}) {
  * @param {object|null} input.addon add-on capability flags
  * @param {boolean} [input.z2mConfigured]
  */
+/** What a briefing is missing when Home Assistant could not be reached at all. */
+const FULLY_DEGRADED = Object.freeze([
+  "Home Assistant version and settings",
+  "areas",
+  "entity inventory",
+  "integrations",
+]);
+
 export function buildBriefingFacts(input) {
   const { generatedAt, layout = null, live = null, addon = null, z2mConfigured = false } = input ?? {};
 
@@ -334,7 +348,10 @@ export function buildBriefingFacts(input) {
     integrations,
     stacks: stacks?.length ? stacks : null,
     addon,
-    degraded: live?.degraded ?? [],
+    // No live data at all is the *most* degraded case, not the absence of a
+    // problem. Reporting `[]` here made a configuration-only briefing claim, by
+    // omission, to be a complete picture of the installation.
+    degraded: live ? live.degraded ?? [] : FULLY_DEGRADED,
   };
 }
 

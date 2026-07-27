@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildBriefingFacts,
   countEntityDomains,
   countListEntries,
   countMappingKeys,
@@ -172,7 +173,7 @@ describe("scanConfigLayout", () => {
       "scripts.yaml",
     ]);
     expect(layout.topLevelKeys).toContain("default_config");
-    expect(layout.packages).toEqual({ configured: true, fileCount: 2 });
+    expect(layout.packages).toEqual({ configured: true, fileCount: 2, directory: "packages" });
     expect(layout.automations).toEqual({ count: 2, uiManaged: true });
     expect(layout.scripts).toEqual({ count: 1 });
     expect(layout.scenes).toEqual({ count: 1 });
@@ -310,5 +311,72 @@ describe("summarizeCore", () => {
 
   it("returns null when nothing was reachable", () => {
     expect(summarizeCore(null, null)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildBriefingFacts
+// ---------------------------------------------------------------------------
+
+describe("buildBriefingFacts", () => {
+  // Reporting no gaps when nothing at all was collected made a briefing built
+  // from files alone look like a complete picture of the installation.
+  it("reports everything as missing when Home Assistant was not reachable", () => {
+    const facts = buildBriefingFacts({ generatedAt: "2026-07-27T09:00:00Z", layout: {}, live: null });
+    expect(facts.degraded.length).toBeGreaterThan(0);
+    expect(facts.degraded).toContain("areas");
+    expect(facts.degraded).toContain("entity inventory");
+  });
+
+  it("reports no gaps when everything came back", () => {
+    const facts = buildBriefingFacts({
+      generatedAt: "2026-07-27T09:00:00Z",
+      layout: {},
+      live: { config: { version: "2026.7.2" }, areas: [], states: [], entityRegistry: [], degraded: [] },
+    });
+    expect(facts.degraded).toEqual([]);
+  });
+
+  it("passes through the partial gaps Home Assistant reported", () => {
+    const facts = buildBriefingFacts({
+      generatedAt: "2026-07-27T09:00:00Z",
+      layout: {},
+      live: { config: { version: "2026.7.2" }, degraded: ["areas"] },
+    });
+    expect(facts.degraded).toEqual(["areas"]);
+  });
+});
+
+describe("packages directory", () => {
+  const fsFor = (files) => ({
+    readFile: async (path) => {
+      const name = path.split("/").pop();
+      if (files[name] === undefined) throw new Error("no such file");
+      return files[name];
+    },
+    readdir: async () => { throw new Error("no such dir"); },
+    stat: async (path) => {
+      const name = path.split("/").pop();
+      if (files[name] === undefined) throw new Error("no such file");
+      return { isFile: () => true, isDirectory: () => false, size: files[name].length };
+    },
+  });
+
+  // Telling the model to write into `packages/` when the include points somewhere
+  // else sends it to a directory Home Assistant never reads.
+  it("reports the directory the include actually points at", async () => {
+    const layout = await scanConfigLayout(
+      fsFor({ "configuration.yaml": "homeassistant:\n  packages: !include_dir_named my_packages\n" }),
+      "/config",
+    );
+    expect(layout.packages).toMatchObject({ configured: true, directory: "my_packages" });
+  });
+
+  it("falls back to packages when the target cannot be read", async () => {
+    const layout = await scanConfigLayout(
+      fsFor({ "configuration.yaml": "homeassistant:\n  packages: !include_dir_named packages\n" }),
+      "/config",
+    );
+    expect(layout.packages.directory).toBe("packages");
   });
 });
