@@ -843,19 +843,14 @@ Nothing is written to disk. The screenshot exists only inside that tool result; 
 
 ### Model requirements
 
-**The screenshot is only useful if the model you have selected accepts image input.** This is a property of the model itself, not an add-on setting — no option here can give a text-only model sight.
+**A screenshot is only useful if the model you have selected accepts image input.** This is a property of the model itself, not an add-on setting — no option here can give a text-only model sight.
 
-As of 2026-07-27, **52 of the 85 OpenCode Zen models accept image input, and 33 do not**. The ones that cannot are mostly the fast and cheap tier, including every DeepSeek V4 model (Flash and Pro), the GLM family, MiniMax M2.x, Kimi K2, Qwen3 Coder and Grok Code.
+Support is far from universal, and it does not follow price or recency: several of the fastest and cheapest models in common use are text-only, while most general-purpose flagship models accept images. Line-ups change often enough that any list printed here would be out of date within a release or two, so check the model you actually use:
 
-If you want screenshots to work, select a model that accepts images. All Claude, GPT-5.x and Gemini models qualify, as do these free Zen models:
+- **[models.dev](https://models.dev)** is the catalogue OpenCode takes its model metadata from. Find your provider and model there; the entry states which input types it accepts.
+- Otherwise, just try it. A model that cannot see the picture is told so explicitly, and will normally reply that it is unable to read images.
 
-- `kimi-k2.5-free`
-- `minimax-m3-free`
-- `qwen3.6-plus-free`
-- `mimo-v2.5-free`
-- `mimo-v2-omni-free`
-
-When a text-only model calls the tool, OpenCode replaces the image with a short notice saying the model cannot read images, so the model is told what happened rather than left guessing. If you see a reply that describes your dashboard anyway, or claims the screenshot was saved somewhere, that reply is not based on the picture — switch models and try again.
+When a text-only model calls the tool, OpenCode replaces the image with a short notice saying the model cannot read it, so the model is told what happened rather than left to guess. If a reply describes your dashboard anyway, or claims the screenshot was saved somewhere, that reply is not based on the picture — switch to a model that accepts image input and try again.
 
 ### Setup
 

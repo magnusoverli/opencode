@@ -44,7 +44,7 @@ configuration:
 
   screenshot_enabled:
     name: "Screenshot tool"
-    description: "Requires the Home Assistant access token below, and a model that accepts image input - many fast models, including DeepSeek V4, cannot see pictures at all. Lets OpenCode photograph Home Assistant pages in a headless browser to check the result of dashboard changes; each capture takes about 5-10 seconds."
+    description: "Requires the Home Assistant access token below, and a model that accepts image input - many fast models cannot see pictures at all. Lets OpenCode photograph Home Assistant pages in a headless browser to check the result of dashboard changes; each capture takes about 5-10 seconds."
 
   access_token:
     name: "Home Assistant access token"
