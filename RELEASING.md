@@ -154,12 +154,28 @@ Things deliberately not fixed yet, so they don't surprise you:
   tag. The new "main moved past the tag" guard makes the mismatch loud instead
   of silent, but the underlying design is unchanged.
 - **`bashio::config 'key' || echo "default"` is dead code** (~30 call sites).
-  `bashio::config` prints the literal string `null` and exits 0 for a key
-  absent from `options.json`, so the fallback never runs. This matters if you
-  ever add an option to only one channel's `config.yaml`: the other channel
-  gets `null`, not your default. `restrict_sensitive_files` would fail to the
-  *unsafe* side that way. Prefer keeping schemas identical across channels and
-  separating behaviour by branch instead.
+  For a key absent from `options.json`, bashio returns its `default_value`
+  argument — which is itself the literal string `null` when you don't pass one
+  — and exits 0, so `||` never fires:
+
+  ```bash
+  if [[ "${result}" == "null" ]]; then
+      echo "${default_value}"
+  else
+      printf "%s" "${result}"
+  fi
+  return "${__BASHIO_EXIT_OK}"
+  ```
+
+  The fix is the second argument, not `||`:
+  `bashio::config 'restrict_sensitive_files' 'true'`.
+
+  This matters if you ever add an option to only one channel's `config.yaml`:
+  the other channel gets `null`, not your default. Today that would leave
+  `restrict_sensitive_files` on the *unsafe* side, because it is declared
+  `|| echo "true"` but tested `= "true"`. Both channels currently declare all
+  28 options identically, so nothing is live — prefer keeping the schemas in
+  step and separating behaviour by branch instead.
 
 ## If something goes wrong
 
