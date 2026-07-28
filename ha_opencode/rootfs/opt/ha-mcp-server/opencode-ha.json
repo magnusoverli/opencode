@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-synced"],
   "snapshot": false,
   "permission": {
     "external_directory": {
