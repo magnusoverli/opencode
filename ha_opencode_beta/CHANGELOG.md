@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.3.8b3
 
 - **Native Home Assistant MCP bridge now works on today's Home Assistant, and is ready for 2026.8** — Home Assistant's native LLM platform (the `llm` integration, the per-domain tool platforms, and the keyed `/api/mcp/<API ID>` endpoints) all land in **2026.8**; none of it is in 2026.7.x or earlier. Until now the bridge targeted `/api/mcp/assist` unconditionally, so on every shipping Home Assistant it simply hit a 404. Three changes fix that and remove the sharp edges:
   - **Endpoint fallback** — the bridge now prefers the keyed `/api/mcp/<API ID>` endpoint and falls back to the configured `/api/mcp` endpoint when it answers 404, logging once whether the endpoint is missing entirely (pre-2026.8) or the API ID is unknown. Pin the choice with `HA_NATIVE_MCP_ENDPOINT_MODE=auto|keyed|configured`.
