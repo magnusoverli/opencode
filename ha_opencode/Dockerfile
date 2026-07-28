@@ -43,6 +43,7 @@ ENV NODE_ENV=production \
 # - tmux: Session persistence to prevent multiple OpenCode instances
 # - chromium: Headless browser for screenshot_url MCP tool (visual verification)
 # - g++/make: native fallback builds for OpenChamber dependencies on all arches
+# - gh: GitHub CLI, required by opencode-synced plugin for repo operations
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -59,6 +60,13 @@ RUN apt-get update \
         python3-venv \
         tmux \
     && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI (gh) for opencode-synced plugin
+# Required for cross-machine config sync via GitHub repos
+RUN ARCH=$([ "$BUILD_ARCH" = "aarch64" ] && echo "arm64" || echo "amd64") \
+    && curl -fsSL "https://github.com/cli/cli/releases/latest/download/gh_${ARCH}.deb" -o /tmp/gh.deb \
+    && dpkg -i /tmp/gh.deb \
+    && rm /tmp/gh.deb
 
 # Chromium path for puppeteer-core (used by screenshot MCP tool)
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
