@@ -1,6 +1,17 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 2.3.8
+
+Home context, promoted from the 2.3.8 beta cycle: OpenCode now starts each session already knowing what your installation looks like and why it is the way it is, instead of rediscovering both from scratch every time.
+
+- **Sessions start knowing your installation ([issue #63](https://github.com/magnusoverli/opencode/issues/63))** — a compact install briefing describing your areas, integrations, configuration layout and add-on capabilities is generated once and refreshed on demand, so the first question of a session no longer has to be spent on discovery. Where the briefing cannot fit everything, it names what it left out rather than staying silent, so a gap in OpenCode's context can never read as an absence in your setup.
+- **Your own instructions survive add-on updates** — rules you write now live in `AGENTS.local.md`, which the add-on never overwrites. The previous guidance pointed at `/config/AGENTS.md`, which was replaced on every update; the one-time migration backs up an existing file rather than clobbering it.
+- **Decision notes carry reasoning between sessions** — your YAML records what your setup does but not *why*, so a deliberate choice looks identical to an oversight and gets "fixed". Notes are recorded only with your explicit approval, are screened for credentials both when written and when read back, are dated by your local clock, and can be pinned so the constraints that matter most are the last to be dropped. Three MCP tools (`remember_decision`, `recall_decisions`, `supersede_decision`) and a new `ha-context` command manage them; recall matches a plain question rather than a single substring, and an empty result says how many notes exist instead of implying nothing was ever decided.
+- **Screenshot tool fixes ([issue #72](https://github.com/magnusoverli/opencode/issues/72))** — it reported "captured successfully" while writing nothing to disk, so models advised users to go and find a file that did not exist; the PNG only ever exists inside the tool result, and the tool now says so. The add-on's own vision model for PPQ private mode could not receive images at all because its `modalities` field was missing, the 10-second MCP call deadline could cut a screenshot off on slower hardware (now 60), and the tool is now hidden unless the feature is on and an access token is set. Whether a screenshot is usable still depends on the model you select — the documentation and option description now say so.
+
+Both channels are now built from separate branches: stable from `main`, beta from `dev`. See [RELEASING.md](../RELEASING.md).
+
 ## 2.3.7
 
 - **Optional OpenChamber LAN web UI** — a new `enable_openchamber_lan` option (only active when `interface_mode: openchamber`) publishes the OpenChamber UI on a mappable network port (`4097/tcp`), mirroring the existing OpenCode LAN server on `4096/tcp`. It runs a second instance of the ingress proxy bound to `0.0.0.0` with the remote-address allowlist relaxed (via `OPENCHAMBER_ALLOW_ANY_REMOTE`) and serves the UI at the root path `/`, so reverse proxies and tunnels (e.g. Cloudflare Tunnel) can point straight at a backend without an ingress-path redirect/rewrite. Off by default; requires both enabling the option and mapping `4097/tcp` in Network settings. No Home Assistant Ingress auth sits in front of the mapped port, so it is intended for trusted networks or behind a reverse proxy / access control.
