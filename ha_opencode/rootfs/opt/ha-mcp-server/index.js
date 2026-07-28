@@ -509,9 +509,22 @@ async function takeScreenshot(haCoreUrl, urlPath, options = {}) {
 
       // â”€â”€ Auth Strategy 2: WebSocket interceptor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // Monkey-patch the WebSocket constructor so that when the HA
-      // frontend opens /api/websocket, our listener auto-responds to
-      // the auth_required handshake with the LLAT.  This covers cases
-      // where localStorage auth fails or the frontend ignores it.
+      // frontend opens /api/websocket, we can auto-respond to the
+      // auth_required handshake with the LLAT.  This covers cases where
+      // localStorage auth fails or the frontend ignores it.
+      //
+      // Strategy 1 usually succeeds, in which case the frontend answers
+      // auth_required itself.  Both it and this interceptor see the same
+      // frame, so firing unconditionally sent a second auth frame that
+      // Home Assistant rejected and logged for every screenshot:
+      //   Received invalid command: {'type': 'auth', ...}
+      // The connection is already authenticated at that point, so the
+      // screenshot still worked and the only symptom was a Core error.
+      //
+      // The frontend therefore owns authentication and this stays a
+      // fallback: watch outgoing frames, and only authenticate if the page
+      // has not done so shortly after auth_required.
+      const AUTH_FALLBACK_MS = 500;
       const _WebSocket = window.WebSocket;
       window.WebSocket = function (url, protocols) {
         const ws = protocols !== undefined
@@ -519,17 +532,35 @@ async function takeScreenshot(haCoreUrl, urlPath, options = {}) {
           : new _WebSocket(url);
 
         if (url && url.includes("/api/websocket")) {
-          let authSent = false;
+          let pageAuthSent = false;
+          let fallbackAuthSent = false;
+
+          // Bound up front so the fallback cannot recurse through the patch.
+          const rawSend = ws.send.bind(ws);
+          ws.send = function (data) {
+            try {
+              if (typeof data === "string" && JSON.parse(data)?.type === "auth") {
+                pageAuthSent = true;
+              }
+            } catch (_) { /* non-JSON or binary frame - not an auth frame */ }
+            return rawSend(data);
+          };
+
           ws.addEventListener("message", function (event) {
             try {
               const msg = JSON.parse(event.data);
-              if (msg.type === "auth_required" && !authSent) {
-                authSent = true;
-                ws.send(JSON.stringify({
-                  type: "auth",
-                  access_token: config.token,
-                }));
-              }
+              if (msg.type !== "auth_required" || fallbackAuthSent) return;
+              setTimeout(() => {
+                if (pageAuthSent || fallbackAuthSent) return;
+                if (ws.readyState !== _WebSocket.OPEN) return;
+                fallbackAuthSent = true;
+                try {
+                  rawSend(JSON.stringify({
+                    type: "auth",
+                    access_token: config.token,
+                  }));
+                } catch (_) { /* socket closed between check and send */ }
+              }, AUTH_FALLBACK_MS);
             } catch (_) { /* ignore parse errors on non-JSON frames */ }
           });
         }
