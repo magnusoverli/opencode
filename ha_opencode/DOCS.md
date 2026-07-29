@@ -785,6 +785,20 @@ Analyzes your setup and suggests:
 
 The `write_config_safe` MCP tool provides a complete validation pipeline when writing Home Assistant YAML configuration files. Instead of blind file writes, every change goes through multiple safety checks — including content protection against accidental data loss — with automatic rollback on failure.
 
+### Write Confirmation
+
+Because this add-on edits a live Home Assistant installation, direct file edits ask for your approval first. You see the proposed change and confirm it before anything is written. In-place shell edits (`yq -i`, `sed -i`, `tee`) and file removal or renaming ask as well; read-only commands do not, so investigating a problem stays uninterrupted.
+
+Writes made through `write_config_safe` do not prompt — they go through the validation, backup, and rollback pipeline described below instead.
+
+If you would rather not be asked, add the following to **Custom OpenCode config** in the add-on configuration:
+
+```json
+{ "permission": { "edit": "allow", "bash": "allow" } }
+```
+
+The same setting can make the add-on more cautious. `{"default_agent": "plan"}` starts every session in the plan agent, which asks before *every* command including read-only ones; press `Tab` to switch agents mid-session.
+
 ### Validation Pipeline
 
 When you (or the AI agent) write configuration through `write_config_safe`, the following steps happen automatically:

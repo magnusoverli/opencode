@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Direct file edits now ask before writing ([issue #81](https://github.com/magnusoverli/opencode/issues/81))** — this add-on points an AI agent at a live Home Assistant installation, and until now a newly installed add-on would edit configuration files without confirming anything first. Editing a file now asks for approval, as do in-place shell edits (`yq -i`, `sed -i`, `tee`) and removing or renaming files. Read-only commands are unaffected, so investigating a problem is as fluid as before. Writes through `write_config_safe` still do not prompt — they already validate, back up, and roll back automatically. Both directions remain configurable through **Custom OpenCode config**: `{"permission": {"edit": "allow", "bash": "allow"}}` restores the previous behaviour, and `{"default_agent": "plan"}` asks before every command instead, as suggested in the issue.
+
 ## 2.3.9b0
 
 Two Home Assistant Core log errors, both reported with accurate root-cause analysis by [@JayMansel](https://github.com/JayMansel). Neither broke the feature it belonged to, which is why both went unnoticed for so long — they just made Core's log lie about your setup.
