@@ -157,6 +157,33 @@ OpenCode snapshots are disabled by default in this add-on to reduce memory and d
 
 On low-memory hosts — for example a 4 GB Home Assistant Green running several other add-ons — keep **OpenCode update policy** on `bundled` (the default) so the add-on does no memory-heavy start-up install, and expect the agent itself to be memory-hungry during large tasks. 8 GB or more is recommended for comfortable use alongside other memory-heavy add-ons such as Matter Server, Music Assistant, and Whisper/Piper.
 
+### Local Models (Ollama and similar)
+
+Local models work, but the add-on sends a large system prompt on every request, and that cost lands entirely on your own hardware. Budget for it before choosing a model.
+
+Every request carries roughly:
+
+| Included on every request | Approximate size |
+|---------------------------|------------------|
+| OpenCode's agent prompt and built-in tools | varies by version |
+| Home Assistant MCP tool definitions (41 tools) | ~25 KB |
+| `AGENTS.md` from your configuration folder | ~35 KB |
+| `INSTRUCTIONS.md` (MCP usage guidance) | ~20 KB |
+| Install briefing | capped at ~500 tokens |
+| `AGENTS.local.md`, if you use one | your own content |
+
+In practice that is on the order of **25,000 tokens before you type anything**. A hosted provider absorbs this in a second or two. A local model on a Raspberry Pi or similar has to evaluate all of it on CPU first, so a one-word prompt can take minutes. This is prompt evaluation, not add-on overhead — comparing against a bare `curl` to your model will not reproduce it, because that request is a few hundred bytes.
+
+To make local models usable:
+
+- **Set the context window to fit.** Ollama defaults `num_ctx` to 4096. A 25,000-token prompt is silently truncated at that size, so the model loses most of its tools and instructions before it sees your message. Raise it (`OLLAMA_CONTEXT_LENGTH`, or `num_ctx` in the model's parameters) and expect higher memory use.
+- **Turn off MCP integration** to remove the 41 tool definitions. This is the single largest saving, but OpenCode then loses the ability to query entities and call services — it becomes a file editor for your YAML rather than a Home Assistant agent.
+- **Turn off Install briefing** for a smaller saving.
+- **Use a model that supports tool calling**, and a large one. Small models (roughly under 7B) generally cannot drive a 41-tool agent loop reliably regardless of how fast they run — a common symptom is the model replying with a raw JSON envelope instead of normal text.
+- **Do not run the model on the Home Assistant host** if you can avoid it. Inference competing with Home Assistant for CPU and RAM makes both worse.
+
+If you want to shrink the prompt further, you can edit `/homeassistant/AGENTS.md` directly — the add-on keeps a file you have modified rather than overwriting it. The trade-off is that you stop receiving updates to those instructions. See [Resetting AGENTS.md to default](#resetting-agentsmd-to-default).
+
 ### OpenCode Updates
 
 By default, **OpenCode update policy** is set to `bundled`: the add-on uses the OpenCode version shipped in its image and does no start-up install. This is the lowest-memory option and is recommended for systems with 4 GB RAM or limited free memory.
@@ -1453,6 +1480,10 @@ OpenCode can use significant memory on larger Home Assistant installations. This
 1. Verify the entity exists in Home Assistant
 2. Check the exact entity_id spelling
 3. Use `search_entities` to find entities by name
+
+### Responses are very slow with a local model
+
+Almost always prompt evaluation, not a fault. The add-on sends roughly 25,000 tokens of tools and instructions on every request, and your hardware has to process all of it before generating the first token. See [Local Models](#local-models-ollama-and-similar) for how to reduce it. Check your model server's context-window setting first — if the prompt is being truncated, quality suffers as well as speed.
 
 ### Changes not taking effect
 

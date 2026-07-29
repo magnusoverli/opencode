@@ -98,7 +98,7 @@ OpenCode works with **75+ AI providers**. Choose the one that fits your needs:
 | 🔷 **Azure OpenAI** | GPT-4, GPT-4 Turbo (Azure hosted) |
 | ⚡ **Groq** | Llama 3, Mixtral (ultra-fast inference) |
 | 🎯 **Mistral** | Mistral Large, Mistral Medium, Codestral |
-| 🦙 **Ollama** | Local models (Llama, CodeLlama, Mistral, etc.) |
+| 🦙 **Ollama** | Local models — see the [local model notes](./ha_opencode/DOCS.md#local-models-ollama-and-similar) before choosing hardware |
 | 🌐 **OpenRouter** | 100+ models through single API |
 | 🤝 **Together AI** | Llama, Mixtral, and open models |
 | 🔥 **Fireworks AI** | Fast inference for open models |
@@ -106,6 +106,8 @@ OpenCode works with **75+ AI providers**. Choose the one that fits your needs:
 | 💫 **Deepseek** | Deepseek Coder, Deepseek Chat |
 
 </details>
+
+> **Running models locally?** The add-on sends a large tools-and-instructions prompt on every request. Read the [local model notes](./ha_opencode/DOCS.md#local-models-ollama-and-similar) first — a small model on modest hardware can take minutes per reply.
 
 ### 🎁 **Free Tier - OpenCode Zen**
 
