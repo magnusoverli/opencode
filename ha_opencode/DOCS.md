@@ -566,7 +566,7 @@ Then restart OpenCode (exit and run `opencode` again).
 
 | Tool | Description |
 |------|-------------|
-| `get_states` | Get entity states (one entity, a domain, or the whole installation). An unfiltered call returns at most 150 entities in Home Assistant's own order; `summarize` gives a complete per-domain census instead. |
+| `get_states` | Get entity states (one entity, a domain, or the whole installation). A call with no domain returns at most 150 entities and a domain-filtered one at most 500, in Home Assistant's own order; `summarize` gives a complete per-domain census instead. |
 | `search_entities` | Semantic search - find entities by natural language ("bedroom lights", "motion sensors") |
 | `get_entity_details` | Deep dive into an entity including device/area relationships |
 | `get_home_context` | Compact area/domain/entity-filtered context with registry-derived area and device metadata |
@@ -1299,7 +1299,7 @@ You own that file: read it in File Editor, edit it, or delete it. It is included
 
 **On context cost.** Each *active* note reaches the model as a single line — its date, title, decision, and any entities, files or integrations you attached to it. The rationale and any retired notes stay in the file and are fetched on demand. (If you see an entity name in `ha-context show` that you did not expect, this is where it comes from: the install briefing contains no entity names at all.) The injected digest is capped at roughly 500 tokens, and up to 40 active notes are stored. When a decision is replaced, the old note is marked superseded rather than deleted: it disappears from the session digest but stays in the file. That is how the cost stays flat instead of creeping up as notes accumulate.
 
-**When there are more notes than fit.** The two limits above are different limits, and the digest one arrives first: depending on how long your notes are, somewhere between about four and eleven of them fit in 500 tokens. Nothing is lost when that happens — the rest stay in the file and in force, and OpenCode reads them with `recall_decisions`. The digest always states how many notes it is showing out of the total, so OpenCode is never left to assume the list is complete.
+**When there are more notes than fit.** The two limits above are different limits, and the digest one arrives first. How many fit depends almost entirely on how long you write them: around a dozen notes of a sentence or so, roughly seventeen terse ones, as few as three if each runs to a paragraph. Nothing is lost when the rest do not fit — they stay in the file and in force, and OpenCode reads them with `recall_decisions`. The digest always states how many notes it is showing out of the total, so OpenCode is never left to assume the list is complete.
 
 To keep a specific note in the digest regardless, pin it — add `pin: true` to it in the file, or ask OpenCode to pin it when it proposes the note:
 

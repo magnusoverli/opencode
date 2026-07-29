@@ -2207,13 +2207,16 @@ const EMPTY_INPUT_SCHEMA = Object.freeze({
   additionalProperties: false,
 });
 
-// An unfiltered get_states is the largest thing this server can put in a
-// conversation, and it is paid for again on every request that follows it. At
-// 500 a mid-sized home returned roughly as many tokens as the entire system
-// prompt. 150 keeps the domain-filtered calls the instructions steer toward
-// intact — those are what the model should be making — while cutting the
-// unfiltered dump by more than 3x.
-const STATE_RESULT_CAP = 150;
+// The ceiling on any get_states list.
+const STATE_RESULT_CAP = 500;
+
+// A tighter ceiling when no domain was given. An unfiltered get_states is the
+// largest thing this server can put in a conversation, and it is paid for again
+// on every request that follows it — at 500 a mid-sized home returned roughly
+// as much as the entire system prompt. Filtering by domain is the behaviour
+// AGENTS.md and INSTRUCTIONS.md steer toward, so it keeps the wider ceiling:
+// narrowing a query should not cost the model results.
+const UNFILTERED_STATE_RESULT_CAP = 150;
 const HOME_CONTEXT_RESULT_CAP = 80;
 const HISTORY_RESULT_CAP = 200;
 const LOGBOOK_RESULT_CAP = 200;
@@ -2253,7 +2256,7 @@ const TOOLS = [
   {
     name: "get_states",
     title: "Get Entity States",
-    description: `Get the current state of entities: one entity, a domain, or the whole installation. Returns entity_id, state, and key attributes. An unfiltered call is capped at ${STATE_RESULT_CAP} entities in Home Assistant's own arbitrary order, so prefer domain or entity_id when you know what you are after, and summarize when you want a complete picture of what exists.`,
+    description: `Get the current state of entities: one entity, a domain, or the whole installation. Returns entity_id, state, and key attributes. A call with no domain is capped at ${UNFILTERED_STATE_RESULT_CAP} entities, a domain-filtered one at ${STATE_RESULT_CAP}, in Home Assistant's own arbitrary order — so prefer domain or entity_id when you know what you are after, and summarize when you want a complete picture of what exists.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -3472,8 +3475,9 @@ async function probeNativeHaMcpReadiness() {
  * `pretty` is forwarded rather than defaulted here, so the single statement of
  * the default lives in createJsonTextContent (lib/helpers.js), which is off.
  * Indentation is whitespace the model pays for on every request the result
- * stays in history: a large get_states payload measured about 27% more
- * characters indented, and nothing reads these blocks but the model.
+ * stays in history: on a large get_states payload compact measured roughly a
+ * quarter fewer characters (23-28%, depending on how many entities carry a
+ * friendly_name and device_class), and nothing reads these blocks but the model.
  */
 function createCompactJsonContent(summary, data, meta = {}, options = {}) {
   return createJsonTextContent(createCompactPayload(summary, data, meta), {
@@ -3608,15 +3612,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           friendly_name: s.attributes?.friendly_name,
           device_class: s.attributes?.device_class,
         }));
-        const truncated = simplified.length > STATE_RESULT_CAP;
-        const returned = truncated ? simplified.slice(0, STATE_RESULT_CAP) : simplified;
+        const cap = args?.domain ? STATE_RESULT_CAP : UNFILTERED_STATE_RESULT_CAP;
+        const truncated = simplified.length > cap;
+        const returned = truncated ? simplified.slice(0, cap) : simplified;
         return makeCompatibleResponse({
           content: [createCompactJsonContent(
             truncated
               ? `Showing ${returned.length} of ${simplified.length} entities, in the order Home Assistant ` +
                 "returned them — this is an arbitrary window, not a ranked or alphabetical one, so absence " +
-                "from it proves nothing about what exists. Narrow with domain or entity_id, or use " +
-                "summarize for a complete per-domain census."
+                "from it proves nothing about what exists. " +
+                (args?.domain
+                  ? "Narrow with entity_id, or use summarize for a complete per-domain census."
+                  : "Narrow with domain or entity_id, or use summarize for a complete per-domain census.")
               : `Returned ${returned.length} entities`,
             returned,
             {
