@@ -566,7 +566,7 @@ Then restart OpenCode (exit and run `opencode` again).
 
 | Tool | Description |
 |------|-------------|
-| `get_states` | Get entity states (all, by domain, or specific). Supports semantic summaries. |
+| `get_states` | Get entity states (one entity, a domain, or the whole installation). An unfiltered call returns at most 150 entities in Home Assistant's own order; `summarize` gives a complete per-domain census instead. |
 | `search_entities` | Semantic search - find entities by natural language ("bedroom lights", "motion sensors") |
 | `get_entity_details` | Deep dive into an entity including device/area relationships |
 | `get_home_context` | Compact area/domain/entity-filtered context with registry-derived area and device metadata |
@@ -1313,6 +1313,10 @@ To keep a specific note in the digest regardless, pin it — add `pin: true` to 
 ```
 
 Pinned notes lead the digest and are the last to be dropped. Up to 10 can be pinned. Use it for the decisions where being forgotten would cause real damage — without a pin, the oldest notes are the first to fall out, and those are often the ones everyone has stopped thinking about.
+
+**When a new note takes effect.** Immediately, but in two stages. A note you approve is in force straight away — OpenCode has it in the current conversation, and `recall_decisions` reads it from the file at any time. It joins the *standing context* that every session starts with when the digest is next rebuilt: at the next add-on restart, or right away if you run `ha-context refresh`.
+
+That split is deliberate. The digest is part of the instructions OpenCode re-reads on every single request, so rewriting it mid-conversation would change the prompt underneath a running session and throw away the cached prefix — a lost cache discount on a hosted model, and a full re-read of the whole conversation on a local one. Recording a note therefore writes the notes file and nothing else. One consequence to know about: between recording a note and the next rebuild, `ha-context notes` shows it and `ha-context show` does not, because they are reading different files.
 
 **On safety.** Notes that contain a password, token, or any value found in your `secrets.yaml` are rejected outright. A note is sent to the model in every future session, so credentials have no business being in one.
 

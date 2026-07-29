@@ -95,7 +95,6 @@ import {
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
 import { extractSecretValues } from "./lib/context-budget.js";
 import {
-  DECISION_DIGEST_PATH,
   DECISION_NOTES_DIR,
   DECISION_NOTES_PATH,
   LIMITS as DECISION_LIMITS,
@@ -2046,7 +2045,6 @@ const DECISION_NOTES_BASE_DIR = process.env.OPENCODE_DECISION_NOTES_DIR || DECIS
 const DECISION_NOTES_FILE = DECISION_NOTES_BASE_DIR === DECISION_NOTES_DIR
   ? DECISION_NOTES_PATH
   : join(DECISION_NOTES_BASE_DIR, "decisions.yaml");
-const DECISION_DIGEST_FILE = process.env.OPENCODE_DECISION_DIGEST_PATH || DECISION_DIGEST_PATH;
 
 /**
  * Read the user's decision notes.
@@ -2105,43 +2103,54 @@ function writeFileAtomicSync(path, contents) {
 }
 
 /**
- * Persist notes and refresh the injected digest.
+ * Persist notes. The injected digest is deliberately not touched.
  *
- * The notes file is the user's record and is written first; the digest is
- * derived and is rebuilt from it. A failure to refresh the digest is reported
- * rather than thrown, because by that point the note *is* saved — telling the
- * user it was not would be the one answer that is simply false.
+ * `/data/context/decision-notes.md` is listed in OpenCode's `instructions`, and
+ * OpenCode re-reads every instruction file from disk on each request rather
+ * than once per session. Rewriting the digest mid-conversation therefore edits
+ * the system prompt underneath a live session, discarding the cached prefix
+ * from that point on — the digest is ordered newest-first and carries a note
+ * count, so a new note changes it at the top and invalidates everything after,
+ * including the whole message history. On a hosted model that is a lost cache
+ * discount; on a local one it is a full re-prefill mid-task.
+ *
+ * The digest is derived from this file, and generate-home-context.mjs already
+ * rebuilds it at add-on start and on `ha-context refresh`. One writer, at one
+ * moment, is the whole point — so recording a note is a write to the notes
+ * file and nothing else.
  */
-function writeDecisionNotes(serialized, notes) {
+function persistDecisionNotes(serialized) {
   mkdirSync(DECISION_NOTES_BASE_DIR, { recursive: true });
   writeFileAtomicSync(DECISION_NOTES_FILE, serialized);
-
-  // Screened again here, not just on the note being added: the file may also
-  // hold notes a user wrote by hand, and this rebuild is what reaches the model.
-  // No `unreadable` count: both write paths refuse to save while the file has
-  // entries the parser rejected, so what is written is always the whole file.
-  const digest = renderDecisionDigest(notes, { secretValues: readSecretValues() });
-
-  try {
-    mkdirSync(dirname(DECISION_DIGEST_FILE), { recursive: true });
-    if (digest.markdown) {
-      writeFileAtomicSync(DECISION_DIGEST_FILE, digest.markdown);
-    } else if (existsSync(DECISION_DIGEST_FILE)) {
-      unlinkSync(DECISION_DIGEST_FILE);
-    }
-    return { ...digest, digestError: null };
-  } catch (error) {
-    return { ...digest, digestError: error?.message ?? String(error) };
-  }
 }
 
 /**
- * Say plainly how much of the record the next session will actually carry.
+ * Render the digest the next rebuild would produce, without writing it.
+ *
+ * This is what lets the tools still tell the user whether a note will fit the
+ * standing context. It is a forecast, not a description of a file on disk, and
+ * the wording at the call sites says so.
+ *
+ * Screened again here, not just on the note being added: the file may also
+ * hold notes a user wrote by hand, and this render is what would reach the
+ * model. No `unreadable` count: both write paths refuse to save while the file
+ * has entries the parser rejected, so what is written is always the whole file.
+ */
+function previewDecisionDigest(notes) {
+  return renderDecisionDigest(notes, { secretValues: readSecretValues() });
+}
+
+/**
+ * Say plainly how much of the record a future session will actually carry.
  *
  * The stored-note limit and the digest budget are different limits, and the
  * digest one bites first. Reporting only the stored count would read as "there
  * is plenty of room" while notes were quietly falling out of the standing
  * context.
+ *
+ * This describes a rendered preview, not a file on disk — the digest is
+ * rebuilt by generate-home-context.mjs, and the user can edit the notes file
+ * before that happens. The wording is a forecast for that reason.
  */
 function describeDigestCoverage(digest) {
   const shown = digest?.includedNotes?.length ?? 0;
@@ -2198,7 +2207,13 @@ const EMPTY_INPUT_SCHEMA = Object.freeze({
   additionalProperties: false,
 });
 
-const STATE_RESULT_CAP = 500;
+// An unfiltered get_states is the largest thing this server can put in a
+// conversation, and it is paid for again on every request that follows it. At
+// 500 a mid-sized home returned roughly as many tokens as the entire system
+// prompt. 150 keeps the domain-filtered calls the instructions steer toward
+// intact — those are what the model should be making — while cutting the
+// unfiltered dump by more than 3x.
+const STATE_RESULT_CAP = 150;
 const HOME_CONTEXT_RESULT_CAP = 80;
 const HISTORY_RESULT_CAP = 200;
 const LOGBOOK_RESULT_CAP = 200;
@@ -2238,7 +2253,7 @@ const TOOLS = [
   {
     name: "get_states",
     title: "Get Entity States",
-    description: "Get the current state of entities. Can return all entities, filter by domain, or get a specific entity. Returns entity_id, state, and key attributes.",
+    description: `Get the current state of entities: one entity, a domain, or the whole installation. Returns entity_id, state, and key attributes. An unfiltered call is capped at ${STATE_RESULT_CAP} entities in Home Assistant's own arbitrary order, so prefer domain or entity_id when you know what you are after, and summarize when you want a complete picture of what exists.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -3451,9 +3466,18 @@ async function probeNativeHaMcpReadiness() {
   };
 }
 
+/**
+ * Build a compact JSON content block.
+ *
+ * `pretty` is forwarded rather than defaulted here, so the single statement of
+ * the default lives in createJsonTextContent (lib/helpers.js), which is off.
+ * Indentation is whitespace the model pays for on every request the result
+ * stays in history: a large get_states payload measured about 27% more
+ * characters indented, and nothing reads these blocks but the model.
+ */
 function createCompactJsonContent(summary, data, meta = {}, options = {}) {
   return createJsonTextContent(createCompactPayload(summary, data, meta), {
-    pretty: options.pretty ?? true,
+    pretty: options.pretty,
     audience: options.audience || ["assistant"],
     priority: options.priority ?? 0.7,
   });
@@ -3589,7 +3613,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return makeCompatibleResponse({
           content: [createCompactJsonContent(
             truncated
-              ? `Showing ${returned.length} of ${simplified.length} entities. Use entity_id, domain, or summarize to narrow.`
+              ? `Showing ${returned.length} of ${simplified.length} entities, in the order Home Assistant ` +
+                "returned them — this is an arbitrary window, not a ranked or alphabetical one, so absence " +
+                "from it proves nothing about what exists. Narrow with domain or entity_id, or use " +
+                "summarize for a complete per-domain census."
               : `Returned ${returned.length} entities`,
             returned,
             {
@@ -4798,7 +4825,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         }
 
-        const digest = writeDecisionNotes(result.serialized, result.state.notes);
+        persistDecisionNotes(result.serialized);
+        const digest = previewDecisionDigest(result.state.notes);
         sendLog("info", "decision-notes", { action: "recorded", id: result.note.id });
 
         const active = activeNotes(result.state.notes).length;
@@ -4808,14 +4836,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `# Decision recorded\n\n` +
             `**${result.note.title}**${result.note.pin ? " (pinned)" : ""}\n\n` +
             `Saved to \`${DECISION_NOTES_FILE}\` as \`${result.note.id}\`.\n\n` +
-            (digest.digestError
-              ? `The note is saved, but the session digest could not be rewritten (${digest.digestError}). ` +
-                "Future sessions may not see it until the add-on restarts — tell the user.\n\n"
-              : `${describeDigestCoverage(digest)}\n\n` +
-                (inDigest
-                  ? "Future sessions will see this note in their standing context.\n\n"
-                  : "**This note did not fit the session digest**, so future sessions will not see it up front. " +
-                    "Tell the user, and offer to pin it or to retire a note that no longer applies.\n\n")) +
+            "This decision is in force now — it is in this conversation, and `recall_decisions` reads it " +
+            "straight from the file. It joins the standing context that starts a session when the digest is " +
+            "next rebuilt: at the next add-on restart, or immediately if the user runs `ha-context refresh`.\n\n" +
+            `${describeDigestCoverage(digest)}\n\n` +
+            (inDigest
+              ? ""
+              : "**This note would not fit the session digest**, so later sessions will not see it up front. " +
+                "Tell the user, and offer to pin it or to retire a note that no longer applies.\n\n") +
             `Stored active notes: ${active}/${DECISION_LIMITS.maxActive}.\n\n` +
             `The user can read, edit, or delete this file at any time, or run \`ha-context notes\` in the terminal.`,
             { audience: ["user", "assistant"], priority: 0.8 }
@@ -4943,7 +4971,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         }
 
-        const digest = writeDecisionNotes(result.serialized, result.state.notes);
+        persistDecisionNotes(result.serialized);
+        const digest = previewDecisionDigest(result.state.notes);
         sendLog("info", "decision-notes", { action: "superseded", ids: result.superseded });
 
         return makeCompatibleResponse({
@@ -4953,7 +4982,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             (result.alreadySuperseded?.length
               ? `Already superseded, unchanged: ${result.alreadySuperseded.map((id) => `\`${id}\``).join(", ")}.\n\n`
               : "") +
-            `They stay in \`${DECISION_NOTES_FILE}\` for the record but no longer reach future sessions.\n\n` +
+            `They stay in \`${DECISION_NOTES_FILE}\` for the record but no longer reach future sessions. ` +
+            "The standing context still carries them until the digest is next rebuilt — at the next add-on " +
+            "restart, or immediately with `ha-context refresh`.\n\n" +
             `${describeDigestCoverage(digest)}\n\n` +
             `Stored active notes: ${activeNotes(result.state.notes).length}/${DECISION_LIMITS.maxActive}.`,
             { audience: ["user", "assistant"], priority: 0.8 }
