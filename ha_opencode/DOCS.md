@@ -157,6 +157,35 @@ OpenCode snapshots are disabled by default in this add-on to reduce memory and d
 
 On low-memory hosts — for example a 4 GB Home Assistant Green running several other add-ons — keep **OpenCode update policy** on `bundled` (the default) so the add-on does no memory-heavy start-up install, and expect the agent itself to be memory-hungry during large tasks. 8 GB or more is recommended for comfortable use alongside other memory-heavy add-ons such as Matter Server, Music Assistant, and Whisper/Piper.
 
+### Local Models (Ollama and similar)
+
+Local models work, but the add-on sends a substantial prompt on every request and that cost lands on your own hardware rather than a provider's. Budget for it before choosing a model.
+
+Every request carries, before you have typed anything:
+
+| Sent on every request | Size |
+|---|---|
+| `AGENTS.md`, the add-on's Home Assistant instructions | ~35 KB |
+| `INSTRUCTIONS.md`, MCP usage guidance | ~20 KB |
+| Definitions for the 41 Home Assistant MCP tools | ~26 KB |
+| Install briefing, if enabled | capped at ~500 tokens |
+| `AGENTS.local.md`, if you use one | your own content |
+| OpenCode's own agent prompt and built-in tools | varies by version |
+
+That is on the order of **25,000 tokens before your first word**. A hosted provider prices most of it away through prompt caching. A local model has to evaluate it, on CPU, before generating a single token — which is why a one-word prompt can take minutes on a Raspberry Pi while the same model answers `curl` in seconds. Comparing against a bare `curl` will not reproduce it: that request is a few hundred bytes.
+
+Tool results add to this as the session runs, and they stay in the conversation, so each one is re-sent on every later request. That is why an unfiltered `get_states` is capped (see [MCP Tools](#mcp-tools-41-available)) and why tool JSON is sent without indentation.
+
+**To make a local model workable:**
+
+- **Raise the context window.** Ollama defaults `num_ctx` to 4096. A 25,000-token prompt is silently truncated at that size, so the model loses most of its tools and instructions before it ever sees your message — you get poor answers *and* slow ones. Raise it with `OLLAMA_CONTEXT_LENGTH` or the model's `num_ctx` parameter, and expect higher memory use.
+- **Turn off MCP integration** to remove ~26 KB of tool definitions. This is the largest single saving, and the largest loss: OpenCode can no longer query entities or call services, so it becomes a YAML editor rather than a Home Assistant agent.
+- **Turn off the install briefing** for a smaller saving.
+- **Use a model that supports tool calling, and a large one.** Models below roughly 7B generally cannot drive a 41-tool agent loop no matter how fast they run. A common symptom is the model replying with a raw JSON envelope instead of ordinary text.
+- **Do not run inference on the Home Assistant host** if you can avoid it. A model competing with Core for CPU and RAM makes both worse.
+
+If you want to go further, you can trim `/homeassistant/AGENTS.md` — the add-on keeps a file you have edited rather than overwriting it. The trade-off is that you stop receiving improvements to those instructions; see [Resetting AGENTS.md to default](#resetting-agentsmd-to-default).
+
 ### OpenCode Updates
 
 By default, **OpenCode update policy** is set to `bundled`: the add-on uses the OpenCode version shipped in its image and does no start-up install. This is the lowest-memory option and is recommended for systems with 4 GB RAM or limited free memory.
@@ -1476,6 +1505,10 @@ OpenCode can use significant memory on larger Home Assistant installations. This
 1. Verify the entity exists in Home Assistant
 2. Check the exact entity_id spelling
 3. Use `search_entities` to find entities by name
+
+### Responses are very slow with a local model
+
+Almost always prompt evaluation, not a fault. The add-on sends roughly 25,000 tokens of instructions and tool definitions on every request, and your hardware processes all of it before producing the first token. See [Local Models](#local-models-ollama-and-similar) for how to reduce it. Check your model server's context-window setting first: if the prompt is being truncated, answer quality suffers as well as speed.
 
 ### Changes not taking effect
 
