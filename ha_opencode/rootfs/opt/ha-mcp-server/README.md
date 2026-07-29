@@ -56,7 +56,7 @@ Safety and behavior hints are maintained in the server definitions and reported 
 | `requiresConfirmation` | `call_service` |
 
 ### 4. Bounded Large Outputs
-Broad state listings, history, logbook, documentation, changelogs, CLI output, and ESPHome logs are capped and include truncation metadata. Re-run with narrower filters when `meta.truncated` is true.
+Broad state listings, history, logbook, documentation, changelogs, CLI output, service-call responses, and ESPHome logs are capped and include truncation metadata. Re-run with narrower filters when `meta.truncated` is true.
 
 ### 5. Logging Capability
 Server-side logging with configurable levels:
@@ -93,6 +93,13 @@ All tools, resources, and prompts include a `title` field for display.
 |------|-------|-------------|
 | `call_service` | Call Home Assistant Service | `destructive`, `requiresConfirmation` |
 | `get_services` | List Available Services | `readOnly`, `idempotent` |
+
+Services whose schema declares a response — `recorder.get_statistics`, `weather.get_forecasts`,
+`calendar.get_events`, `todo.get_items` — require `?return_response` on the REST call, and Home
+Assistant returns 400 both for omitting it and for sending it to a service that returns nothing.
+`call_service` reads the service catalog and sets the flag on its own; `return_response: true`
+opts into a service whose response is optional. `get_services` reports the response-capable
+services per domain under `returns_response`.
 
 ### History & Logging
 | Tool | Title | Annotations |

@@ -467,6 +467,11 @@ hab entity get sensor.living_room_temperature
 # Call an action
 hab action call light.turn_on --entity light.living_room --data '{"brightness": 200}'
 
+# Call an action that answers with data (weather forecasts, recorder statistics,
+# calendar events, todo items) — without --return-response these fail with
+# "Service call requires responses but caller did not ask for responses"
+hab action call weather.get_forecasts --entity weather.home --data '{"type": "daily"}' --return-response
+
 # Create an automation from a YAML file
 hab automation create my-automation -f automation.yaml
 
@@ -575,8 +580,8 @@ Then restart OpenCode (exit and run `opencode` again).
 
 | Tool | Description |
 |------|-------------|
-| `call_service` | Call any HA service (turn on lights, run scripts, set temperatures, etc.) |
-| `get_services` | List available services, optionally by domain |
+| `call_service` | Call any HA service (turn on lights, run scripts, set temperatures, etc.). Services that answer with data — `recorder.get_statistics`, `weather.get_forecasts`, `calendar.get_events`, `todo.get_items` — return their response automatically |
+| `get_services` | List available services, optionally by domain; marks which ones answer with data |
 
 ### History & Logging
 

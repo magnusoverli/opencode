@@ -93,6 +93,15 @@ import {
   probeNativeMcpEndpoint,
 } from "./lib/ha-native-mcp.js";
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
+import {
+  buildServiceCallPath,
+  listResponseCapableServices,
+  planServiceCall,
+  readAffectedEntities,
+  readResponseMismatch,
+  readServiceResponseSupport,
+  splitServiceCallResult,
+} from "./lib/service-response.js";
 import { extractSecretValues } from "./lib/context-budget.js";
 import {
   DECISION_NOTES_DIR,
@@ -317,6 +326,51 @@ async function getCachedStates() {
 function invalidateStatesCache() {
   statesCache.data = null;
   statesCache.fetchedAt = 0;
+}
+
+// The service catalog changes only when an integration is set up or reloaded,
+// but every call_service now reads it to decide about `return_response`. Cache
+// it so that check costs nothing on the common path.
+const servicesCache = { data: null, fetchedAt: 0, inflight: null };
+const SERVICES_CACHE_TTL = 300000; // 5 minutes
+
+async function getCachedServices() {
+  const now = Date.now();
+  if (servicesCache.data && (now - servicesCache.fetchedAt) < SERVICES_CACHE_TTL) {
+    return servicesCache.data;
+  }
+  if (servicesCache.inflight) {
+    return servicesCache.inflight;
+  }
+  servicesCache.inflight = callHA("/services")
+    .then((services) => {
+      servicesCache.data = services;
+      servicesCache.fetchedAt = Date.now();
+      return services;
+    })
+    .finally(() => { servicesCache.inflight = null; });
+  return servicesCache.inflight;
+}
+
+function invalidateServicesCache() {
+  servicesCache.data = null;
+  servicesCache.fetchedAt = 0;
+}
+
+/**
+ * Read the catalog without letting its absence break a service call.
+ *
+ * A call that would have worked should not fail because the lookup that only
+ * informs it did; callers fall back to Home Assistant's own error, which says
+ * exactly which way the `return_response` flag was wrong.
+ */
+async function getServiceCatalogSafely() {
+  try {
+    return await getCachedServices();
+  } catch (error) {
+    sendLog("debug", "ha-service", { action: "catalog_unavailable", error: error.message });
+    return null;
+  }
 }
 
 // ============================================================================
@@ -1159,6 +1213,8 @@ const SCHEMAS = {
       domain: { type: "string" },
       service: { type: "string" },
       affected_entities: { type: "array", items: { type: "string" } },
+      returned_response: { type: "boolean" },
+      service_response: { type: "object" },
     },
     required: ["success", "domain", "service"],
   },
@@ -2223,6 +2279,9 @@ const LOGBOOK_RESULT_CAP = 200;
 const DOCS_MAX_CHARS = 12000;
 const CHANGELOG_MAX_CHARS = 16000;
 const CLI_OUTPUT_MAX_CHARS = 20000;
+// Statistics and forecast responses are the large ones; generous enough to hold
+// a useful window without letting a single call swamp the context.
+const SERVICE_RESPONSE_MAX_CHARS = 20000;
 
 const server = new Server(
   {
@@ -2366,7 +2425,11 @@ const TOOLS = [
   {
     name: "call_service",
     title: "Call Home Assistant Service",
-    description: "Call a Home Assistant service to control devices or trigger actions. Use for turning on/off lights, running scripts, triggering automations, etc. THIS MODIFIES DEVICE STATE.",
+    description:
+      "Call a Home Assistant service to control devices or trigger actions. Use for turning on/off lights, " +
+      "running scripts, triggering automations, etc. THIS MODIFIES DEVICE STATE. " +
+      "Services that answer with data (recorder.get_statistics, weather.get_forecasts, calendar.get_events, " +
+      "todo.get_items) work here too — their response comes back with the result, no extra argument needed.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2408,6 +2471,13 @@ const TOOLS = [
         data: {
           type: "object",
           description: "Additional service data (e.g., brightness: 255, color_temp: 400, temperature: 72)",
+        },
+        return_response: {
+          type: "boolean",
+          description:
+            "Ask for the service's response data. Leave unset for the normal case: services that always " +
+            "return data request it automatically. Set true only to opt into a service whose response is " +
+            "optional — get_services marks which services in a domain can return one.",
         },
       },
       required: ["domain", "service"],
@@ -3685,43 +3755,105 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // === SERVICE CALLS ===
       case "call_service": {
-        const { domain, service, target, data } = args;
+        const { domain, service, target, data, return_response: requestedResponse } = args;
         sendLog("notice", "ha-service", { action: "call", domain, service, target });
-        
+
         const payload = { ...data };
         if (target) {
           Object.assign(payload, target);
         }
-        const result = await callHA(`/services/${domain}/${service}`, "POST", payload);
+
+        const support = readServiceResponseSupport(await getServiceCatalogSafely(), domain, service);
+        const plan = planServiceCall(support, requestedResponse);
+        const notes = plan.note ? [plan.note] : [];
+        let returnResponse = plan.returnResponse;
+
+        let result;
+        try {
+          result = await callHA(buildServiceCallPath(domain, service, returnResponse), "POST", payload);
+        } catch (error) {
+          // A cached catalog can lag a reloaded integration. Home Assistant's
+          // 400 says exactly which way the flag was wrong, so take it at its
+          // word and retry once rather than handing back an error the caller
+          // could only fix by repeating the call itself.
+          const corrected = error?.status === 400 ? readResponseMismatch(error.message) : null;
+          if (corrected === null || corrected === returnResponse) throw error;
+
+          invalidateServicesCache();
+          returnResponse = corrected;
+          result = await callHA(buildServiceCallPath(domain, service, returnResponse), "POST", payload);
+          notes.push(corrected
+            ? "Home Assistant requires a response for this service; retried with return_response."
+            : "Home Assistant returns no response for this service; retried without return_response.");
+        }
+
         invalidateStatesCache();
+
+        const { changedStates, serviceResponse, hasResponse } = splitServiceCallResult(result);
+        const lines = [`Service ${domain}.${service} called successfully.`];
+
+        if (hasResponse) {
+          const affected = readAffectedEntities(changedStates);
+          if (affected.length) {
+            lines.push(`Changed entities (${affected.length}): ${affected.join(", ")}`);
+          }
+          // The response is what the caller wanted; the changed-state dump that
+          // shares the envelope is noise beside it, and statistics responses
+          // are large enough that printing both would crowd out the answer.
+          // Compact for the same reason the other tool payloads are: a
+          // statistics response is among the largest things this server can put
+          // in a conversation, and indentation is re-read on every later request.
+          const rendered = truncateText(JSON.stringify(serviceResponse), {
+            maxChars: SERVICE_RESPONSE_MAX_CHARS,
+          });
+          lines.push("Response data:", rendered.text);
+          if (rendered.truncated) {
+            lines.push(`(response truncated: ${rendered.omitted_chars} of ${rendered.original_chars} chars omitted — narrow the request to see the rest)`);
+          }
+        } else {
+          lines.push(JSON.stringify(result, null, 2));
+        }
+
+        lines.push(...notes);
 
         return makeCompatibleResponse({
           content: [
-            createTextContent(
-              `Service ${domain}.${service} called successfully.\n${JSON.stringify(result, null, 2)}`,
-              { audience: ["user", "assistant"], priority: 0.9 }
-            ),
+            createTextContent(lines.join("\n"), { audience: ["user", "assistant"], priority: 0.9 }),
           ],
         });
       }
 
       case "get_services": {
-        const services = await callHA("/services");
+        const services = await getCachedServices();
         if (args?.domain) {
           const filtered = services.filter((s) => s.domain === args.domain);
+          const responseServices = filtered.flatMap((s) =>
+            listResponseCapableServices(s.services).map((name) => `${s.domain}.${name}`));
+          const header = responseServices.length
+            ? `Answers with data (call_service returns it automatically): ${responseServices.join(", ")}\n`
+            : "";
           return makeCompatibleResponse({
-            content: [createTextContent(JSON.stringify(filtered, null, 2), { audience: ["assistant"], priority: 0.6 })],
+            content: [createTextContent(header + JSON.stringify(filtered, null, 2), { audience: ["assistant"], priority: 0.6 })],
           });
         }
         // Full catalog with field docs is enormous; unfiltered calls get the
-        // domain/service index and a hint to re-query with a domain
-        const index = services.map((s) => ({
-          domain: s.domain,
-          services: Object.keys(s.services || {}),
-        }));
+        // domain/service index and a hint to re-query with a domain. The
+        // `response` flag survives that trim: it is the one field that changes
+        // how a service must be called, so dropping it here would cost a round
+        // trip on exactly the services that need one.
+        const index = services.map((s) => {
+          const entry = {
+            domain: s.domain,
+            services: Object.keys(s.services || {}),
+          };
+          const withResponse = listResponseCapableServices(s.services);
+          if (withResponse.length) entry.returns_response = withResponse;
+          return entry;
+        });
         return makeCompatibleResponse({
           content: [createTextContent(
             `Service index (${index.length} domains). Pass domain for full schemas.\n` +
+            `'returns_response' lists services that answer with data; call_service returns it automatically.\n` +
             JSON.stringify(index),
             { audience: ["assistant"], priority: 0.6 }
           )],
