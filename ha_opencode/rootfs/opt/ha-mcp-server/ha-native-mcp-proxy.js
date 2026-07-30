@@ -50,10 +50,18 @@ const forwarder = createNativeMcpForwarder({
   endpointMode: ENDPOINT_MODE,
   timeoutMs: REQUEST_TIMEOUT_MS,
   onEndpointFallback: (details) => {
-    log("info", details.reason === "unknown_llm_api_id"
-      ? "Home Assistant does not know this LLM API ID; falling back to the configured /api/mcp endpoint"
-      : "Home Assistant has no keyed /api/mcp/<API ID> endpoint (added in 2026.8); falling back to the configured /api/mcp endpoint",
-    details);
+    log(
+      "info",
+      "Home Assistant has no keyed /api/mcp/<API ID> endpoint (added in 2026.8); falling back to the configured /api/mcp endpoint",
+      details
+    );
+  },
+  onEndpointRecovered: (details) => {
+    log(
+      "info",
+      "The keyed /api/mcp/<API ID> endpoint is available now; using it instead of the configured endpoint",
+      details
+    );
   },
 });
 

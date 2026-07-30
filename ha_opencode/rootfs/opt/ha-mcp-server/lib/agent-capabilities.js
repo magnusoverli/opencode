@@ -23,8 +23,9 @@ const ROADMAP_NOW = [
 ];
 
 const ROADMAP_NEXT = [
-  "Validate the native MCP bridge against Home Assistant 2026.8, the first release that carries the llm integration, the domain tool platforms, and the keyed /api/mcp/<API ID> endpoints.",
-  "Prefer native Home Assistant LLM tools for core Assist/entity control once 2026.8 is released and reachable from the add-on.",
+  "Drop the tool-schema repair and the pre-2026.8 endpoint fallback once no supported Home Assistant release needs them.",
+  "Prefer native Home Assistant LLM tools for core Assist/entity control where they cover a workflow better than OpenCode MCP does.",
+  "Track home-assistant/core#176734 and remove the local JSON-RPC guard once its fix ships.",
   "Position OpenCode as a premium consumer of HA-native LLM capabilities for users testing agent-focused Home Assistant features.",
   "Keep MCP tools for OpenCode-specific, add-on, admin, development, validation, and safety workflows that Home Assistant Core does not intend to expose through Assist.",
   "Confirm whether Supervisor-proxied add-on requests count as admin, which decides whether keyed API IDs other than 'assist' are reachable at all.",
@@ -94,12 +95,16 @@ export function meetsHaVersion(version, minimum) {
  *
  * Reported so an agent reading `get_agent_capabilities` can tell a known
  * upstream limitation apart from a broken local configuration.
+ *
+ * Each entry carries the release that fixes it, or null when no release does
+ * yet. They are filtered per issue rather than against one blanket version,
+ * because they are not all fixed together: the keyed endpoints and the schema
+ * conversion landed in 2026.8, but the streamable-endpoint crash has not landed
+ * anywhere — its fix (home-assistant/core#176782) is still open, so it applies
+ * on 2026.8 exactly as it did on 2026.7.
  */
 function buildNativeMcpKnownIssues(version) {
-  const meets = meetsHaVersion(version, MIN_VERSION_NATIVE_LLM_PLATFORM);
-  if (meets === null || meets === true) return [];
-
-  return [
+  const issues = [
     {
       id: "keyed_endpoints_unavailable",
       upstream: "home-assistant/core#175570",
@@ -116,12 +121,23 @@ function buildNativeMcpKnownIssues(version) {
     },
     {
       id: "streamable_endpoint_crash_risk",
-      upstream: "home-assistant/core#176734",
+      upstream: "home-assistant/core#176734 (fix #176782 still open)",
       fixed_in: null,
-      impact: "A malformed or empty POST to /api/mcp has been reported to crash Home Assistant Core.",
+      impact: "A malformed or empty POST to /api/mcp has been reported to crash Home Assistant Core. No Home Assistant release fixes this yet, including 2026.8.",
       mitigation: "The bridge validates every message as JSON-RPC 2.0 before forwarding it, so a malformed client message is rejected locally.",
     },
   ];
+
+  return issues.filter((issue) => {
+    // An unfixed issue applies to every version, including versions we cannot
+    // parse: staying silent there would understate a live crash risk.
+    if (issue.fixed_in === null) return true;
+
+    const meets = meetsHaVersion(version, issue.fixed_in);
+    // An unparseable version is not evidence the issue is present, so a fixed
+    // issue stays unreported rather than guessing.
+    return meets === false;
+  });
 }
 
 export function buildAgentCapabilities({

@@ -169,11 +169,11 @@ describe("native MCP endpoint negotiation", () => {
     expect(forwarder.activeApiId).toBeNull();
   });
 
-  it("distinguishes an unknown LLM API ID from a missing keyed endpoint", async () => {
-    // Home Assistant >= 2026.8 answers 404 with this body for a bad API ID.
-    const fetchImpl = vi.fn()
-      .mockResolvedValueOnce(new Response("Unknown LLM API 'nope'", { status: 404 }))
-      .mockResolvedValueOnce(jsonResponse({ jsonrpc: "2.0", id: 1, result: {} }));
+  it("reports an unknown LLM API ID instead of falling back to a different API", async () => {
+    // Home Assistant >= 2026.8 answers 404 with this body when the endpoint
+    // exists but the ID does not. Falling back would serve the configured API
+    // in its place and hide the misconfiguration.
+    const fetchImpl = vi.fn(async () => new Response("Unknown LLM API 'nope'", { status: 404 }));
     const onEndpointFallback = vi.fn();
 
     const forwarder = createNativeMcpForwarder({
@@ -183,9 +183,13 @@ describe("native MCP endpoint negotiation", () => {
       onEndpointFallback,
     });
 
-    await forwarder.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const response = await forwarder.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
 
-    expect(onEndpointFallback.mock.calls[0][0].reason).toBe("unknown_llm_api_id");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(onEndpointFallback).not.toHaveBeenCalled();
+    expect(response.error.message).toContain("'nope'");
+    expect(response.error.data.api_id).toBe("nope");
+    expect(forwarder.activeApiId).toBe("nope");
   });
 
   it("latches the fallback so later requests skip the keyed endpoint", async () => {
@@ -204,6 +208,135 @@ describe("native MCP endpoint negotiation", () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(fetchImpl.mock.calls[2][0]).toBe("http://supervisor/core/api/mcp");
+  });
+
+  it("retries the keyed endpoint after the latch ages out", async () => {
+    // Upgrading Home Assistant to 2026.8 restarts Core but not the add-on, so a
+    // bridge that fell back on 2026.7 has to find the keyed endpoint by itself.
+    // A Response body can only be read once, so each call gets a fresh one.
+    let firstCall = true;
+    const fetchImpl = vi.fn(async () => {
+      if (firstCall) {
+        firstCall = false;
+        return new Response("404: Not Found", { status: 404 });
+      }
+      return jsonResponse({ jsonrpc: "2.0", id: 1, result: {} });
+    });
+    const onEndpointRecovered = vi.fn();
+    let clock = 0;
+
+    const forwarder = createNativeMcpForwarder({
+      fetchImpl,
+      supervisorToken: "token",
+      apiId: "assist",
+      fallbackRetryMs: 1000,
+      now: () => clock,
+      onEndpointRecovered,
+    });
+
+    await forwarder.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    expect(forwarder.activeApiId).toBeNull();
+
+    // Still inside the retry window: stays on the configured endpoint.
+    clock = 999;
+    await forwarder.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    expect(onEndpointRecovered).not.toHaveBeenCalled();
+    expect(fetchImpl.mock.calls.at(-1)[0]).toBe("http://supervisor/core/api/mcp");
+
+    // Past the window: the keyed endpoint is tried again, and now answers.
+    clock = 1000;
+    await forwarder.send({ jsonrpc: "2.0", id: 3, method: "tools/list" });
+    expect(onEndpointRecovered).toHaveBeenCalledOnce();
+    expect(fetchImpl.mock.calls.at(-1)[0]).toBe("http://supervisor/core/api/mcp/assist");
+    expect(forwarder.activeApiId).toBe("assist");
+  });
+
+  it("reports the fallback once, not on every retry", async () => {
+    // A Home Assistant that never gains the keyed endpoint keeps failing the
+    // retry. Reporting each one would log forever on every 2026.7 install.
+    const fetchImpl = vi.fn(async (url) => (
+      String(url).endsWith("/mcp/assist")
+        ? new Response("404: Not Found", { status: 404 })
+        : jsonResponse({ jsonrpc: "2.0", id: 1, result: {} })
+    ));
+    const onEndpointFallback = vi.fn();
+    const onEndpointRecovered = vi.fn();
+    let clock = 0;
+
+    const forwarder = createNativeMcpForwarder({
+      fetchImpl,
+      supervisorToken: "token",
+      apiId: "assist",
+      fallbackRetryMs: 1000,
+      now: () => clock,
+      onEndpointFallback,
+      onEndpointRecovered,
+    });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      clock = attempt * 1000;
+      await forwarder.send({ jsonrpc: "2.0", id: attempt, method: "tools/list" });
+    }
+
+    expect(onEndpointFallback).toHaveBeenCalledOnce();
+    expect(onEndpointRecovered).not.toHaveBeenCalled();
+    // Every request still resolved on the configured endpoint.
+    expect(fetchImpl.mock.calls.at(-1)[0]).toBe("http://supervisor/core/api/mcp");
+  });
+
+  it("reports the fallback again after a recovery and a second outage", async () => {
+    const responses = [
+      new Response("404: Not Found", { status: 404 }),               // keyed gone
+      jsonResponse({ jsonrpc: "2.0", id: 1, result: {} }),           // configured
+      jsonResponse({ jsonrpc: "2.0", id: 2, result: {} }),           // keyed back
+      new Response("404: Not Found", { status: 404 }),               // keyed gone again
+      jsonResponse({ jsonrpc: "2.0", id: 3, result: {} }),           // configured
+    ];
+    const fetchImpl = vi.fn(async () => responses.shift());
+    const onEndpointFallback = vi.fn();
+    const onEndpointRecovered = vi.fn();
+    let clock = 0;
+
+    const forwarder = createNativeMcpForwarder({
+      fetchImpl,
+      supervisorToken: "token",
+      apiId: "assist",
+      fallbackRetryMs: 1000,
+      now: () => clock,
+      onEndpointFallback,
+      onEndpointRecovered,
+    });
+
+    await forwarder.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    clock = 1000;
+    await forwarder.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    clock = 2000;
+    await forwarder.send({ jsonrpc: "2.0", id: 3, method: "tools/list" });
+
+    expect(onEndpointRecovered).toHaveBeenCalledOnce();
+    expect(onEndpointFallback).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the fallback latched forever when the retry is disabled", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response("404: Not Found", { status: 404 }))
+      .mockResolvedValue(jsonResponse({ jsonrpc: "2.0", id: 1, result: {} }));
+    let clock = 0;
+
+    const forwarder = createNativeMcpForwarder({
+      fetchImpl,
+      supervisorToken: "token",
+      apiId: "assist",
+      fallbackRetryMs: 0,
+      now: () => clock,
+    });
+
+    await forwarder.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    clock = 10 ** 9;
+    await forwarder.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+
+    expect(forwarder.activeApiId).toBeNull();
+    expect(fetchImpl.mock.calls.at(-1)[0]).toBe("http://supervisor/core/api/mcp");
   });
 
   it("does not fall back in keyed mode", async () => {
