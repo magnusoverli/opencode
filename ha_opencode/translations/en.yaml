@@ -80,7 +80,7 @@ configuration:
 
   cpu_mode:
     name: "CPU mode"
-    description: "Which OpenCode binary to run. 'auto' detects your CPU (recommended), 'baseline' forces the build for older CPUs without AVX2, and 'regular' forces the standard build."
+    description: "Which OpenCode binary to run. 'auto' detects your CPU (recommended), 'baseline' selects the build meant for older CPUs without AVX2, and 'regular' forces the standard build. OpenCode requires a CPU with SSE4.2 (Intel Nehalem 2008+, AMD Bulldozer 2011+) in every mode. Note that upstream currently ships the same binary in both packages, so 'baseline' does not presently help a CPU without AVX2."
 
   enable_server:
     name: "OpenCode LAN server"

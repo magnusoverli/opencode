@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.9b2
+
+A crash with no explanation, and an option that had stopped meaning what it said.
+
+- **A CPU too old for OpenCode now says so instead of crashing ([issue #86](https://github.com/magnusoverli/opencode/issues/86), reported by [@deanhalllincoln](https://github.com/deanhalllincoln))** — on an AMD G-T56N, `opencode --version` died with `Illegal instruction (core dumped)` and nothing anywhere explained why. OpenCode ships as a Bun-compiled binary, so Bun's CPU floor is OpenCode's, and Bun's oldest supported target — the x64 *baseline* build — still requires SSE4.2, the x86-64-v2 level. That processor is a 2011 Bobcat: it has SSE4a and POPCNT but neither SSE4.1 nor SSE4.2, so it sits below the floor and no published OpenCode binary can start on it. The add-on now checks for SSE4.2 at start-up and states that in the log, naming the CPU and the requirement, and the error raised when the binary then fails to execute points at the CPU instead of reporting a generic execution failure. Everything else still comes up, so the message is readable in the add-on log. This does not make OpenCode run on such hardware — nothing can — but it replaces a bare crash with a diagnosis.
+- **The `baseline` CPU mode does not currently do what it promised** — the add-on detects missing AVX2 and selects `opencode-linux-x64-baseline` for it, which is the right thing to do, but upstream is publishing the regular AVX2 binary inside that package. For the shipped OpenCode versions the two are byte-identical: same SHA-256, tarballs differing only by the package name in `package.json`, and the "baseline" binary disassembles with AVX and SSE4.1 instructions still in it. The fallback is therefore inert, and machines with SSE4.2 but no AVX2 — Sandy Bridge and Ivy Bridge boxes, common enough as Home Assistant hosts — hit the same illegal instruction the option exists to avoid. The documentation and the option description claimed otherwise and now say what is true, and the start-up warning links the upstream report ([anomalyco/opencode#33595](https://github.com/anomalyco/opencode/issues/33595)). The option is kept rather than removed, because it starts working again the moment upstream publishes a genuine baseline build.
+- **Minimum hardware is documented** — the README and the add-on documentation both state the SSE4.2 floor and the separate AVX2 distinction up front, instead of leaving it to be discovered by crashing.
+
 ## 2.3.9b1
 
 Two things users could not do, and a quieter one about what every request costs. The first two came in as issues with the diagnostic work already done; the third came out of chasing why a local model took two minutes to say hello.
