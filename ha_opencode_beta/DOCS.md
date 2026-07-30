@@ -85,7 +85,13 @@ By default, **OpenCode update policy** is set to `bundled`: the add-on uses the 
 
 Set the policy to `latest` to follow upstream OpenCode releases. The add-on starts immediately on the bundled (or an existing healthy persistent) binary, then refreshes `opencode-ai@latest` into `/data/.npm-global` **in the background**; the newer version becomes active for the next OpenCode session. The background update never blocks start-up and is skipped automatically when available memory is below ~1.5 GB. An interrupted or non-working update is discarded so the add-on keeps using the known-good bundled copy.
 
-For x64 VM installs, make sure the guest can see AVX2 when the host supports it. Generic QEMU/KVM CPU models can hide AVX2 and force OpenCode's baseline binary.
+### CPU requirements
+
+OpenCode is a Bun-compiled binary, so Bun's CPU floor applies: an x64 processor must support **SSE4.2** (the x86-64-v2 level — Intel Nehalem/2008 or newer, AMD Bulldozer/2011 or Jaguar/2013 or newer). Below that line every OpenCode binary exits immediately with `Illegal instruction (core dumped)` and no add-on setting changes it; the add-on detects this at start-up and says so in its log. ARM64 is unaffected.
+
+The regular x64 build additionally requires **AVX2** (Haswell/2013 or newer), and the add-on falls back to OpenCode's *baseline* build when AVX2 is missing. Note that upstream currently publishes the regular AVX2 binary inside the baseline package ([anomalyco/opencode#33595](https://github.com/anomalyco/opencode/issues/33595)) — the two are byte-identical in the shipped versions, so baseline mode does not presently rescue a CPU without AVX2.
+
+For x64 VM installs, make sure the guest can see AVX2 when the host supports it. Generic QEMU/KVM CPU models can hide AVX2 and force OpenCode's baseline binary unnecessarily.
 
 ## Native Home Assistant MCP Bridge (Beta)
 

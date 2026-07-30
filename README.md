@@ -119,6 +119,8 @@ Simply run `/connect` and select **OpenCode Zen** to get started for free.
 
 ## 📦 Installation
 
+> ⚙️ **Hardware requirement:** on x86-64, OpenCode needs a CPU with **SSE4.2** (Intel Nehalem/2008 or newer, AMD Bulldozer/2011 or Jaguar/2013 or newer). Older processors cannot run it at all — it exits with `Illegal instruction (core dumped)`. ARM64 is unaffected. See [CPU requirements][cpu-req] for details.
+
 ### Quick Install
 
 1. **Add this repository to Home Assistant:**
@@ -331,6 +333,7 @@ This distribution also includes third-party software, including OpenCode. Its co
 
 <!-- Links -->
 [docs]: ./ha_opencode/DOCS.md
+[cpu-req]: ./ha_opencode/DOCS.md#cpu-requirements
 [changelog]: ./ha_opencode/CHANGELOG.md
 [issues]: https://github.com/magnusoverli/opencode/issues
 [license]: UNLICENSE
