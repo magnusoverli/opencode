@@ -83,7 +83,7 @@ OpenChamber's own built-in update check is disabled in this add-on. OpenChamber 
 | **LSP integration** | `true` | Give OpenCode live diagnostics, entity and service auto-completion, and validation while it edits Home Assistant YAML. |
 | **Screenshot tool** | `false` | Requires the access token below. Lets OpenCode photograph Home Assistant pages in a headless browser to check dashboard changes. |
 | **Home Assistant access token** | `""` | Long-lived access token for Home Assistant Core. Required by the screenshot tool and ESPHome commands. |
-| **Native Home Assistant MCP bridge (beta)** | `false` | Adds an optional second MCP server for Home Assistant's native LLM MCP endpoint when the running Home Assistant version provides it. |
+| **Native Home Assistant MCP bridge** | `false` | Adds an optional second MCP server for Home Assistant's native LLM MCP endpoint. Needs the MCP Server integration set up in Home Assistant; the keyed endpoints and native LLM tool platforms ship in Home Assistant 2026.8. |
 | **Native MCP API ID** | `assist` | Applies only when the native bridge is on. The default `assist` targets `/api/mcp/assist`; leave empty to use the configured `/api/mcp` endpoint. |
 | **Install briefing** | `true` | Give OpenCode a generated summary of your installation — version, areas, entity counts, configuration layout — so it does not rediscover them each session. See [Home Context](#home-context). |
 | **Decision notes** | `true` | Let OpenCode carry lasting decisions between sessions, recorded only when you approve each one. See [Decision notes](#decision-notes). |
@@ -529,35 +529,57 @@ Run `hab --help` or `hab <command> --help` for complete documentation.
 
 The app includes an enhanced MCP (Model Context Protocol) server that provides deep integration between OpenCode and Home Assistant. This is a comprehensive implementation featuring **Tools**, **Resources**, **Prompts**, and an **Intelligence Layer**.
 
-OpenCode's MCP server remains the complete working agent surface for this add-on today. Home Assistant is also developing a native `llm` integration and `<integration>/llm.py` platform so Core integrations and custom integrations can contribute curated LLM tools to Assist. OpenCode is designed to complement that work, not compete with it: as HA-native LLM capabilities become stable and accessible, this add-on will follow them closely and use them where they help users.
+OpenCode's MCP server remains the complete working agent surface for this add-on. Home Assistant also has a native `llm` integration and an `<integration>/llm.py` platform, so Core and custom integrations can contribute curated LLM tools to Assist. OpenCode is designed to complement that work, not compete with it: it consumes HA-native LLM capabilities where they help and keeps its own tools for everything Home Assistant does not intend to expose through Assist.
 
 ### Home Assistant Native LLM Readiness
 
-The current Home Assistant native LLM work is primarily an internal platform for Home Assistant integrations and custom integrations. It lets integrations expose an `<integration>/llm.py` file with an `async_get_tools(hass, llm_context, api_id) -> llm.LLMTools | None` hook. At the time of this add-on release, that platform is not a public external API that an add-on container can register with directly.
+Home Assistant's native LLM platform ships in **Home Assistant 2026.8**: the `llm` integration, the per-domain `llm.py` tool platforms, and the keyed `/api/mcp/<API ID>` endpoints all first appear there. On 2026.7.x and earlier, Home Assistant serves only the configured `/api/mcp` endpoint and the legacy `/mcp_server/sse` transport. In every case the **MCP Server** integration must be added in Home Assistant first — the endpoints are not served otherwise.
 
-OpenCode supports the transition now by:
+The platform is primarily an internal one for integrations: it lets an integration expose an `<integration>/llm.py` file with an `async_get_tools(hass, llm_context, api_id) -> llm.LLMTools | None` hook. It is not an API an add-on container registers with directly; add-ons reach the resulting tools over MCP.
+
+OpenCode supports this by:
 
 - Detecting whether the running Home Assistant instance reports the native `llm` component.
-- Probing native MCP endpoints such as `/api/mcp/<API ID>` when available.
-- Providing an opt-in native MCP bridge that remains explicitly marked beta while Home Assistant's API matures.
-- Exposing this status through the `get_agent_capabilities` MCP tool and the `ha://agent/capabilities` resource.
+- Probing the native MCP endpoints and reporting which one this instance actually serves.
+- Providing an opt-in native MCP bridge to Home Assistant's own endpoint.
+- Exposing this status through the `get_agent_capabilities` MCP tool and the `ha://agent/capabilities` resource, including any known upstream limitations that apply to the running version.
 - Providing `get_home_context` for compact area/domain/entity understanding without dumping every state.
 - Providing `get_ha_llm_development_guide` for custom integration authors building native `<integration>/llm.py` providers.
-- Keeping all existing MCP, LSP, `hab`, screenshot, ESPHome, update, and Zigbee functionality active while HA's native platform matures.
-- Providing a strong environment for custom integration authors to edit and test future `<custom_component>/llm.py` providers.
+- Keeping all existing MCP, LSP, `hab`, screenshot, ESPHome, update, and Zigbee functionality active alongside it.
 
 Long-term plan:
 
-- Use HA-native LLM tools for core Assist/entity-control capabilities when Home Assistant makes them stable and accessible.
+- Use HA-native LLM tools for core Assist/entity-control capabilities where they cover a workflow better than OpenCode's own tools do.
 - Keep OpenCode MCP focused on add-on-specific and power-user workflows: safe config writing, validation, filesystem-aware edits, admin/dev tasks, screenshots, firmware/update flows, and troubleshooting.
-- Evaluate a companion custom integration or public API bridge if Home Assistant's native LLM platform remains integration-only and does not expose a direct add-on API.
-- Keep the add-on aligned with Home Assistant's architecture decisions so users who want to test agent-focused HA features have a first-class workbench and so OpenCode can become a premium consumer of HA-native LLM capabilities as they become available.
+- Retire the compatibility workarounds below once no supported Home Assistant release needs them.
+- Keep the add-on aligned with Home Assistant's architecture decisions so users who want to test agent-focused HA features have a first-class workbench.
 
-### Native Home Assistant MCP Bridge (Beta)
+### Native Home Assistant MCP Bridge
 
-When **Native Home Assistant MCP bridge (beta)** is enabled, the add-on adds a second OpenCode MCP server named `homeassistant_native` that forwards requests to Home Assistant Core's native MCP endpoint. **Native MCP API ID** defaults to `assist`, which targets `/api/mcp/assist`; leave it empty to use the configured `/api/mcp` endpoint instead.
+When **Native Home Assistant MCP bridge** is enabled, the add-on adds a second OpenCode MCP server named `homeassistant_native` that forwards requests to Home Assistant Core's native MCP endpoint through the Supervisor proxy. **Native MCP API ID** defaults to `assist`, which targets `/api/mcp/assist`; leave it empty to use the configured `/api/mcp` endpoint instead.
 
-Use this only with a Home Assistant version that provides the endpoint. The regular `homeassistant` MCP server remains available and is the supported tool surface when native MCP is unavailable.
+#### What you have to do
+
+The bridge is **off by default**, and Home Assistant does not serve its MCP endpoints until you set the integration up. Two one-time steps, in this order:
+
+1. **Add the Model Context Protocol Server integration in Home Assistant.** Go to **Settings → Devices & Services → Add Integration** and add **Model Context Protocol Server**. Until this exists, Home Assistant registers no `/api/mcp` routes at all and the bridge has nothing to talk to on any version.
+2. **Turn on the bridge in the add-on and restart it.** Set **Native Home Assistant MCP bridge** to on in the add-on's Configuration tab, then restart the add-on. The setting is read once at start-up, so it does not take effect until the restart.
+
+To confirm it worked, ask OpenCode to run `get_agent_capabilities`: it reports the detected Home Assistant version, which endpoint the bridge resolved to, and any upstream limitations that still apply. In OpenCode you should also see a second MCP server named `homeassistant_native` alongside the built-in `homeassistant` one.
+
+Nothing else is required. In particular, you do **not** need to change the API ID (the `assist` default is the one keyed API that needs no admin access), set any environment variable, or supply an access token — the bridge authenticates with the Supervisor token. If you skip step 1, the bridge starts and every request fails with a 404, which `get_agent_capabilities` will report.
+
+Once it is on, the bridge handles Home Assistant versions by itself and needs no further attention when you upgrade — including across the 2026.8 boundary, which it picks up without a restart.
+
+Access model from Home Assistant Core: `/api/mcp` serves the API selected in the MCP Server integration and does not require admin access. `/api/mcp/<API ID>` selects a specific registered LLM API by ID and requires admin access except for the built-in Assist API.
+
+The bridge adapts itself to what your Home Assistant actually serves:
+
+- **Endpoint fallback.** If the keyed `/api/mcp/<API ID>` endpoint is not served — which is the case before 2026.8 — the bridge falls back to the configured `/api/mcp` endpoint and logs the reason once. It retries the keyed endpoint periodically, so upgrading Home Assistant to 2026.8 under a running add-on is picked up without a restart. If Home Assistant instead reports that the API ID itself is unknown, the bridge reports that error rather than silently serving a different API. Set `HA_NATIVE_MCP_ENDPOINT_MODE` to `keyed` or `configured` in **Environment variables** to pin one endpoint.
+- **Tool schema repair.** Before 2026.8, tools whose parameters use validators such as `cv.string` produced a schema that strict MCP clients cannot compile; calls then failed with `extra keys not allowed @ data['__unparsedToolInput']`, which affected `GetLiveContext` in particular ([home-assistant/core#176762](https://github.com/home-assistant/core/issues/176762), fixed by [#176814](https://github.com/home-assistant/core/pull/176814)). The bridge repairs these schemas as they pass through, and does nothing on versions that already serve them correctly. Set `HA_NATIVE_MCP_SANITIZE_SCHEMAS` to `0` to see the raw upstream schemas.
+- **Malformed-message guard.** Every message is validated as JSON-RPC 2.0 before it is forwarded, because malformed POSTs to `/api/mcp` have been reported to crash Home Assistant Core ([home-assistant/core#176734](https://github.com/home-assistant/core/issues/176734)). This one is **not fixed in 2026.8** — the upstream fix is still open — so the guard applies on every version.
+
+Run `get_agent_capabilities` to see what the running instance supports; it reports the detected version, the endpoint status, and any known upstream limitations that still apply to it. The regular `homeassistant` MCP server remains available and is the supported tool surface either way.
 
 ### MCP Capabilities Overview
 

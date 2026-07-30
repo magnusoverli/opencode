@@ -80,7 +80,9 @@ options:
   # (create at: Profile → Long-lived access tokens).
   access_token: ""
   # Optional bridge to Home Assistant Core's native /api/mcp/<API ID> endpoint.
-  # Requires a Home Assistant version that includes the native MCP keyed endpoint.
+  # Requires the MCP Server integration in Home Assistant. The keyed endpoints
+  # ship in Home Assistant 2026.8; on earlier releases the bridge falls back to
+  # the configured /api/mcp endpoint.
   native_ha_mcp_enabled: false
   native_ha_mcp_api_id: "assist"
   # Home context: what OpenCode knows about this installation before you type.

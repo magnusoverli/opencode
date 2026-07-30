@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Home Assistant 2026.8 reached beta, and the native MCP bridge had been built against assumptions about it that only two of three held.
+
+- **The endpoint fallback no longer latches for the life of the add-on** — a bridge that fell back to `/api/mcp` on 2026.7 stayed there until someone restarted the add-on by hand. Upgrading Home Assistant is exactly the case that breaks: Core restarts, the add-on does not, so the keyed `/api/mcp/<API ID>` endpoint that the upgrade just made available would never be tried. The fallback is now retried periodically and picks the keyed endpoint up on its own, logging once when it does. The retry itself is silent — on a release that will never serve the keyed endpoint it runs for as long as the add-on does, and only the retry that succeeds is worth a log line.
+- **An unknown API ID is reported instead of quietly serving a different one** — before 2026.8 a 404 on the keyed endpoint could only mean the endpoint did not exist, so falling back was always right. On 2026.8 it can also mean the endpoint exists and the API ID is wrong, and Home Assistant says so by name. Falling back there would serve the configured API in place of the one that was asked for and hide the mistake, so that case now returns an error naming the ID, with a note that keyed endpoints other than `assist` require admin access.
+- **`get_agent_capabilities` still reports the crash risk on 2026.8** — known issues were filtered against a single version gate, so all three disappeared on 2026.8. Two of them are genuinely fixed there; the streamable-endpoint crash ([home-assistant/core#176734](https://github.com/home-assistant/core/issues/176734)) is not — its fix is still open upstream — and reporting no known issues while that risk is live was the opposite of what the field is for. Each issue is now filtered against the release that fixes it, and an issue with no fix anywhere is reported on every version, including versions the add-on cannot parse.
+- **What you have to do to use the bridge is now written down** — it needs the **Model Context Protocol Server** integration added in Home Assistant (without it Home Assistant serves no `/api/mcp` routes at all) and the bridge option turned on followed by an add-on restart, since the option is read once at start-up. Neither requirement was documented, and the restart was not mentioned anywhere. The add-on documentation now gives the procedure, how to check it worked, and what the failure looks like if the integration is missing.
+
 ## 2.3.9b1
 
 Two things users could not do, and a quieter one about what every request costs. The first two came in as issues with the diagnostic work already done; the third came out of chasing why a local model took two minutes to say hello.
