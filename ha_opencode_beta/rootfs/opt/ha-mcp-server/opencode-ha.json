@@ -1,0 +1,71 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "snapshot": false,
+  "permission": {
+    "edit": "ask",
+    "bash": {
+      "*": "allow",
+      "yq -i*": "ask",
+      "sed -i*": "ask",
+      "tee *": "ask",
+      "rm *": "ask",
+      "mv *": "ask"
+    },
+    "external_directory": {
+      "/homeassistant": "allow",
+      "/homeassistant/**": "allow"
+    }
+  },
+  "watcher": {
+    "ignore": [
+      ".git/**",
+      ".storage/**",
+      ".cloud/**",
+      ".cache/**",
+      ".local/**",
+      "deps/**",
+      "tts/**",
+      "__pycache__/**",
+      "node_modules/**",
+      "home-assistant_v2.db*",
+      "*.log"
+    ]
+  },
+  "formatter": {
+    "prettier": {
+      "command": ["prettier", "--write", "$FILE"],
+      "extensions": [".yaml", ".yml"]
+    }
+  },
+  "mcp": {
+    "homeassistant": {
+      "type": "local",
+      "command": ["node", "/opt/ha-mcp-server/index.js"],
+      "enabled": true,
+      "timeout": 60000,
+      "environment": {
+        "SUPERVISOR_TOKEN": "{env:SUPERVISOR_TOKEN}",
+        "HA_NATIVE_MCP_API_ID": "assist"
+      }
+    },
+    "homeassistant_native": {
+      "type": "local",
+      "command": ["node", "/opt/ha-mcp-server/ha-native-mcp-proxy.js", "assist"],
+      "enabled": false,
+      "timeout": 10000,
+      "environment": {
+        "SUPERVISOR_TOKEN": "{env:SUPERVISOR_TOKEN}",
+        "HA_NATIVE_MCP_API_ID": "assist"
+      }
+    }
+  },
+  "lsp": {
+    "ha-yaml": {
+      "command": ["node", "/opt/ha-lsp-server/server.js", "--stdio"],
+      "extensions": [".yaml", ".yml"]
+    }
+  },
+  "instructions": [
+    "/opt/ha-mcp-server/INSTRUCTIONS.md"
+  ]
+}

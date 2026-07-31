@@ -263,16 +263,22 @@ We love contributions! Here's how you can help:
 
 Contributions of all kinds are welcome — feel free to open a PR!
 
-### Branches and release channels
+### Release channels
 
-- **`main`** — the stable channel. Tagged `v*`, published as the **OpenCode**
-  add-on.
-- **`dev`** — the beta channel. `main` plus work still soaking. Tagged
+Channels are folders, not branches. Both live on `main`:
+
+- **`ha_opencode/`** — the stable channel. Tagged `v*`, published as the
+  **OpenCode** add-on.
+- **`ha_opencode_beta/`** — the beta channel, for work still soaking. Tagged
   `beta-v*`, published as the **OpenCode Beta** add-on.
 
-Target `dev` for anything experimental; target `main` only for fixes that
-should ship to stable users right away. Full details in
-[RELEASING.md](RELEASING.md).
+Each folder is a complete add-on with its own `Dockerfile` and `rootfs/`, so a
+stable release cannot contain something that only exists in beta. Put
+experimental work in `ha_opencode_beta/`; touch `ha_opencode/` only for changes
+that should reach stable users right away.
+
+Both add-ons can be installed side by side — they keep separate decision notes
+and separate storage. Full details in [RELEASING.md](RELEASING.md).
 
 ---
 

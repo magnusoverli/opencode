@@ -1,0 +1,1214 @@
+#!/usr/bin/env node
+/**
+ * Home Assistant Language Server Protocol (LSP) Server
+ * 
+ * Provides intelligent editing features for Home Assistant YAML configuration files:
+ * 
+ * FEATURES:
+ * - Entity ID autocomplete from live Home Assistant instance
+ * - Service/action autocomplete with parameter hints
+ * - Area, device, floor, and label completion
+ * - Unknown entity/service diagnostics
+ * - Hover information for entities (state, attributes)
+ * - Jinja2 template preview on hover
+ * - Go-to-definition for !include tags
+ * - YAML validation for HA-specific configurations
+ * 
+ * REQUIREMENTS:
+ * - SUPERVISOR_TOKEN environment variable (auto-provided in Home Assistant app)
+ * - Home Assistant Supervisor API access
+ * 
+ * USAGE:
+ * - Communicate via stdio (standard input/output)
+ * - Configure in OpenCode via opencode.json lsp settings
+ */
+
+import lsp from "vscode-languageserver/node.js";
+import { TextDocument } from "vscode-languageserver-textdocument";
+import yaml from "yaml";
+import { fileURLToPath } from "url";
+import { dirname, join, resolve, isAbsolute } from "path";
+import { existsSync, readFileSync } from "fs";
+
+// Destructure from CommonJS default export
+const {
+  createConnection,
+  TextDocuments,
+  ProposedFeatures,
+  TextDocumentSyncKind,
+  CompletionItemKind,
+  MarkupKind,
+  DiagnosticSeverity,
+} = lsp;
+
+const { parse: parseYaml } = yaml;
+
+// Extracted pure-function modules (testable in isolation)
+import { YamlContextAnalyzer } from "./lib/yaml-analyzer.js";
+import {
+  getTriggerPlatformCompletions,
+  getConditionTypeCompletions,
+  getKeyCompletions,
+  getWordRangeAtPosition,
+} from "./lib/completions.js";
+
+const __lsp_filename = fileURLToPath(import.meta.url);
+const __lsp_dirname = dirname(__lsp_filename);
+
+// ============================================================================
+// SHARED DEPRECATION PATTERNS (with remote update support)
+// ============================================================================
+
+const GITHUB_PATTERNS_URL = "https://raw.githubusercontent.com/magnusoverli/opencode/main/ha_opencode/rootfs/opt/shared/deprecation-patterns.json";
+
+/**
+ * Load deprecation patterns from the local shared JSON file.
+ * These patterns are shared with the MCP server for consistency.
+ */
+function loadLocalDeprecationPatterns() {
+  try {
+    const patternsPath = resolve(__lsp_dirname, "../shared/deprecation-patterns.json");
+    const raw = readFileSync(patternsPath, "utf-8");
+    const patterns = JSON.parse(raw);
+    return patterns.map(p => ({
+      ...p,
+      regex: new RegExp(p.pattern, p.flags || "m"),
+    }));
+  } catch (error) {
+    console.error("Warning: Could not load local deprecation patterns:", error.message);
+    return [];
+  }
+}
+
+// Start with local patterns (always available synchronously)
+let DEPRECATION_PATTERNS = loadLocalDeprecationPatterns();
+
+/**
+ * Attempt to fetch updated patterns from GitHub in the background.
+ * If successful, replaces the local patterns. If not, keeps using local.
+ * Runs once on startup with a delay to avoid blocking initialization.
+ */
+async function refreshDeprecationPatternsFromRemote() {
+  try {
+    const response = await fetch(GITHUB_PATTERNS_URL, {
+      headers: { "User-Agent": "HA-LSP-Server/1.0", "Accept": "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    
+    if (!response.ok) return;
+    
+    const patterns = await response.json();
+    if (!Array.isArray(patterns) || patterns.length === 0) return;
+    
+    const compiled = patterns.map(p => ({
+      ...p,
+      regex: new RegExp(p.pattern, p.flags || "m"),
+    }));
+    
+    // Only update if we got more or equal patterns (sanity check)
+    if (compiled.length >= DEPRECATION_PATTERNS.length) {
+      DEPRECATION_PATTERNS = compiled;
+      console.error(`LSP: Updated deprecation patterns from remote (${compiled.length} patterns)`);
+    }
+  } catch (error) {
+    // Silent fail — local patterns remain active
+    console.error(`LSP: Remote pattern fetch skipped: ${error.message}`);
+  }
+}
+
+// Refresh patterns 10 seconds after startup (non-blocking)
+setTimeout(refreshDeprecationPatternsFromRemote, 10000);
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+const SUPERVISOR_API = "http://supervisor/core/api";
+const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
+const CACHE_TTL = 60000; // 1 minute cache TTL
+// Editor requests must never hang on a slow HA API; timeouts fall back to stale cache
+const FETCH_TIMEOUT_MS = 3000;
+
+// HA configuration keys that expect entity IDs
+const ENTITY_ID_KEYS = [
+  "entity_id",
+  "entity",
+  "entities",
+  "target",
+  "device_id",
+  "area_id",
+  // Trigger-specific
+  "platform",
+  // Condition keys
+  "condition",
+  // Common automation/script keys
+  "trigger",
+  "action",
+  "sequence",
+];
+
+// Keys that expect service names
+const SERVICE_KEYS = [
+  "service",
+  "action",
+];
+
+// Keys that expect area references
+const AREA_KEYS = [
+  "area_id",
+  "area",
+];
+
+// Keys that expect device references  
+const DEVICE_KEYS = [
+  "device_id",
+  "device",
+];
+
+// Domain-specific attributes that take entity IDs
+const ENTITY_ATTRIBUTE_PATTERNS = {
+  "media_player": ["source"],
+  "climate": ["target_temp_entity_id"],
+  "light": ["rgb_color", "brightness"],
+  "cover": ["position"],
+};
+
+// ============================================================================
+// HOME ASSISTANT API CLIENT
+// ============================================================================
+
+class HomeAssistantClient {
+  constructor() {
+    this.cache = new Map();
+    this.cacheTimestamps = new Map();
+    this.inflight = new Map();
+  }
+
+  async fetch(endpoint, method = "GET", body = null) {
+    if (!SUPERVISOR_TOKEN) {
+      throw new Error("SUPERVISOR_TOKEN not available");
+    }
+
+    const options = {
+      method,
+      headers: {
+        "Authorization": `Bearer ${SUPERVISOR_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    };
+
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(`${SUPERVISOR_API}${endpoint}`, options);
+    
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HA API error (${response.status}): ${text}`);
+    }
+
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      return response.json();
+    }
+    return response.text();
+  }
+
+  isCacheValid(key) {
+    const timestamp = this.cacheTimestamps.get(key);
+    return timestamp && (Date.now() - timestamp) < CACHE_TTL;
+  }
+
+  async getCached(key, fetcher) {
+    if (this.isCacheValid(key)) {
+      return this.cache.get(key);
+    }
+
+    // Concurrent misses share one fetch instead of each hitting the API
+    let refresh = this.inflight.get(key);
+    if (!refresh) {
+      refresh = (async () => {
+        try {
+          const data = await fetcher();
+          this.cache.set(key, data);
+          this.cacheTimestamps.set(key, Date.now());
+          return data;
+        } finally {
+          this.inflight.delete(key);
+        }
+      })();
+      this.inflight.set(key, refresh);
+    }
+
+    // Stale-while-revalidate: serve expired data immediately, refresh in background
+    if (this.cache.has(key)) {
+      refresh.catch(() => {});
+      return this.cache.get(key);
+    }
+
+    return refresh;
+  }
+
+  invalidateCache() {
+    this.cache.clear();
+    this.cacheTimestamps.clear();
+  }
+
+  // ---- Cached API Methods ----
+
+  async getStates() {
+    return this.getCached("states", () => this.fetch("/states"));
+  }
+
+  async getServices() {
+    return this.getCached("services", () => this.fetch("/services"));
+  }
+
+  async getConfig() {
+    return this.getCached("config", () => this.fetch("/config"));
+  }
+
+  // Registry templates emit parallel id/name arrays in a single pass —
+  // incremental `list + [item]` concatenation is quadratic in HA's Jinja sandbox
+
+  async getAreas() {
+    return this.getCached("areas", async () => {
+      const result = await this.fetch("/template", "POST", {
+        template: `{% set ids = areas() %}{{ [ids, ids | map('area_name') | list] | tojson }}`
+      });
+      const [ids, names] = JSON.parse(result);
+      return ids.map((id, i) => ({ id, name: names[i] }));
+    });
+  }
+
+  async getDevices() {
+    return this.getCached("devices", async () => {
+      try {
+        // Home Assistant has no all-device global to match areas()/floors()/
+        // labels(): its device extension only registers device_entities,
+        // device_id, device_name, device_attr and is_device_attr. The device
+        // registry itself is reachable only over the WebSocket API
+        // (config/device_registry/list), which this REST-only client cannot
+        // call, so derive the device list from the entities in `states`.
+        //
+        // Caveat: this finds only devices that own at least one entity.
+        // Entity-less devices are missed, which is acceptable for completion
+        // (a device_id worth referencing in YAML has entities) but means this
+        // is not a faithful registry dump.
+        const result = await this.fetch("/template", "POST", {
+          template: `{% set ids = states | map(attribute='entity_id') | map('device_id') | reject('eq', none) | unique | list %}{{ [ids, ids | map('device_attr', 'name') | list, ids | map('device_attr', 'area_id') | list] | tojson }}`
+        });
+        const [ids, names, areas] = JSON.parse(result);
+        return ids.map((id, i) => ({ id, name: names[i], area: areas[i] }));
+      } catch {
+        // Never let a device lookup failure reject cache warm-up — the other
+        // registries stay usable and completion simply offers no device IDs.
+        return [];
+      }
+    });
+  }
+
+  async getFloors() {
+    return this.getCached("floors", async () => {
+      try {
+        const result = await this.fetch("/template", "POST", {
+          template: `{% set ids = floors() %}{{ [ids, ids | map('floor_name') | list] | tojson }}`
+        });
+        const [ids, names] = JSON.parse(result);
+        return ids.map((id, i) => ({ id, name: names[i] }));
+      } catch {
+        // Floors might not be available in older HA versions
+        return [];
+      }
+    });
+  }
+
+  async getLabels() {
+    return this.getCached("labels", async () => {
+      try {
+        const result = await this.fetch("/template", "POST", {
+          template: `{% set ids = labels() %}{{ [ids, ids | map('label_name') | list] | tojson }}`
+        });
+        const [ids, names] = JSON.parse(result);
+        return ids.map((id, i) => ({ id, name: names[i] }));
+      } catch {
+        // Labels might not be available in older HA versions
+        return [];
+      }
+    });
+  }
+
+  async renderTemplate(template) {
+    return this.fetch("/template", "POST", { template });
+  }
+
+  // ---- Derived Data ----
+
+  async getEntityIds() {
+    const states = await this.getStates();
+    return states.map(s => s.entity_id);
+  }
+
+  async getEntityMap() {
+    const states = await this.getStates();
+    const map = new Map();
+    for (const state of states) {
+      map.set(state.entity_id, state);
+    }
+    return map;
+  }
+
+  async getDomains() {
+    const states = await this.getStates();
+    const domains = new Set();
+    for (const state of states) {
+      const [domain] = state.entity_id.split(".");
+      domains.add(domain);
+    }
+    return Array.from(domains).sort();
+  }
+
+  async getServiceList() {
+    const services = await this.getServices();
+    const list = [];
+    for (const domainObj of services) {
+      const domain = domainObj.domain;
+      for (const [serviceName, serviceInfo] of Object.entries(domainObj.services)) {
+        list.push({
+          domain,
+          service: serviceName,
+          fullName: `${domain}.${serviceName}`,
+          name: serviceInfo.name || serviceName,
+          description: serviceInfo.description || "",
+          fields: serviceInfo.fields || {},
+          target: serviceInfo.target,
+        });
+      }
+    }
+    return list;
+  }
+}
+
+// YamlContextAnalyzer — moved to ./lib/yaml-analyzer.js
+
+// ============================================================================
+// LSP SERVER
+// ============================================================================
+
+// Create a connection for the server
+const connection = createConnection(ProposedFeatures.all);
+
+// Create a document manager
+const documents = new TextDocuments(TextDocument);
+
+// Create instances
+const haClient = new HomeAssistantClient();
+const yamlAnalyzer = new YamlContextAnalyzer();
+
+// Track initialization state
+let hasWorkspaceFolderCapability = false;
+let workspaceFolders = [];
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+connection.onInitialize((params) => {
+  const capabilities = params.capabilities;
+  
+  hasWorkspaceFolderCapability = !!(
+    capabilities.workspace && capabilities.workspace.workspaceFolders
+  );
+  
+  if (params.workspaceFolders) {
+    workspaceFolders = params.workspaceFolders;
+  }
+
+  const result = {
+    capabilities: {
+      textDocumentSync: TextDocumentSyncKind.Incremental,
+      completionProvider: {
+        resolveProvider: true,
+        triggerCharacters: [".", ":", '"', "'", "/"],
+      },
+      hoverProvider: true,
+      definitionProvider: true,
+      diagnosticProvider: {
+        interFileDependencies: false,
+        workspaceDiagnostics: false,
+      },
+    },
+  };
+
+  if (hasWorkspaceFolderCapability) {
+    result.capabilities.workspace = {
+      workspaceFolders: {
+        supported: true,
+        changeNotifications: true,
+      },
+    };
+  }
+
+  return result;
+});
+
+connection.onInitialized(() => {
+  if (hasWorkspaceFolderCapability) {
+    connection.workspace.onDidChangeWorkspaceFolders((event) => {
+      connection.console.log("Workspace folder change event received.");
+    });
+  }
+  
+  // Pre-warm the cache
+  warmCache();
+});
+
+async function warmCache() {
+  if (!SUPERVISOR_TOKEN) {
+    connection.console.log("No SUPERVISOR_TOKEN - HA features disabled");
+    return;
+  }
+  
+  // allSettled, not all: one failing registry must not discard the caches the
+  // others already populated, nor hide which one actually failed.
+  const warmers = [
+    ["states", haClient.getStates()],
+    ["services", haClient.getServices()],
+    ["areas", haClient.getAreas()],
+    ["devices", haClient.getDevices()],
+  ];
+  const results = await Promise.allSettled(warmers.map(([, promise]) => promise));
+  const failed = results
+    .map((result, i) => (result.status === "rejected" ? `${warmers[i][0]}: ${result.reason?.message ?? result.reason}` : null))
+    .filter(Boolean);
+
+  if (failed.length === 0) {
+    connection.console.log("HA cache warmed successfully");
+  } else {
+    connection.console.error(`HA cache warmed with ${failed.length} failure(s) - ${failed.join("; ")}`);
+  }
+}
+
+// ============================================================================
+// COMPLETION PROVIDER
+// ============================================================================
+
+connection.onCompletion(async (params) => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document) return [];
+
+  const context = yamlAnalyzer.analyzeContext(document, params.position);
+  const completions = [];
+
+  try {
+    // Inside Jinja template
+    if (context.inJinja) {
+      return await getJinjaCompletions(context);
+    }
+
+    // Completing a value
+    if (context.inValue) {
+      const key = context.key?.toLowerCase();
+
+      // Entity ID completion
+      if (key === "entity_id" || key === "entity" || key === "entities") {
+        return await getEntityCompletions(context);
+      }
+
+      // Service completion
+      if (key === "service" || key === "action") {
+        return await getServiceCompletions(context);
+      }
+
+      // Area completion
+      if (key === "area_id" || key === "area") {
+        return await getAreaCompletions(context);
+      }
+
+      // Device completion
+      if (key === "device_id" || key === "device") {
+        return await getDeviceCompletions(context);
+      }
+
+      // Platform completion for triggers
+      if (key === "platform" && context.parentKeys.includes("trigger")) {
+        return getTriggerPlatformCompletions(CompletionItemKind);
+      }
+
+      // Condition type completion
+      if (key === "condition") {
+        return getConditionTypeCompletions(CompletionItemKind);
+      }
+    }
+
+    // Completing a key
+    if (context.inKey) {
+      return getKeyCompletions(context, CompletionItemKind);
+    }
+
+  } catch (error) {
+    connection.console.error(`Completion error: ${error.message}`);
+  }
+
+  return completions;
+});
+
+async function getEntityCompletions(context) {
+  const completions = [];
+  
+  try {
+    const states = await haClient.getStates();
+    
+    // Parse partial input to filter
+    const partialMatch = context.lineBeforeCursor.match(/:\s*([a-z_.]*)$/i);
+    const partial = partialMatch?.[1]?.toLowerCase() || "";
+    
+    for (const state of states) {
+      const entityId = state.entity_id;
+      const friendlyName = state.attributes?.friendly_name || entityId;
+      const [domain] = entityId.split(".");
+      
+      // Filter by partial match
+      if (partial && !entityId.toLowerCase().includes(partial) && 
+          !friendlyName.toLowerCase().includes(partial)) {
+        continue;
+      }
+
+      // Documentation is built lazily in onCompletionResolve — eagerly
+      // serializing it for thousands of entities dominates completion latency
+      completions.push({
+        label: entityId,
+        kind: CompletionItemKind.Value,
+        detail: friendlyName,
+        insertText: entityId,
+        sortText: entityId.startsWith(partial) ? `0${entityId}` : `1${entityId}`,
+        data: { type: "entity", entityId },
+      });
+    }
+  } catch (error) {
+    connection.console.error(`Entity completion error: ${error.message}`);
+  }
+
+  return completions;
+}
+
+async function getServiceCompletions(context) {
+  const completions = [];
+  
+  try {
+    const services = await haClient.getServiceList();
+    
+    // Parse partial input
+    const partialMatch = context.lineBeforeCursor.match(/:\s*([a-z_.]*)$/i);
+    const partial = partialMatch?.[1]?.toLowerCase() || "";
+    
+    for (const service of services) {
+      if (partial && !service.fullName.toLowerCase().includes(partial)) {
+        continue;
+      }
+
+      completions.push({
+        label: service.fullName,
+        kind: CompletionItemKind.Function,
+        detail: service.name || service.service,
+        insertText: service.fullName,
+        sortText: service.fullName.startsWith(partial) ? `0${service.fullName}` : `1${service.fullName}`,
+        data: { type: "service", service: service.fullName },
+      });
+    }
+  } catch (error) {
+    connection.console.error(`Service completion error: ${error.message}`);
+  }
+
+  return completions;
+}
+
+async function getAreaCompletions(context) {
+  const completions = [];
+  
+  try {
+    const areas = await haClient.getAreas();
+    
+    for (const area of areas) {
+      completions.push({
+        label: area.id,
+        kind: CompletionItemKind.Folder,
+        detail: area.name,
+        documentation: `Area: ${area.name}`,
+        insertText: area.id,
+        data: { type: "area", areaId: area.id },
+      });
+    }
+  } catch (error) {
+    connection.console.error(`Area completion error: ${error.message}`);
+  }
+
+  return completions;
+}
+
+async function getDeviceCompletions(context) {
+  const completions = [];
+  
+  try {
+    const devices = await haClient.getDevices();
+    
+    for (const device of devices) {
+      if (!device.id) continue;
+      
+      completions.push({
+        label: device.id,
+        kind: CompletionItemKind.Module,
+        detail: device.name || device.id,
+        documentation: device.area ? `Device in area: ${device.area}` : "Device",
+        insertText: device.id,
+        data: { type: "device", deviceId: device.id },
+      });
+    }
+  } catch (error) {
+    connection.console.error(`Device completion error: ${error.message}`);
+  }
+
+  return completions;
+}
+
+async function getJinjaCompletions(context) {
+  const completions = [];
+  const lineBeforeCursor = context.lineBeforeCursor;
+  
+  // Check for states() completion
+  if (lineBeforeCursor.match(/states\s*\(\s*['"]?[a-z_.]*$/i)) {
+    try {
+      const states = await haClient.getStates();
+      for (const state of states) {
+        completions.push({
+          label: state.entity_id,
+          kind: CompletionItemKind.Value,
+          detail: state.attributes?.friendly_name || state.entity_id,
+          insertText: `${state.entity_id}'`,
+          data: { type: "jinja_entity", entityId: state.entity_id },
+        });
+      }
+    } catch (error) {
+      connection.console.error(`Jinja entity completion error: ${error.message}`);
+    }
+    return completions;
+  }
+
+  // Jinja function completions
+  const jinjaFunctions = [
+    { label: "states", detail: "Get entity state", insertText: "states('$1')" },
+    { label: "is_state", detail: "Check entity state", insertText: "is_state('$1', '$2')" },
+    { label: "state_attr", detail: "Get entity attribute", insertText: "state_attr('$1', '$2')" },
+    { label: "is_state_attr", detail: "Check entity attribute", insertText: "is_state_attr('$1', '$2', '$3')" },
+    { label: "now", detail: "Current datetime", insertText: "now()" },
+    { label: "today_at", detail: "Time today", insertText: "today_at('$1')" },
+    { label: "as_timestamp", detail: "Convert to timestamp", insertText: "as_timestamp($1)" },
+    { label: "relative_time", detail: "Human-readable time diff", insertText: "relative_time($1)" },
+    { label: "float", detail: "Convert to float", insertText: "float($1)" },
+    { label: "int", detail: "Convert to int", insertText: "int($1)" },
+    { label: "area_entities", detail: "Get area entities", insertText: "area_entities('$1')" },
+    { label: "area_devices", detail: "Get area devices", insertText: "area_devices('$1')" },
+    { label: "device_entities", detail: "Get device entities", insertText: "device_entities('$1')" },
+    { label: "device_attr", detail: "Get device attribute", insertText: "device_attr('$1', '$2')" },
+  ];
+
+  for (const fn of jinjaFunctions) {
+    completions.push({
+      label: fn.label,
+      kind: CompletionItemKind.Function,
+      detail: fn.detail,
+      insertText: fn.insertText,
+      insertTextFormat: 2, // Snippet
+    });
+  }
+
+  return completions;
+}
+
+// getTriggerPlatformCompletions, getConditionTypeCompletions,
+// getKeyCompletions — moved to ./lib/completions.js
+
+connection.onCompletionResolve(async (item) => {
+  // Resolve additional details for completion items
+  if (item.data?.type === "entity" || item.data?.type === "jinja_entity") {
+    try {
+      const entityMap = await haClient.getEntityMap();
+      const state = entityMap.get(item.data.entityId);
+      if (state) {
+        const attrs = Object.entries(state.attributes || {})
+          .filter(([k]) => !k.startsWith("_"))
+          .slice(0, 10)
+          .map(([k, v]) => `- ${k}: ${JSON.stringify(v)}`)
+          .join("\n");
+        
+        item.documentation = {
+          kind: MarkupKind.Markdown,
+          value: [
+            `**${state.attributes?.friendly_name || state.entity_id}**`,
+            "",
+            `**Current State:** ${state.state}`,
+            "",
+            "**Attributes:**",
+            attrs,
+          ].join("\n"),
+        };
+      }
+    } catch (error) {
+      // Ignore resolution errors
+    }
+  }
+
+  if (item.data?.type === "service") {
+    try {
+      const services = await haClient.getServiceList();
+      const service = services.find(s => s.fullName === item.data.service);
+      if (service) {
+        const fieldDocs = Object.entries(service.fields)
+          .slice(0, 5)
+          .map(([name, field]) => `- \`${name}\`: ${field.description || "No description"}`)
+          .join("\n");
+
+        item.documentation = {
+          kind: MarkupKind.Markdown,
+          value: [
+            `**${service.fullName}**`,
+            "",
+            service.description,
+            "",
+            fieldDocs ? "**Fields:**" : "",
+            fieldDocs,
+          ].filter(Boolean).join("\n"),
+        };
+      }
+    } catch (error) {
+      // Ignore resolution errors
+    }
+  }
+
+  return item;
+});
+
+// ============================================================================
+// HOVER PROVIDER
+// ============================================================================
+
+connection.onHover(async (params) => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document) return null;
+
+  const position = params.position;
+  const text = document.getText();
+  const offset = document.offsetAt(position);
+  
+  // Get the word at cursor position
+  const wordRange = getWordRangeAtPosition(document, position);
+  if (!wordRange) return null;
+  
+  const word = document.getText(wordRange);
+
+  // domain.object_id — a service in service/action positions, otherwise an entity
+  if (word.match(/^[a-z_]+\.[a-z0-9_]+$/i)) {
+    const lineText = text.split("\n")[position.line];
+    if (lineText.match(/(?:service|action):\s*/)) {
+      return await getServiceHover(word);
+    }
+    return await getEntityHover(word);
+  }
+
+  // Check for Jinja template - try to render it
+  const jinjaMatch = text.substring(0, offset).match(/\{\{[^}]*$/);
+  if (jinjaMatch) {
+    const templateEnd = text.indexOf("}}", offset);
+    if (templateEnd !== -1) {
+      const template = text.substring(
+        text.lastIndexOf("{{", offset),
+        templateEnd + 2
+      );
+      return await getTemplateHover(template);
+    }
+  }
+
+  return null;
+});
+
+async function getEntityHover(entityId) {
+  try {
+    const entityMap = await haClient.getEntityMap();
+    const state = entityMap.get(entityId);
+    
+    if (!state) {
+      return {
+        contents: {
+          kind: MarkupKind.Markdown,
+          value: `**Unknown entity:** \`${entityId}\`\n\nThis entity does not exist in Home Assistant.`,
+        },
+      };
+    }
+
+    const friendlyName = state.attributes?.friendly_name || entityId;
+    const [domain] = entityId.split(".");
+    
+    const attrs = Object.entries(state.attributes || {})
+      .filter(([k]) => !k.startsWith("_") && k !== "friendly_name")
+      .slice(0, 10)
+      .map(([k, v]) => {
+        const value = typeof v === "object" ? JSON.stringify(v) : String(v);
+        return `| ${k} | ${value.substring(0, 50)}${value.length > 50 ? "..." : ""} |`;
+      })
+      .join("\n");
+
+    const markdown = [
+      `## ${friendlyName}`,
+      "",
+      `\`${entityId}\``,
+      "",
+      `**State:** \`${state.state}\``,
+      "",
+      `**Domain:** ${domain}`,
+      state.attributes?.device_class ? `**Device Class:** ${state.attributes.device_class}` : "",
+      state.attributes?.unit_of_measurement ? `**Unit:** ${state.attributes.unit_of_measurement}` : "",
+      "",
+      "### Attributes",
+      "| Attribute | Value |",
+      "|-----------|-------|",
+      attrs,
+      "",
+      `*Last changed: ${state.last_changed}*`,
+    ].filter(Boolean).join("\n");
+
+    return {
+      contents: {
+        kind: MarkupKind.Markdown,
+        value: markdown,
+      },
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+async function getServiceHover(serviceName) {
+  try {
+    const services = await haClient.getServiceList();
+    const service = services.find(s => s.fullName === serviceName);
+    
+    if (!service) {
+      return {
+        contents: {
+          kind: MarkupKind.Markdown,
+          value: `**Unknown service:** \`${serviceName}\``,
+        },
+      };
+    }
+
+    const fieldDocs = Object.entries(service.fields)
+      .map(([name, field]) => {
+        const required = field.required ? " *(required)*" : "";
+        return `- **${name}**${required}: ${field.description || "No description"}`;
+      })
+      .join("\n");
+
+    const markdown = [
+      `## ${service.fullName}`,
+      "",
+      service.description,
+      "",
+      service.target ? "**Supports targeting** entities, areas, or devices" : "",
+      "",
+      fieldDocs ? "### Fields" : "",
+      fieldDocs,
+    ].filter(Boolean).join("\n");
+
+    return {
+      contents: {
+        kind: MarkupKind.Markdown,
+        value: markdown,
+      },
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+async function getTemplateHover(template) {
+  try {
+    const result = await haClient.renderTemplate(template);
+    
+    return {
+      contents: {
+        kind: MarkupKind.Markdown,
+        value: [
+          "### Template Result",
+          "",
+          "```",
+          String(result),
+          "```",
+        ].join("\n"),
+      },
+    };
+  } catch (error) {
+    return {
+      contents: {
+        kind: MarkupKind.Markdown,
+        value: [
+          "### Template Error",
+          "",
+          "```",
+          error.message,
+          "```",
+        ].join("\n"),
+      },
+    };
+  }
+}
+
+// getWordRangeAtPosition — moved to ./lib/completions.js
+
+// ============================================================================
+// DIAGNOSTICS PROVIDER
+// ============================================================================
+
+async function validateDocument(document) {
+  const diagnostics = [];
+  
+  if (!SUPERVISOR_TOKEN) {
+    // Can't validate without HA connection
+    return diagnostics;
+  }
+
+  try {
+    // Validate entity references
+    const entityRefs = yamlAnalyzer.findEntityReferences(document);
+    const entityMap = await haClient.getEntityMap();
+    
+    for (const ref of entityRefs) {
+      if (!entityMap.has(ref.entityId)) {
+        diagnostics.push({
+          severity: DiagnosticSeverity.Warning,
+          range: ref.range,
+          message: `Unknown entity: ${ref.entityId}`,
+          source: "ha-lsp",
+          code: "unknown-entity",
+        });
+      }
+    }
+
+    // Validate service references
+    const serviceRefs = yamlAnalyzer.findServiceReferences(document);
+    const services = await haClient.getServiceList();
+    const serviceSet = new Set(services.map(s => s.fullName));
+    
+    for (const ref of serviceRefs) {
+      if (!serviceSet.has(ref.service)) {
+        diagnostics.push({
+          severity: DiagnosticSeverity.Warning,
+          range: ref.range,
+          message: `Unknown service: ${ref.service}`,
+          source: "ha-lsp",
+          code: "unknown-service",
+        });
+      }
+    }
+
+    // Validate !include paths
+    const includeRefs = yamlAnalyzer.findIncludeReferences(document);
+    const docPath = fileURLToPath(document.uri);
+    const docDir = dirname(docPath);
+    
+    for (const ref of includeRefs) {
+      const includePath = isAbsolute(ref.path) 
+        ? ref.path 
+        : resolve(docDir, ref.path);
+      
+      if (!existsSync(includePath)) {
+        diagnostics.push({
+          severity: DiagnosticSeverity.Error,
+          range: ref.range,
+          message: `Include file not found: ${ref.path}`,
+          source: "ha-lsp",
+          code: "include-not-found",
+        });
+      }
+    }
+
+    // Check for deprecated syntax patterns
+    const text = document.getText();
+    for (const dp of DEPRECATION_PATTERNS) {
+      // Only flag warning/error severity patterns, skip info-level
+      if (dp.severity === "info") continue;
+      
+      const match = dp.regex.exec(text);
+      if (match) {
+        const startOffset = match.index;
+        // Highlight just the matched line, not the entire multi-line match
+        const matchedLine = match[0].split("\n")[0];
+        const endOffset = startOffset + matchedLine.length;
+        
+        const severity = dp.deprecated_in
+          ? DiagnosticSeverity.Warning
+          : DiagnosticSeverity.Information;
+        
+        const message = dp.deprecated_in
+          ? `[Deprecated since ${dp.deprecated_in}] ${dp.message}`
+          : dp.message;
+        
+        diagnostics.push({
+          severity,
+          range: {
+            start: document.positionAt(startOffset),
+            end: document.positionAt(endOffset),
+          },
+          message,
+          source: "ha-lsp",
+          code: `deprecated-${dp.id}`,
+        });
+      }
+    }
+
+    // Basic YAML validation
+    try {
+      parseYaml(document.getText());
+    } catch (yamlError) {
+      // Extract position from YAML error if available
+      const errorPos = yamlError.linePos?.[0];
+      const range = errorPos ? {
+        start: { line: errorPos.line - 1, character: errorPos.col - 1 },
+        end: { line: errorPos.line - 1, character: errorPos.col },
+      } : {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 1 },
+      };
+      
+      diagnostics.push({
+        severity: DiagnosticSeverity.Error,
+        range,
+        message: `YAML syntax error: ${yamlError.message}`,
+        source: "ha-lsp",
+        code: "yaml-syntax",
+      });
+    }
+
+  } catch (error) {
+    connection.console.error(`Validation error: ${error.message}`);
+  }
+
+  return diagnostics;
+}
+
+// Debounce timers are per-document so editing one file doesn't cancel
+// pending validation of another
+const validationTimeouts = new Map();
+
+// Document change handler - validate on change
+documents.onDidChangeContent(async (change) => {
+  const document = change.document;
+
+  // Only validate YAML files
+  if (!document.uri.endsWith(".yaml") && !document.uri.endsWith(".yml")) {
+    return;
+  }
+
+  const uri = document.uri;
+  clearTimeout(validationTimeouts.get(uri));
+  validationTimeouts.set(uri, setTimeout(async () => {
+    validationTimeouts.delete(uri);
+    const version = document.version;
+    const diagnostics = await validateDocument(document);
+    // Drop results computed from a superseded document version
+    if (documents.get(uri)?.version !== version) {
+      return;
+    }
+    connection.sendDiagnostics({ uri, diagnostics });
+  }, 500));
+});
+
+// ============================================================================
+// GO-TO-DEFINITION PROVIDER
+// ============================================================================
+
+connection.onDefinition(async (params) => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document) return null;
+
+  const position = params.position;
+  const text = document.getText();
+  const lineText = text.split("\n")[position.line];
+  
+  // Check for !include
+  const includeMatch = lineText.match(/!include\s+([^\s\n]+)/);
+  if (includeMatch) {
+    const includePath = includeMatch[1];
+    const docPath = fileURLToPath(document.uri);
+    const docDir = dirname(docPath);
+    
+    const resolvedPath = isAbsolute(includePath) 
+      ? includePath 
+      : resolve(docDir, includePath);
+    
+    if (existsSync(resolvedPath)) {
+      return {
+        uri: `file://${resolvedPath}`,
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 0 },
+        },
+      };
+    }
+  }
+
+  // Check for !secret
+  const secretMatch = lineText.match(/!secret\s+(\w+)/);
+  if (secretMatch) {
+    const secretName = secretMatch[1];
+    const docPath = fileURLToPath(document.uri);
+    const docDir = dirname(docPath);
+    
+    // Look for secrets.yaml in the same directory or parent
+    const possiblePaths = [
+      resolve(docDir, "secrets.yaml"),
+      resolve(docDir, "..", "secrets.yaml"),
+      "/homeassistant/secrets.yaml",
+    ];
+    
+    for (const secretsPath of possiblePaths) {
+      if (existsSync(secretsPath)) {
+        // TODO: Parse secrets.yaml to find the exact line
+        return {
+          uri: `file://${secretsPath}`,
+          range: {
+            start: { line: 0, character: 0 },
+            end: { line: 0, character: 0 },
+          },
+        };
+      }
+    }
+  }
+
+  return null;
+});
+
+// ============================================================================
+// DOCUMENT MANAGEMENT
+// ============================================================================
+
+documents.onDidClose((e) => {
+  clearTimeout(validationTimeouts.get(e.document.uri));
+  validationTimeouts.delete(e.document.uri);
+  connection.sendDiagnostics({ uri: e.document.uri, diagnostics: [] });
+});
+
+// Listen for document events
+documents.listen(connection);
+
+// Start listening
+connection.listen();
+
+// Log startup
+connection.console.log("Home Assistant LSP Server started");
+if (SUPERVISOR_TOKEN) {
+  connection.console.log("SUPERVISOR_TOKEN available - HA features enabled");
+} else {
+  connection.console.log("SUPERVISOR_TOKEN not available - running in limited mode");
+}

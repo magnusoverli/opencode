@@ -93,17 +93,9 @@ import {
   probeNativeMcpEndpoint,
 } from "./lib/ha-native-mcp.js";
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
-import {
-  buildServiceCallPath,
-  listResponseCapableServices,
-  planServiceCall,
-  readAffectedEntities,
-  readResponseMismatch,
-  readServiceResponseSupport,
-  splitServiceCallResult,
-} from "./lib/service-response.js";
 import { extractSecretValues } from "./lib/context-budget.js";
 import {
+  DECISION_DIGEST_PATH,
   DECISION_NOTES_DIR,
   DECISION_NOTES_PATH,
   LIMITS as DECISION_LIMITS,
@@ -292,6 +284,42 @@ async function callSupervisor(endpoint, method = "GET", body = null, timeoutMs =
   return response.text();
 }
 
+/**
+ * The slug of the add-on this server is running inside.
+ *
+ * This cannot be a literal. It differs per channel (`…_ha_opencode` versus
+ * `…_ha_opencode_beta`) and its prefix depends on how the repository was added
+ * — `local_` for a local folder, a repository hash otherwise. The guard that
+ * uses it stops the agent from tearing down its own container mid-session, so a
+ * literal that matches only one channel silently disables the guard everywhere
+ * else.
+ *
+ * Resolved once and cached; the answer cannot change while the process lives.
+ */
+let selfAddonSlug;
+async function getSelfAddonSlug() {
+  if (selfAddonSlug !== undefined) return selfAddonSlug;
+  try {
+    const info = await callSupervisor("/addons/self/info");
+    selfAddonSlug = info?.slug || null;
+  } catch (e) {
+    sendLog("warning", "updates", { action: "self_slug_lookup_failed", error: e.message });
+    selfAddonSlug = null;
+  }
+  return selfAddonSlug;
+}
+
+/**
+ * Conservative fallback for when Supervisor would not tell us our own slug.
+ * Matches this add-on under either channel and any repository prefix. It can
+ * refuse an update of the *other* channel's add-on, which is a legitimate
+ * operation — but declining to press the button is the safe way to be wrong
+ * here, and the Home Assistant UI can always do it.
+ */
+function looksLikeThisAddon(slug) {
+  return /(^|_)ha_opencode(_beta)?$/.test(slug || "");
+}
+
 async function getErrorLogWithFallback(lines) {
   return readErrorLogWithFallback({
     readErrorLog: () => callHA("/error_log"),
@@ -326,51 +354,6 @@ async function getCachedStates() {
 function invalidateStatesCache() {
   statesCache.data = null;
   statesCache.fetchedAt = 0;
-}
-
-// The service catalog changes only when an integration is set up or reloaded,
-// but every call_service now reads it to decide about `return_response`. Cache
-// it so that check costs nothing on the common path.
-const servicesCache = { data: null, fetchedAt: 0, inflight: null };
-const SERVICES_CACHE_TTL = 300000; // 5 minutes
-
-async function getCachedServices() {
-  const now = Date.now();
-  if (servicesCache.data && (now - servicesCache.fetchedAt) < SERVICES_CACHE_TTL) {
-    return servicesCache.data;
-  }
-  if (servicesCache.inflight) {
-    return servicesCache.inflight;
-  }
-  servicesCache.inflight = callHA("/services")
-    .then((services) => {
-      servicesCache.data = services;
-      servicesCache.fetchedAt = Date.now();
-      return services;
-    })
-    .finally(() => { servicesCache.inflight = null; });
-  return servicesCache.inflight;
-}
-
-function invalidateServicesCache() {
-  servicesCache.data = null;
-  servicesCache.fetchedAt = 0;
-}
-
-/**
- * Read the catalog without letting its absence break a service call.
- *
- * A call that would have worked should not fail because the lookup that only
- * informs it did; callers fall back to Home Assistant's own error, which says
- * exactly which way the `return_response` flag was wrong.
- */
-async function getServiceCatalogSafely() {
-  try {
-    return await getCachedServices();
-  } catch (error) {
-    sendLog("debug", "ha-service", { action: "catalog_unavailable", error: error.message });
-    return null;
-  }
 }
 
 // ============================================================================
@@ -562,22 +545,9 @@ async function takeScreenshot(haCoreUrl, urlPath, options = {}) {
 
       // â”€â”€ Auth Strategy 2: WebSocket interceptor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // Monkey-patch the WebSocket constructor so that when the HA
-      // frontend opens /api/websocket, we can auto-respond to the
-      // auth_required handshake with the LLAT.  This covers cases where
-      // localStorage auth fails or the frontend ignores it.
-      //
-      // Strategy 1 usually succeeds, in which case the frontend answers
-      // auth_required itself.  Both it and this interceptor see the same
-      // frame, so firing unconditionally sent a second auth frame that
-      // Home Assistant rejected and logged for every screenshot:
-      //   Received invalid command: {'type': 'auth', ...}
-      // The connection is already authenticated at that point, so the
-      // screenshot still worked and the only symptom was a Core error.
-      //
-      // The frontend therefore owns authentication and this stays a
-      // fallback: watch outgoing frames, and only authenticate if the page
-      // has not done so shortly after auth_required.
-      const AUTH_FALLBACK_MS = 500;
+      // frontend opens /api/websocket, our listener auto-responds to
+      // the auth_required handshake with the LLAT.  This covers cases
+      // where localStorage auth fails or the frontend ignores it.
       const _WebSocket = window.WebSocket;
       window.WebSocket = function (url, protocols) {
         const ws = protocols !== undefined
@@ -585,35 +555,17 @@ async function takeScreenshot(haCoreUrl, urlPath, options = {}) {
           : new _WebSocket(url);
 
         if (url && url.includes("/api/websocket")) {
-          let pageAuthSent = false;
-          let fallbackAuthSent = false;
-
-          // Bound up front so the fallback cannot recurse through the patch.
-          const rawSend = ws.send.bind(ws);
-          ws.send = function (data) {
-            try {
-              if (typeof data === "string" && JSON.parse(data)?.type === "auth") {
-                pageAuthSent = true;
-              }
-            } catch (_) { /* non-JSON or binary frame - not an auth frame */ }
-            return rawSend(data);
-          };
-
+          let authSent = false;
           ws.addEventListener("message", function (event) {
             try {
               const msg = JSON.parse(event.data);
-              if (msg.type !== "auth_required" || fallbackAuthSent) return;
-              setTimeout(() => {
-                if (pageAuthSent || fallbackAuthSent) return;
-                if (ws.readyState !== _WebSocket.OPEN) return;
-                fallbackAuthSent = true;
-                try {
-                  rawSend(JSON.stringify({
-                    type: "auth",
-                    access_token: config.token,
-                  }));
-                } catch (_) { /* socket closed between check and send */ }
-              }, AUTH_FALLBACK_MS);
+              if (msg.type === "auth_required" && !authSent) {
+                authSent = true;
+                ws.send(JSON.stringify({
+                  type: "auth",
+                  access_token: config.token,
+                }));
+              }
             } catch (_) { /* ignore parse errors on non-JSON frames */ }
           });
         }
@@ -1213,8 +1165,6 @@ const SCHEMAS = {
       domain: { type: "string" },
       service: { type: "string" },
       affected_entities: { type: "array", items: { type: "string" } },
-      returned_response: { type: "boolean" },
-      service_response: { type: "object" },
     },
     required: ["success", "domain", "service"],
   },
@@ -2101,6 +2051,7 @@ const DECISION_NOTES_BASE_DIR = process.env.OPENCODE_DECISION_NOTES_DIR || DECIS
 const DECISION_NOTES_FILE = DECISION_NOTES_BASE_DIR === DECISION_NOTES_DIR
   ? DECISION_NOTES_PATH
   : join(DECISION_NOTES_BASE_DIR, "decisions.yaml");
+const DECISION_DIGEST_FILE = process.env.OPENCODE_DECISION_DIGEST_PATH || DECISION_DIGEST_PATH;
 
 /**
  * Read the user's decision notes.
@@ -2159,54 +2110,43 @@ function writeFileAtomicSync(path, contents) {
 }
 
 /**
- * Persist notes. The injected digest is deliberately not touched.
+ * Persist notes and refresh the injected digest.
  *
- * `/data/context/decision-notes.md` is listed in OpenCode's `instructions`, and
- * OpenCode re-reads every instruction file from disk on each request rather
- * than once per session. Rewriting the digest mid-conversation therefore edits
- * the system prompt underneath a live session, discarding the cached prefix
- * from that point on — the digest is ordered newest-first and carries a note
- * count, so a new note changes it at the top and invalidates everything after,
- * including the whole message history. On a hosted model that is a lost cache
- * discount; on a local one it is a full re-prefill mid-task.
- *
- * The digest is derived from this file, and generate-home-context.mjs already
- * rebuilds it at add-on start and on `ha-context refresh`. One writer, at one
- * moment, is the whole point — so recording a note is a write to the notes
- * file and nothing else.
+ * The notes file is the user's record and is written first; the digest is
+ * derived and is rebuilt from it. A failure to refresh the digest is reported
+ * rather than thrown, because by that point the note *is* saved — telling the
+ * user it was not would be the one answer that is simply false.
  */
-function persistDecisionNotes(serialized) {
+function writeDecisionNotes(serialized, notes) {
   mkdirSync(DECISION_NOTES_BASE_DIR, { recursive: true });
   writeFileAtomicSync(DECISION_NOTES_FILE, serialized);
+
+  // Screened again here, not just on the note being added: the file may also
+  // hold notes a user wrote by hand, and this rebuild is what reaches the model.
+  // No `unreadable` count: both write paths refuse to save while the file has
+  // entries the parser rejected, so what is written is always the whole file.
+  const digest = renderDecisionDigest(notes, { secretValues: readSecretValues() });
+
+  try {
+    mkdirSync(dirname(DECISION_DIGEST_FILE), { recursive: true });
+    if (digest.markdown) {
+      writeFileAtomicSync(DECISION_DIGEST_FILE, digest.markdown);
+    } else if (existsSync(DECISION_DIGEST_FILE)) {
+      unlinkSync(DECISION_DIGEST_FILE);
+    }
+    return { ...digest, digestError: null };
+  } catch (error) {
+    return { ...digest, digestError: error?.message ?? String(error) };
+  }
 }
 
 /**
- * Render the digest the next rebuild would produce, without writing it.
- *
- * This is what lets the tools still tell the user whether a note will fit the
- * standing context. It is a forecast, not a description of a file on disk, and
- * the wording at the call sites says so.
- *
- * Screened again here, not just on the note being added: the file may also
- * hold notes a user wrote by hand, and this render is what would reach the
- * model. No `unreadable` count: both write paths refuse to save while the file
- * has entries the parser rejected, so what is written is always the whole file.
- */
-function previewDecisionDigest(notes) {
-  return renderDecisionDigest(notes, { secretValues: readSecretValues() });
-}
-
-/**
- * Say plainly how much of the record a future session will actually carry.
+ * Say plainly how much of the record the next session will actually carry.
  *
  * The stored-note limit and the digest budget are different limits, and the
  * digest one bites first. Reporting only the stored count would read as "there
  * is plenty of room" while notes were quietly falling out of the standing
  * context.
- *
- * This describes a rendered preview, not a file on disk — the digest is
- * rebuilt by generate-home-context.mjs, and the user can edit the notes file
- * before that happens. The wording is a forecast for that reason.
  */
 function describeDigestCoverage(digest) {
   const shown = digest?.includedNotes?.length ?? 0;
@@ -2263,25 +2203,13 @@ const EMPTY_INPUT_SCHEMA = Object.freeze({
   additionalProperties: false,
 });
 
-// The ceiling on any get_states list.
 const STATE_RESULT_CAP = 500;
-
-// A tighter ceiling when no domain was given. An unfiltered get_states is the
-// largest thing this server can put in a conversation, and it is paid for again
-// on every request that follows it — at 500 a mid-sized home returned roughly
-// as much as the entire system prompt. Filtering by domain is the behaviour
-// AGENTS.md and INSTRUCTIONS.md steer toward, so it keeps the wider ceiling:
-// narrowing a query should not cost the model results.
-const UNFILTERED_STATE_RESULT_CAP = 150;
 const HOME_CONTEXT_RESULT_CAP = 80;
 const HISTORY_RESULT_CAP = 200;
 const LOGBOOK_RESULT_CAP = 200;
 const DOCS_MAX_CHARS = 12000;
 const CHANGELOG_MAX_CHARS = 16000;
 const CLI_OUTPUT_MAX_CHARS = 20000;
-// Statistics and forecast responses are the large ones; generous enough to hold
-// a useful window without letting a single call swamp the context.
-const SERVICE_RESPONSE_MAX_CHARS = 20000;
 
 const server = new Server(
   {
@@ -2315,7 +2243,7 @@ const TOOLS = [
   {
     name: "get_states",
     title: "Get Entity States",
-    description: `Get the current state of entities: one entity, a domain, or the whole installation. Returns entity_id, state, and key attributes. A call with no domain is capped at ${UNFILTERED_STATE_RESULT_CAP} entities, a domain-filtered one at ${STATE_RESULT_CAP}, in Home Assistant's own arbitrary order — so prefer domain or entity_id when you know what you are after, and summarize when you want a complete picture of what exists.`,
+    description: "Get the current state of entities. Can return all entities, filter by domain, or get a specific entity. Returns entity_id, state, and key attributes.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2425,11 +2353,7 @@ const TOOLS = [
   {
     name: "call_service",
     title: "Call Home Assistant Service",
-    description:
-      "Call a Home Assistant service to control devices or trigger actions. Use for turning on/off lights, " +
-      "running scripts, triggering automations, etc. THIS MODIFIES DEVICE STATE. " +
-      "Services that answer with data (recorder.get_statistics, weather.get_forecasts, calendar.get_events, " +
-      "todo.get_items) work here too — their response comes back with the result, no extra argument needed.",
+    description: "Call a Home Assistant service to control devices or trigger actions. Use for turning on/off lights, running scripts, triggering automations, etc. THIS MODIFIES DEVICE STATE.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2471,13 +2395,6 @@ const TOOLS = [
         data: {
           type: "object",
           description: "Additional service data (e.g., brightness: 255, color_temp: 400, temperature: 72)",
-        },
-        return_response: {
-          type: "boolean",
-          description:
-            "Ask for the service's response data. Leave unset for the normal case: services that always " +
-            "return data request it automatically. Set true only to opt into a service whose response is " +
-            "optional — get_services marks which services in a domain can return one.",
         },
       },
       required: ["domain", "service"],
@@ -3520,13 +3437,8 @@ async function probeNativeHaMcpReadiness() {
 
   return {
     upstream: {
-      llm_integration_pr: "home-assistant/core#174253",
-      assist_api_pr: "home-assistant/core#175659",
-      keyed_endpoint_pr: "home-assistant/core#175570",
-      tool_schema_fix_pr: "home-assistant/core#176814",
       llm_docs_pr: "home-assistant/developers.home-assistant#3236",
-      tool_platform_docs_pr: "home-assistant/developers.home-assistant#3201",
-      first_release: "2026.8.0",
+      keyed_endpoint_pr: "home-assistant/core#175570",
       endpoint_pattern: "/api/mcp/<API ID>",
       configured_endpoint: "/api/mcp",
       assist_api_id: NATIVE_MCP_ASSIST_API_ID,
@@ -3539,19 +3451,9 @@ async function probeNativeHaMcpReadiness() {
   };
 }
 
-/**
- * Build a compact JSON content block.
- *
- * `pretty` is forwarded rather than defaulted here, so the single statement of
- * the default lives in createJsonTextContent (lib/helpers.js), which is off.
- * Indentation is whitespace the model pays for on every request the result
- * stays in history: on a large get_states payload compact measured roughly a
- * quarter fewer characters (23-28%, depending on how many entities carry a
- * friendly_name and device_class), and nothing reads these blocks but the model.
- */
 function createCompactJsonContent(summary, data, meta = {}, options = {}) {
   return createJsonTextContent(createCompactPayload(summary, data, meta), {
-    pretty: options.pretty,
+    pretty: options.pretty ?? true,
     audience: options.audience || ["assistant"],
     priority: options.priority ?? 0.7,
   });
@@ -3682,18 +3584,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           friendly_name: s.attributes?.friendly_name,
           device_class: s.attributes?.device_class,
         }));
-        const cap = args?.domain ? STATE_RESULT_CAP : UNFILTERED_STATE_RESULT_CAP;
-        const truncated = simplified.length > cap;
-        const returned = truncated ? simplified.slice(0, cap) : simplified;
+        const truncated = simplified.length > STATE_RESULT_CAP;
+        const returned = truncated ? simplified.slice(0, STATE_RESULT_CAP) : simplified;
         return makeCompatibleResponse({
           content: [createCompactJsonContent(
             truncated
-              ? `Showing ${returned.length} of ${simplified.length} entities, in the order Home Assistant ` +
-                "returned them — this is an arbitrary window, not a ranked or alphabetical one, so absence " +
-                "from it proves nothing about what exists. " +
-                (args?.domain
-                  ? "Narrow with entity_id, or use summarize for a complete per-domain census."
-                  : "Narrow with domain or entity_id, or use summarize for a complete per-domain census.")
+              ? `Showing ${returned.length} of ${simplified.length} entities. Use entity_id, domain, or summarize to narrow.`
               : `Returned ${returned.length} entities`,
             returned,
             {
@@ -3755,105 +3651,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // === SERVICE CALLS ===
       case "call_service": {
-        const { domain, service, target, data, return_response: requestedResponse } = args;
+        const { domain, service, target, data } = args;
         sendLog("notice", "ha-service", { action: "call", domain, service, target });
-
+        
         const payload = { ...data };
         if (target) {
           Object.assign(payload, target);
         }
-
-        const support = readServiceResponseSupport(await getServiceCatalogSafely(), domain, service);
-        const plan = planServiceCall(support, requestedResponse);
-        const notes = plan.note ? [plan.note] : [];
-        let returnResponse = plan.returnResponse;
-
-        let result;
-        try {
-          result = await callHA(buildServiceCallPath(domain, service, returnResponse), "POST", payload);
-        } catch (error) {
-          // A cached catalog can lag a reloaded integration. Home Assistant's
-          // 400 says exactly which way the flag was wrong, so take it at its
-          // word and retry once rather than handing back an error the caller
-          // could only fix by repeating the call itself.
-          const corrected = error?.status === 400 ? readResponseMismatch(error.message) : null;
-          if (corrected === null || corrected === returnResponse) throw error;
-
-          invalidateServicesCache();
-          returnResponse = corrected;
-          result = await callHA(buildServiceCallPath(domain, service, returnResponse), "POST", payload);
-          notes.push(corrected
-            ? "Home Assistant requires a response for this service; retried with return_response."
-            : "Home Assistant returns no response for this service; retried without return_response.");
-        }
-
+        const result = await callHA(`/services/${domain}/${service}`, "POST", payload);
         invalidateStatesCache();
-
-        const { changedStates, serviceResponse, hasResponse } = splitServiceCallResult(result);
-        const lines = [`Service ${domain}.${service} called successfully.`];
-
-        if (hasResponse) {
-          const affected = readAffectedEntities(changedStates);
-          if (affected.length) {
-            lines.push(`Changed entities (${affected.length}): ${affected.join(", ")}`);
-          }
-          // The response is what the caller wanted; the changed-state dump that
-          // shares the envelope is noise beside it, and statistics responses
-          // are large enough that printing both would crowd out the answer.
-          // Compact for the same reason the other tool payloads are: a
-          // statistics response is among the largest things this server can put
-          // in a conversation, and indentation is re-read on every later request.
-          const rendered = truncateText(JSON.stringify(serviceResponse), {
-            maxChars: SERVICE_RESPONSE_MAX_CHARS,
-          });
-          lines.push("Response data:", rendered.text);
-          if (rendered.truncated) {
-            lines.push(`(response truncated: ${rendered.omitted_chars} of ${rendered.original_chars} chars omitted — narrow the request to see the rest)`);
-          }
-        } else {
-          lines.push(JSON.stringify(result, null, 2));
-        }
-
-        lines.push(...notes);
 
         return makeCompatibleResponse({
           content: [
-            createTextContent(lines.join("\n"), { audience: ["user", "assistant"], priority: 0.9 }),
+            createTextContent(
+              `Service ${domain}.${service} called successfully.\n${JSON.stringify(result, null, 2)}`,
+              { audience: ["user", "assistant"], priority: 0.9 }
+            ),
           ],
         });
       }
 
       case "get_services": {
-        const services = await getCachedServices();
+        const services = await callHA("/services");
         if (args?.domain) {
           const filtered = services.filter((s) => s.domain === args.domain);
-          const responseServices = filtered.flatMap((s) =>
-            listResponseCapableServices(s.services).map((name) => `${s.domain}.${name}`));
-          const header = responseServices.length
-            ? `Answers with data (call_service returns it automatically): ${responseServices.join(", ")}\n`
-            : "";
           return makeCompatibleResponse({
-            content: [createTextContent(header + JSON.stringify(filtered, null, 2), { audience: ["assistant"], priority: 0.6 })],
+            content: [createTextContent(JSON.stringify(filtered, null, 2), { audience: ["assistant"], priority: 0.6 })],
           });
         }
         // Full catalog with field docs is enormous; unfiltered calls get the
-        // domain/service index and a hint to re-query with a domain. The
-        // `response` flag survives that trim: it is the one field that changes
-        // how a service must be called, so dropping it here would cost a round
-        // trip on exactly the services that need one.
-        const index = services.map((s) => {
-          const entry = {
-            domain: s.domain,
-            services: Object.keys(s.services || {}),
-          };
-          const withResponse = listResponseCapableServices(s.services);
-          if (withResponse.length) entry.returns_response = withResponse;
-          return entry;
-        });
+        // domain/service index and a hint to re-query with a domain
+        const index = services.map((s) => ({
+          domain: s.domain,
+          services: Object.keys(s.services || {}),
+        }));
         return makeCompatibleResponse({
           content: [createTextContent(
             `Service index (${index.length} domains). Pass domain for full schemas.\n` +
-            `'returns_response' lists services that answer with data; call_service returns it automatically.\n` +
             JSON.stringify(index),
             { audience: ["assistant"], priority: 0.6 }
           )],
@@ -4964,8 +4798,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         }
 
-        persistDecisionNotes(result.serialized);
-        const digest = previewDecisionDigest(result.state.notes);
+        const digest = writeDecisionNotes(result.serialized, result.state.notes);
         sendLog("info", "decision-notes", { action: "recorded", id: result.note.id });
 
         const active = activeNotes(result.state.notes).length;
@@ -4975,14 +4808,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `# Decision recorded\n\n` +
             `**${result.note.title}**${result.note.pin ? " (pinned)" : ""}\n\n` +
             `Saved to \`${DECISION_NOTES_FILE}\` as \`${result.note.id}\`.\n\n` +
-            "This decision is in force now — it is in this conversation, and `recall_decisions` reads it " +
-            "straight from the file. It joins the standing context that starts a session when the digest is " +
-            "next rebuilt: at the next add-on restart, or immediately if the user runs `ha-context refresh`.\n\n" +
-            `${describeDigestCoverage(digest)}\n\n` +
-            (inDigest
-              ? ""
-              : "**This note would not fit the session digest**, so later sessions will not see it up front. " +
-                "Tell the user, and offer to pin it or to retire a note that no longer applies.\n\n") +
+            (digest.digestError
+              ? `The note is saved, but the session digest could not be rewritten (${digest.digestError}). ` +
+                "Future sessions may not see it until the add-on restarts — tell the user.\n\n"
+              : `${describeDigestCoverage(digest)}\n\n` +
+                (inDigest
+                  ? "Future sessions will see this note in their standing context.\n\n"
+                  : "**This note did not fit the session digest**, so future sessions will not see it up front. " +
+                    "Tell the user, and offer to pin it or to retire a note that no longer applies.\n\n")) +
             `Stored active notes: ${active}/${DECISION_LIMITS.maxActive}.\n\n` +
             `The user can read, edit, or delete this file at any time, or run \`ha-context notes\` in the terminal.`,
             { audience: ["user", "assistant"], priority: 0.8 }
@@ -5110,8 +4943,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         }
 
-        persistDecisionNotes(result.serialized);
-        const digest = previewDecisionDigest(result.state.notes);
+        const digest = writeDecisionNotes(result.serialized, result.state.notes);
         sendLog("info", "decision-notes", { action: "superseded", ids: result.superseded });
 
         return makeCompatibleResponse({
@@ -5121,9 +4953,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             (result.alreadySuperseded?.length
               ? `Already superseded, unchanged: ${result.alreadySuperseded.map((id) => `\`${id}\``).join(", ")}.\n\n`
               : "") +
-            `They stay in \`${DECISION_NOTES_FILE}\` for the record but no longer reach future sessions. ` +
-            "The standing context still carries them until the digest is next rebuilt — at the next add-on " +
-            "restart, or immediately with `ha-context refresh`.\n\n" +
+            `They stay in \`${DECISION_NOTES_FILE}\` for the record but no longer reach future sessions.\n\n` +
             `${describeDigestCoverage(digest)}\n\n` +
             `Stored active notes: ${activeNotes(result.state.notes).length}/${DECISION_LIMITS.maxActive}.`,
             { audience: ["user", "assistant"], priority: 0.8 }
@@ -5272,9 +5102,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { component, addon_slug, backup = true } = args;
         sendLog("notice", "updates", { action: "initiate_update", component, addon_slug, backup });
         
-        // Prevent self-update
-        if (component === "addon" && addon_slug === "local_ha_opencode") {
-          throw new Error("Cannot update OpenCode from within itself. The container will be stopped during update. Please use the Home Assistant UI to update this app.");
+        // Prevent self-update. Supervisor runs the update, so the pull itself
+        // survives — but it stops this container to do it, which kills the
+        // session that asked, before any progress or job id can come back.
+        if (component === "addon") {
+          const ownSlug = await getSelfAddonSlug();
+          const isSelf = ownSlug ? addon_slug === ownSlug : looksLikeThisAddon(addon_slug);
+          if (isSelf) {
+            throw new Error("Cannot update OpenCode from within itself. The container will be stopped during update. Please use the Home Assistant UI to update this app.");
+          }
         }
         
         let endpoint;

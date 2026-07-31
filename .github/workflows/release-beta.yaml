@@ -33,27 +33,34 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
-      - name: Verify the tag was cut from dev
+      - name: Verify the tag was cut from main
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          # Beta ships from dev. This job runs with main checked out (that is
-          # where Home Assistant reads add-on metadata from), so fetch dev
-          # explicitly before asking whether the tag is on it.
-          git fetch origin dev --quiet
-
-          if ! git merge-base --is-ancestor "${TAG}^{commit}" origin/dev; then
-            echo "::error::Beta tag ${TAG} is not reachable from dev."
-            echo "::error::Beta releases must be cut from dev; main carries stable."
-            echo "::error::Delete the tag, push the work to dev, and tag again."
+          # Both channels ship from main now. What separates them is the folder
+          # the add-on lives in, not the branch the tag sits on: this release
+          # publishes ha_opencode_beta/, and a stable release cut from the same
+          # commit publishes ha_opencode/. Home Assistant only ever reads the
+          # default branch, so a tag off main could not be served anyway.
+          if ! git merge-base --is-ancestor "${TAG}^{commit}" HEAD; then
+            echo "::error::Beta tag ${TAG} is not reachable from main."
+            echo "::error::Both channels release from main; merge the work and tag again."
             exit 1
           fi
 
-          if git merge-base --is-ancestor "${TAG}^{commit}" origin/main; then
-            echo "::notice::${TAG} is also on main — this beta contains no dev-only work."
+          # main is allowed to have moved on for stable-only reasons. It is NOT
+          # allowed to have moved the beta add-on itself, because this job
+          # publishes main's ha_opencode_beta/ as the storefront for an image
+          # built from the tag.
+          if ! git diff --quiet "${TAG}" HEAD -- ha_opencode_beta/; then
+            echo "::error::main has moved past ${TAG} inside ha_opencode_beta/."
+            echo "::error::The published storefront would not match the image built from ${TAG}."
+            git diff --stat "${TAG}" HEAD -- ha_opencode_beta/
+            echo "::error::Either tag main's current tip, or reset main to ${TAG}."
+            exit 1
           fi
 
-          echo "OK: ${TAG} is on dev."
+          echo "OK: ${TAG} is on main and ha_opencode_beta/ matches main's tip."
 
       - name: Guard against publishing a downgrade
         env:
@@ -76,28 +83,15 @@ jobs:
             exit 1
           fi
 
-      - name: Sync entire beta addon directory from dev to main
+      - name: Update version in config.yaml
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          # Replace the entire ha_opencode_beta/ directory with the version
-          # from the tagged commit (on dev). This syncs everything HA reads
-          # from the repo: config.yaml (schema, options), translations,
-          # CHANGELOG.md, DOCS.md, icons, build.yaml, etc.
-          #
-          # rm -rf first: `git checkout <tag> -- <dir>` is additive only.
-          # Without it, a file deleted on dev is silently restored from main
-          # and lives on forever, and HA keeps serving it to beta users.
-          rm -rf ha_opencode_beta
-          git checkout "${{ github.ref_name }}" -- ha_opencode_beta/
-
-          test -f ha_opencode_beta/config.yaml || {
-            echo "::error::ha_opencode_beta/config.yaml missing after sync from ${{ github.ref_name }}."
-            exit 1
-          }
-
-          # Set the release version (dev's config.yaml may show the previous
-          # beta version since the version bump happens here, not on dev)
+          # No cross-branch copy any more. ha_opencode_beta/ is a complete
+          # add-on that already lives on main — everything Home Assistant reads
+          # (config.yaml, translations, CHANGELOG.md, DOCS.md, icons) is here
+          # and current, because the tag is on this branch. All that is left is
+          # to stamp the version the image was just built with.
           sed -i "s/^version: .*/version: \"${VERSION}\"/" ha_opencode_beta/config.yaml
           sed -i 's|^image: .*|image: "ghcr.io/magnusoverli/ha_opencode_beta"|' ha_opencode_beta/config.yaml
 
@@ -119,16 +113,16 @@ jobs:
             exit 1
           }
 
-      - name: Commit metadata update
+      - name: Commit version update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A ha_opencode_beta/
+          git add ha_opencode_beta/config.yaml
 
           if git diff --cached --quiet; then
-            echo "main already carries this beta metadata — nothing to commit."
+            echo "main already advertises beta ${{ steps.version.outputs.version }} — nothing to commit."
           else
-            git commit -m "chore: bump beta to ${{ steps.version.outputs.version }} — sync metadata from dev"
+            git commit -m "chore: bump beta to ${{ steps.version.outputs.version }}"
           fi
 
           for attempt in 1 2 3; do
@@ -151,7 +145,6 @@ jobs:
         id: changelog
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          # Changelog is now on main (synced above), read it directly
           CHANGELOG=$(awk "
             /^## ${VERSION}$/ { found=1; next }
             found && /^## / { exit }

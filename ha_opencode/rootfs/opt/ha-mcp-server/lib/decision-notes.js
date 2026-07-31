@@ -25,9 +25,23 @@ import { byteLength, describeSecretFindings, findSecrets, plausibleSecretValues 
  * The notes themselves live in the configuration directory: they are the
  * user's record, they belong in Home Assistant backups, and they diff cleanly
  * for anyone keeping `/config` under version control.
+ *
+ * Per channel, though. That directory is mounted by BOTH the stable and the
+ * beta add-on, so a note recorded while trying something out in beta would
+ * otherwise be injected into every stable session for good. ADDON_CHANNEL is
+ * set from a Docker build arg — see rootfs/usr/local/lib/opencode/channel.sh.
  */
-export const DECISION_NOTES_DIR = "/homeassistant/opencode";
+export const DECISION_NOTES_DIR =
+  process.env.ADDON_CHANNEL === "beta" ? "/homeassistant/opencode_beta" : "/homeassistant/opencode";
 export const DECISION_NOTES_PATH = `${DECISION_NOTES_DIR}/decisions.yaml`;
+
+/**
+ * The same file, named the way the user sees it. Home Assistant calls the
+ * configuration directory `/config`; the add-on mounts it at `/homeassistant`.
+ * Messages that tell someone to go and edit the file must use their name for
+ * it, not ours.
+ */
+export const DECISION_NOTES_DISPLAY_PATH = DECISION_NOTES_PATH.replace("/homeassistant/", "/config/");
 
 /** The injected digest is derived, so it lives with the other generated context. */
 export const DECISION_DIGEST_PATH = "/data/context/decision-notes.md";
@@ -789,23 +803,12 @@ const DIGEST_INTRO = [
  * the failure that matters here is silent: a decision that was dropped for space
  * reads exactly like a decision that was never made, which is how a deliberate
  * configuration gets "fixed". So the digest always says which case it is in.
- *
- * The completeness claim is bounded to the rebuild it was written at. This file
- * is regenerated at add-on start and on `ha-context refresh`, not when a note is
- * recorded — recording writes decisions.yaml alone, so that adding a note cannot
- * rewrite a prompt OpenCode re-reads on every request. An unbounded "nothing has
- * been left out" would therefore be a claim this function cannot make good on.
- * The truncated branch needs no such caveat: it already sends the model to
- * `recall_decisions`, which reads the notes file itself.
  */
 function completeScope(total, everythingReadable) {
   // "Nothing has been left out" is only true when nothing was withheld for
   // credentials and nothing was unreadable. Claiming it otherwise is the same
   // failure as silent truncation, one level up.
-  const claim = everythingReadable
-    ? " — nothing had been left out when this summary was built. Notes recorded since are in " +
-      "force but are not listed here; `recall_decisions` reads the file itself"
-    : "";
+  const claim = everythingReadable ? " — nothing has been left out" : "";
   return total === 1
     ? `This is the only active note that reached this summary${claim}.`
     : `All ${total} active notes that reached this summary are listed here${claim}.`;
@@ -814,7 +817,7 @@ function completeScope(total, everythingReadable) {
 function unreadableScope(unreadable) {
   const one = unreadable === 1;
   return (
-    `${one ? "One entry" : `${unreadable} entries`} in \`/config/opencode/decisions.yaml\` could not be read and ` +
+    `${one ? "One entry" : `${unreadable} entries`} in \`${DECISION_NOTES_DISPLAY_PATH}\` could not be read and ` +
     `${one ? "is" : "are"} missing from this summary. Tell the user, and use \`recall_decisions\` rather than ` +
     "assuming the decisions below are all of them."
   );
@@ -848,7 +851,7 @@ function withheldScope(withheld) {
   return (
     `${one ? "One note is" : `${withheld} notes are`} withheld from this context because ` +
     `${one ? "it contains" : "they contain"} credential-shaped text. Tell the user to edit or remove ` +
-    `${one ? "it" : "them"} in \`/config/opencode/decisions.yaml\` — a note is sent to the model every session, ` +
+    `${one ? "it" : "them"} in \`${DECISION_NOTES_DISPLAY_PATH}\` — a note is sent to the model every session, ` +
     "so it must not carry a password, token, or anything from `secrets.yaml`."
   );
 }

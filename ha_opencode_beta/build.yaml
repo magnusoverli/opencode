@@ -1,10 +1,14 @@
 ---
 # NOTE: only OPENCHAMBER_VERSION below is actually read by CI
-# (.github/workflows/build-beta.yaml scrapes it with sed). Every other value
-# here is inert — the image is built from ha_opencode/Dockerfile, and the
-# remaining pins resolve from its ARG defaults. Home Assistant does not read
-# this file either, because config.yaml sets `image:`. To change a pinned
-# version for real, edit ha_opencode/Dockerfile. See RELEASING.md.
+# (.github/workflows/build-beta.yaml scrapes it with sed and passes it as a
+# build arg). It is a per-channel pin, which is what lets a new OpenChamber
+# soak in beta while stable stays put.
+#
+# Every other value here is inert — the image is built from
+# ha_opencode_beta/Dockerfile and the remaining pins resolve from its ARG
+# defaults. Home Assistant does not read this file either, because config.yaml
+# sets `image:`. To change one of those for real, edit
+# ha_opencode_beta/Dockerfile. See RELEASING.md.
 build_from:
   aarch64: ghcr.io/home-assistant/base-debian:trixie
   amd64: ghcr.io/home-assistant/base-debian:trixie

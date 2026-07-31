@@ -32,22 +32,55 @@ jobs:
       - name: Get pinned hab CLI version
         id: pinned
         run: |
-          PINNED=$(grep -oP '^ARG HAB_VERSION=\K\S+' ha_opencode/Dockerfile)
-          echo "version=${PINNED}" >> $GITHUB_OUTPUT
-          echo "Pinned hab CLI version: ${PINNED}"
+          # Each channel has its own Dockerfile now, so each has its own pin.
+          # They are normally equal — promotion copies the Dockerfile across —
+          # but reporting only one would hide a channel left behind.
+          STABLE=$(grep -oP '^ARG HAB_VERSION=\K\S+' ha_opencode/Dockerfile)
+          BETA=$(grep -oP '^ARG HAB_VERSION=\K\S+' ha_opencode_beta/Dockerfile)
+
+          if [ -z "${STABLE}" ] || [ -z "${BETA}" ]; then
+            echo "::error::HAB_VERSION not found in one of the Dockerfiles (stable='${STABLE}' beta='${BETA}')."
+            exit 1
+          fi
+
+          echo "stable=${STABLE}" >> $GITHUB_OUTPUT
+          echo "beta=${BETA}" >> $GITHUB_OUTPUT
+          echo "Pinned hab CLI version: stable=${STABLE} beta=${BETA}"
 
       - name: Summary
+        env:
+          STABLE: ${{ steps.pinned.outputs.stable }}
+          BETA: ${{ steps.pinned.outputs.beta }}
+          LATEST: ${{ steps.latest.outputs.tag }}
         run: |
-          echo "## hab CLI release status" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| Pinned version | \`${{ steps.pinned.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Latest release | [\`${{ steps.latest.outputs.tag }}\`](${{ steps.latest.outputs.url }}) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Released | ${{ steps.latest.outputs.date }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.pinned.outputs.version }}" != "${{ steps.latest.outputs.tag }}" ]; then
-            echo "⚠️ A newer release is available. Bump \`HAB_VERSION\` in \`ha_opencode/Dockerfile\`." >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## hab CLI release status"
+            echo
+            echo "| | Value |"
+            echo "|---|---|"
+            echo "| Pinned (stable) | \`${STABLE}\` |"
+            echo "| Pinned (beta) | \`${BETA}\` |"
+            echo "| Latest release | [\`${LATEST}\`](${{ steps.latest.outputs.url }}) |"
+            echo "| Released | ${{ steps.latest.outputs.date }} |"
+            echo
+          } >> $GITHUB_STEP_SUMMARY
+
+          if [ "${STABLE}" != "${BETA}" ]; then
+            echo "ℹ️ The channels are pinned to different versions. That is allowed while a bump soaks in beta." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Plain `if`, not `[ ... ] && var=...`: GitHub runs these steps under
+          # `bash -e`, where a false test on the last line fails the step.
+          behind=""
+          if [ "${STABLE}" != "${LATEST}" ]; then
+            behind="${behind} \`ha_opencode/Dockerfile\`"
+          fi
+          if [ "${BETA}" != "${LATEST}" ]; then
+            behind="${behind} \`ha_opencode_beta/Dockerfile\`"
+          fi
+
+          if [ -n "${behind}" ]; then
+            echo "⚠️ A newer release is available. Bump \`HAB_VERSION\` in:${behind}." >> $GITHUB_STEP_SUMMARY
           else
-            echo "✅ Pinned version matches the latest release." >> $GITHUB_STEP_SUMMARY
+            echo "✅ Both channels match the latest release." >> $GITHUB_STEP_SUMMARY
           fi

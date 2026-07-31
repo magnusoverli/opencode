@@ -1,0 +1,68 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# OpenCode - Optional OpenChamber LAN web UI Service
+# ------------------------------------------------------------------------------
+# Publishes the OpenChamber web UI on a mappable network port (4097/tcp) so
+# reverse proxies and tunnels can point straight at the root path, mirroring the
+# optional OpenCode LAN server on 4096/tcp. Only active when interface_mode is
+# 'openchamber' and enable_openchamber_lan is true. This instance runs a second
+# copy of the ingress proxy with the remote-address allowlist relaxed, because
+# there is no Home Assistant Ingress session in front of the mapped port.
+# ==============================================================================
+
+export HOME="/data"
+export XDG_DATA_HOME="/data/.local/share"
+export XDG_CONFIG_HOME="/data/.config"
+export NPM_CONFIG_PREFIX="/data/.npm-global"
+
+INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+ENABLE_OPENCHAMBER_LAN=$(bashio::config 'enable_openchamber_lan' 2>/dev/null || echo "false")
+
+if [ "${INTERFACE_MODE}" != "openchamber" ]; then
+    bashio::log.info "Interface mode is '${INTERFACE_MODE}'; OpenChamber LAN service is inactive."
+    exec sleep infinity
+fi
+
+if ! bashio::var.true "${ENABLE_OPENCHAMBER_LAN}"; then
+    bashio::log.info "OpenChamber LAN web UI is disabled; service is inactive."
+    exec sleep infinity
+fi
+
+OPENCHAMBER_INTERNAL_PORT=3010
+OPENCHAMBER_LAN_PORT=4097
+
+# Point this proxy instance at the OpenChamber process started by the
+# ha-openchamber service and bind it to all interfaces on the mappable port.
+export OPENCHAMBER_INGRESS_HOST="0.0.0.0"
+export OPENCHAMBER_INGRESS_PORT="${OPENCHAMBER_LAN_PORT}"
+export OPENCHAMBER_UPSTREAM_HOST="127.0.0.1"
+export OPENCHAMBER_UPSTREAM_PORT="${OPENCHAMBER_INTERNAL_PORT}"
+# No Home Assistant Ingress session guards this port, so accept LAN clients.
+export OPENCHAMBER_ALLOW_ANY_REMOTE="true"
+
+HOST_PORT=$(bashio::addon.port "${OPENCHAMBER_LAN_PORT}" 2>/dev/null || true)
+
+bashio::log.warning "=============================================="
+bashio::log.warning "  OpenChamber LAN web UI (no Ingress auth)"
+bashio::log.warning "=============================================="
+bashio::log.warning "OpenChamber will be reachable on 0.0.0.0:${OPENCHAMBER_LAN_PORT} inside the container."
+bashio::log.warning "There is no Home Assistant login in front of this port."
+bashio::log.warning "Only map this port on trusted networks. Put it behind a reverse proxy or Cloudflare Access before any remote exposure."
+if bashio::var.has_value "${HOST_PORT}"; then
+    bashio::log.info "Home Assistant port mapping: ${OPENCHAMBER_LAN_PORT}/tcp -> ${HOST_PORT}"
+    bashio::log.info "Open the UI at: http://<home-assistant-host>:${HOST_PORT}/"
+else
+    bashio::log.warning "Home Assistant port mapping for ${OPENCHAMBER_LAN_PORT}/tcp is disabled; the UI is not reachable yet."
+    bashio::log.info "Map ${OPENCHAMBER_LAN_PORT}/tcp in the add-on Network settings, then open http://<home-assistant-host>:<mapped-host-port>/"
+fi
+
+# Wait for the OpenChamber upstream (owned by the ha-openchamber service) to be
+# ready before starting the LAN proxy, so early LAN requests do not 502.
+for _ in $(seq 1 240); do
+    if curl -fsS --max-time 2 "http://127.0.0.1:${OPENCHAMBER_INTERNAL_PORT}/health" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.5
+done
+
+exec node /usr/local/bin/openchamber-ingress-proxy.js

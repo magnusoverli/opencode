@@ -1,0 +1,43 @@
+# =============================================================================
+# Prettier Configuration for Home Assistant YAML
+# Reference: https://developers.home-assistant.io/docs/documenting/yaml-style-guide/
+# =============================================================================
+#
+# Prettier auto-formats YAML files written by OpenCode. This config aligns
+# with the official Home Assistant YAML Style Guide where possible.
+#
+# WHAT PRETTIER ENFORCES:
+#   - 2-space indentation (no tabs)
+#   - Double quotes for strings (HA convention)
+#   - Trailing newline at end of file
+#   - Consistent spacing and formatting
+#   - Preserves HA custom tags (!include, !secret, !input, !env_var)
+#   - Preserves block style sequences and mappings
+#   - Preserves multiline strings (literal | and folded > styles)
+#   - Preserves comments
+#
+# WHAT PRETTIER DOES NOT ENFORCE (must be handled manually or by the AI):
+#   - Converting flow style [1, 2, 3] to block style sequences
+#   - Converting flow style { key: val } to block style mappings
+#   - Normalizing null/~ to implicit null (just "key:" with no value)
+#   - Normalizing truthy booleans (Yes/On/TRUE) to lowercase true/false
+#   - Wrapping long lines (templates, etc.)
+#
+# Users can customize this file. See: https://prettier.io/docs/en/options
+# =============================================================================
+
+# HA YAML Style Guide: "An indentation of 2 spaces must be used"
+tabWidth: 2
+useTabs: false
+
+# HA YAML Style Guide: "Strings are preferably quoted with double quotes"
+singleQuote: false
+
+# Keep printWidth generous to avoid prettier breaking long YAML keys into
+# explicit key notation (?). HA templates can be long but should be manually
+# split using literal (|) or folded (>) block scalars per the style guide.
+printWidth: 120
+
+# Preserve multiline string formatting (literal |, folded >, etc.)
+# HA YAML Style Guide: "make use of the literal style and folded style strings"
+proseWrap: "preserve"

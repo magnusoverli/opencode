@@ -2,7 +2,15 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-**You can install this alongside the stable OpenCode add-on.** Both will appear in the sidebar (as "OpenCode" and "OpenCode Beta") and operate independently.
+**You can install this alongside the stable OpenCode add-on.** Both appear in the sidebar (as "OpenCode" and "OpenCode Beta").
+
+What is separate: each add-on has its own storage, so sessions, credentials, the OpenCode binary and generated context never mix. Decision notes are separate too — beta keeps its at `/config/opencode_beta/decisions.yaml`, and copies your existing notes there once on first start so nothing is lost. Anything you record while testing beta stays out of your stable sessions.
+
+The beta add-on does not write to your configuration directory at all beyond its own notes. In particular it no longer deploys `AGENTS.md` there — that file belongs to the stable add-on, and beta keeps its own copy inside the add-on instead. If you previously ran beta on its own, it removes the copy it left behind, unless you edited it or the stable add-on has since taken it over.
+
+What is shared, because it is your Home Assistant configuration directory and both add-ons work in it: your actual configuration files, and `AGENTS.local.md` — your own instructions, which neither add-on ever writes and both always load.
+
+The `4096`/`4097` ports listed under Network are *container* ports and do not clash between the two add-ons. If you expose both add-ons' LAN ports, give each a different host port.
 
 ## Upstream Attribution
 

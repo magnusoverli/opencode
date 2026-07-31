@@ -63,6 +63,24 @@ jobs:
           echo "openchamber_version=${OPENCHAMBER_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Using OpenChamber ${OPENCHAMBER_VERSION} for beta build"
 
+      - name: Assert this folder really is the beta add-on
+        shell: bash
+        run: |
+          # The two folders ship identical rootfs trees; ADDON_CHANNEL below is
+          # the only thing that makes this image behave as beta. If that arg
+          # ever stopped matching the folder, beta would write into stable's
+          # decision notes and nothing would look wrong until a user noticed.
+          grep -qx 'slug: "ha_opencode_beta"' ha_opencode_beta/config.yaml || {
+            echo "::error::ha_opencode_beta/config.yaml does not declare slug ha_opencode_beta."
+            grep -n "^slug:" ha_opencode_beta/config.yaml
+            exit 1
+          }
+          test -f ha_opencode_beta/Dockerfile || {
+            echo "::error::ha_opencode_beta/Dockerfile is missing — the beta add-on is not self-contained."
+            exit 1
+          }
+          echo "OK: building the beta add-on from ha_opencode_beta/ with ADDON_CHANNEL=beta."
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -76,8 +94,8 @@ jobs:
       - name: Build and push ${{ matrix.ha_arch }} image
         uses: docker/build-push-action@v7
         with:
-          context: ha_opencode
-          file: ha_opencode/Dockerfile
+          context: ha_opencode_beta
+          file: ha_opencode_beta/Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
@@ -87,6 +105,7 @@ jobs:
             BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
             BUILD_VERSION=${{ steps.version.outputs.version }}
             BUILD_ARCH=${{ matrix.ha_arch }}
+            ADDON_CHANNEL=beta
             OPENCHAMBER_VERSION=${{ steps.beta_build_args.outputs.openchamber_version }}
           cache-from: type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
           cache-to: type=gha,mode=max,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}

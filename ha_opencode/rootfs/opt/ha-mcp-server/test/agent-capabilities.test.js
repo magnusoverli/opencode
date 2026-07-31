@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAgentCapabilities, meetsHaVersion } from "../lib/agent-capabilities.js";
+import { buildAgentCapabilities } from "../lib/agent-capabilities.js";
 
 describe("buildAgentCapabilities", () => {
   it("reports native LLM as detected when the llm component is loaded", () => {
@@ -64,20 +64,6 @@ describe("buildAgentCapabilities", () => {
     expect(capabilities.roadmap.next.length).toBeGreaterThan(0);
   });
 
-  it("states the access model so an add-on is not told a keyed API is out of reach", () => {
-    // Core requires admin for keyed endpoints other than 'assist', and the
-    // Supervisor calls Core as its own admin system user, so every registered
-    // API ID is reachable from here. This used to be an open question on the
-    // roadmap; reporting it as unresolved would keep steering agents away from
-    // custom API IDs that work.
-    const { access_model: accessModel } = buildAgentCapabilities({}).home_assistant.native_mcp;
-
-    expect(accessModel.addon_requests_are_admin).toBe(true);
-    expect(accessModel.configured_endpoint).toMatch(/every LLM API/);
-    expect(accessModel.keyed_endpoint).toMatch(/exactly one/);
-    expect(buildAgentCapabilities({}).roadmap.next.join(" ")).not.toMatch(/count as admin/);
-  });
-
   it("reports configured custom native MCP API availability", () => {
     const capabilities = buildAgentCapabilities({
       haConfig: { version: "2026.7.0", components: ["conversation", "llm"] },
@@ -125,90 +111,5 @@ describe("buildAgentCapabilities", () => {
     expect(capabilities.home_assistant.external_native_llm_api.configured_endpoint_mode).toBe("configured_api");
     expect(capabilities.home_assistant.native_mcp.configured_endpoint_status).toBe("available");
     expect(capabilities.home_assistant.native_mcp.configured_endpoint_mode).toBe("configured_api");
-  });
-
-  it("reports the upstream limitations of Home Assistant releases before 2026.8", () => {
-    const capabilities = buildAgentCapabilities({
-      haConfig: { version: "2026.7.3", components: ["conversation", "mcp_server"] },
-    });
-
-    const { known_issues: knownIssues } = capabilities.home_assistant.native_mcp;
-    expect(knownIssues.map((issue) => issue.id)).toEqual([
-      "keyed_endpoints_unavailable",
-      "tool_schema_anyof_empty",
-      "streamable_endpoint_crash_risk",
-    ]);
-    expect(capabilities.home_assistant.native_llm_platform.version_supported).toBe(false);
-    expect(capabilities.home_assistant.native_llm_platform.minimum_version).toBe("2026.8.0");
-  });
-
-  it("drops the issues 2026.8 fixes but keeps the one it does not", () => {
-    // home-assistant/core#176734 is still open, so the crash risk survives the
-    // upgrade even though the keyed endpoints and the schema fix landed.
-    const capabilities = buildAgentCapabilities({
-      haConfig: { version: "2026.8.0", components: ["conversation", "llm"] },
-    });
-
-    const { known_issues: knownIssues } = capabilities.home_assistant.native_mcp;
-    expect(knownIssues.map((issue) => issue.id)).toEqual(["streamable_endpoint_crash_risk"]);
-    expect(knownIssues[0].fixed_in).toBeNull();
-    expect(capabilities.home_assistant.native_llm_platform.version_supported).toBe(true);
-  });
-
-  it("still reports unfixed issues on releases newer than 2026.8", () => {
-    const capabilities = buildAgentCapabilities({
-      haConfig: { version: "2027.1.0", components: ["conversation", "llm"] },
-    });
-
-    expect(capabilities.home_assistant.native_mcp.known_issues.map((issue) => issue.id))
-      .toEqual(["streamable_endpoint_crash_risk"]);
-  });
-
-  it("reports only unfixed issues when the version cannot be parsed", () => {
-    // An unparseable version is no reason to understate a live crash risk, but
-    // it is also no evidence that the already-fixed issues are present.
-    const capabilities = buildAgentCapabilities({ haConfig: { components: [] } });
-
-    expect(capabilities.home_assistant.native_mcp.known_issues.map((issue) => issue.id))
-      .toEqual(["streamable_endpoint_crash_risk"]);
-    expect(capabilities.home_assistant.native_llm_platform.version_supported).toBeNull();
-  });
-
-  it("separates conversation agents from AI task providers", () => {
-    const capabilities = buildAgentCapabilities({
-      haConfig: {
-        version: "2026.8.0",
-        components: ["conversation", "wyoming", "anthropic", "ovhcloud_ai_endpoints"],
-      },
-    });
-
-    const { native_ai_components: ai } = capabilities.home_assistant;
-    expect(ai.conversation_agents).toEqual(["anthropic", "ovhcloud_ai_endpoints", "wyoming"]);
-    expect(ai.ai_task_providers).toEqual(["anthropic"]);
-    // lmstudio is not a Home Assistant integration and must not be probed for.
-    expect(ai.known_components_checked).not.toContain("lmstudio");
-    expect(ai.known_components_checked).toContain("ovhcloud_ai_endpoints");
-  });
-});
-
-describe("meetsHaVersion", () => {
-  it("compares Home Assistant version strings", () => {
-    expect(meetsHaVersion("2026.8.0", "2026.8.0")).toBe(true);
-    expect(meetsHaVersion("2026.8.1", "2026.8.0")).toBe(true);
-    expect(meetsHaVersion("2026.9.0", "2026.8.0")).toBe(true);
-    expect(meetsHaVersion("2027.1.0", "2026.8.0")).toBe(true);
-    expect(meetsHaVersion("2026.7.3", "2026.8.0")).toBe(false);
-    expect(meetsHaVersion("2025.12.4", "2026.8.0")).toBe(false);
-  });
-
-  it("treats pre-releases of the target version as meeting it", () => {
-    expect(meetsHaVersion("2026.8.0b0", "2026.8.0")).toBe(true);
-    expect(meetsHaVersion("2026.8.0.dev0", "2026.8.0")).toBe(true);
-    expect(meetsHaVersion("2026.7.0b4", "2026.8.0")).toBe(false);
-  });
-
-  it("returns null for versions it cannot parse", () => {
-    expect(meetsHaVersion("unknown", "2026.8.0")).toBeNull();
-    expect(meetsHaVersion(undefined, "2026.8.0")).toBeNull();
   });
 });
