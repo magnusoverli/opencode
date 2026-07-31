@@ -576,11 +576,13 @@ The bridge is **off by default**, and Home Assistant does not serve its MCP endp
 
 To confirm it worked, ask OpenCode to run `get_agent_capabilities`: it reports the detected Home Assistant version, which endpoint the bridge resolved to, and any upstream limitations that still apply. In OpenCode you should also see a second MCP server named `homeassistant_native` alongside the built-in `homeassistant` one.
 
-Nothing else is required. In particular, you do **not** need to change the API ID (the `assist` default is the one keyed API that needs no admin access), set any environment variable, or supply an access token — the bridge authenticates with the Supervisor token. If you skip step 1, the bridge starts and every request fails with a 404, which `get_agent_capabilities` will report.
+Nothing else is required. In particular, you do **not** need to change the API ID, set any environment variable, or supply an access token — the bridge authenticates with the Supervisor token. If you skip step 1, the bridge starts and every request fails with a 404, which `get_agent_capabilities` will report.
 
 Once it is on, the bridge handles Home Assistant versions by itself and needs no further attention when you upgrade — including across the 2026.8 boundary, which it picks up without a restart.
 
-Access model from Home Assistant Core: `/api/mcp` serves the API selected in the MCP Server integration and does not require admin access. `/api/mcp/<API ID>` selects a specific registered LLM API by ID and requires admin access except for the built-in Assist API.
+Access model from Home Assistant Core: `/api/mcp` serves **every** LLM API selected in the MCP Server integration — that setting is a multi-select — and needs no admin access. `/api/mcp/<API ID>` narrows to one registered LLM API and requires admin access for every ID except the built-in Assist API.
+
+That admin requirement is not a wall for this add-on. The Supervisor calls Home Assistant Core as its own system user, which Home Assistant creates in the admin group, so **any registered API ID is reachable from here** — including a custom LLM API you register from your own integration. If the bridge reports an unknown API ID, the ID does not exist; it is not an access failure. The `assist` default is simply the API most people want, not the only one you can reach.
 
 The bridge adapts itself to what your Home Assistant actually serves:
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.9b3
+
+A correction to what 2.3.9b2 told you about reaching Home Assistant's keyed MCP endpoints, and the two things that correction makes possible.
+
+- **Keyed API IDs other than `assist` are reachable from the add-on — 2.3.9b2 said they might not be** — Home Assistant requires admin access for every keyed `/api/mcp/<API ID>` endpoint except Assist, and the previous release passed that on as a warning that an add-on may not clear the bar. It does clear it: the Supervisor calls Home Assistant Core as its own system user, and the `hassio` integration creates that user in the admin group. So a custom LLM API registered by your own integration is testable over `/api/mcp/<your API ID>` with no token and no extra configuration. The warning sent people looking for a permission problem that does not exist; an unknown-API-ID error now says plainly that the ID does not exist. `get_agent_capabilities` reports the access model as a field rather than leaving it to be inferred.
+- **`/api/mcp` is a multi-API endpoint, and the documentation now says so** — the API selection in the Model Context Protocol Server integration is a multi-select, and Home Assistant passes the whole list to that endpoint. It was described throughout as serving "the configured API", singular, which understates it: leaving the add-on's API ID empty gives you every API you selected there, and the endpoint fallback can therefore widen the tool surface rather than narrow it.
+- **The bridge sends the `MCP-Protocol-Version` header** — required of MCP clients from protocol revision 2025-06-18 onward. Home Assistant's streamable endpoint is stateless and does not read it today, but the Supervisor proxy forwards the header by name, so sending it costs nothing and keeps the bridge correct if Core starts enforcing it.
+
 ## 2.3.9b2
 
 A crash with no explanation, an option that had stopped meaning what it said, and a native MCP bridge that finally meets the Home Assistant release it was written for.
