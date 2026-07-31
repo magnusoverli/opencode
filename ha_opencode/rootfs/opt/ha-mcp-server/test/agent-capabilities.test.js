@@ -64,6 +64,20 @@ describe("buildAgentCapabilities", () => {
     expect(capabilities.roadmap.next.length).toBeGreaterThan(0);
   });
 
+  it("states the access model so an add-on is not told a keyed API is out of reach", () => {
+    // Core requires admin for keyed endpoints other than 'assist', and the
+    // Supervisor calls Core as its own admin system user, so every registered
+    // API ID is reachable from here. This used to be an open question on the
+    // roadmap; reporting it as unresolved would keep steering agents away from
+    // custom API IDs that work.
+    const { access_model: accessModel } = buildAgentCapabilities({}).home_assistant.native_mcp;
+
+    expect(accessModel.addon_requests_are_admin).toBe(true);
+    expect(accessModel.configured_endpoint).toMatch(/every LLM API/);
+    expect(accessModel.keyed_endpoint).toMatch(/exactly one/);
+    expect(buildAgentCapabilities({}).roadmap.next.join(" ")).not.toMatch(/count as admin/);
+  });
+
   it("reports configured custom native MCP API availability", () => {
     const capabilities = buildAgentCapabilities({
       haConfig: { version: "2026.7.0", components: ["conversation", "llm"] },

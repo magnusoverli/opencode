@@ -19,7 +19,10 @@ describe("Home Assistant LLM development guide", () => {
     expect(guide).toContain("tool_input.tool_args");
     expect(guide).toContain("/api/mcp/<API ID>");
     expect(guide).toContain("/api/mcp");
-    expect(guide).toContain("require admin access except for Assist");
+    expect(guide).toMatch(/admin access for every API ID except `assist`/);
+    // A tool author's next question after "it needs admin" is whether they can
+    // test a custom API from here at all. They can.
+    expect(guide).toMatch(/An add-on clears that bar/);
     expect(guide).toContain("async_get_api_instance");
     expect(guide).toContain("custom_serializer");
   });
