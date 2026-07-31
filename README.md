@@ -98,7 +98,7 @@ OpenCode works with **75+ AI providers**. Choose the one that fits your needs:
 | 🔷 **Azure OpenAI** | GPT-4, GPT-4 Turbo (Azure hosted) |
 | ⚡ **Groq** | Llama 3, Mixtral (ultra-fast inference) |
 | 🎯 **Mistral** | Mistral Large, Mistral Medium, Codestral |
-| 🦙 **Ollama** | Local models (Llama, CodeLlama, Mistral, etc.) |
+| 🦙 **Ollama** | Local models — see the [local model notes](./ha_opencode/DOCS.md#local-models-ollama-and-similar) before choosing hardware |
 | 🌐 **OpenRouter** | 100+ models through single API |
 | 🤝 **Together AI** | Llama, Mixtral, and open models |
 | 🔥 **Fireworks AI** | Fast inference for open models |
@@ -106,6 +106,8 @@ OpenCode works with **75+ AI providers**. Choose the one that fits your needs:
 | 💫 **Deepseek** | Deepseek Coder, Deepseek Chat |
 
 </details>
+
+> **Running models locally?** The add-on sends a large tools-and-instructions prompt on every request. Read the [local model notes](./ha_opencode/DOCS.md#local-models-ollama-and-similar) first — a small model on modest hardware can take minutes per reply.
 
 ### 🎁 **Free Tier - OpenCode Zen**
 
@@ -116,6 +118,8 @@ Simply run `/connect` and select **OpenCode Zen** to get started for free.
 ---
 
 ## 📦 Installation
+
+> ⚙️ **Hardware requirement:** on x86-64, OpenCode needs a CPU with **SSE4.2** (Intel Nehalem/2008 or newer, AMD Bulldozer/2011 or Jaguar/2013 or newer). Older processors cannot run it at all — it exits with `Illegal instruction (core dumped)`. ARM64 is unaffected. See [CPU requirements][cpu-req] for details.
 
 ### Quick Install
 
@@ -259,16 +263,22 @@ We love contributions! Here's how you can help:
 
 Contributions of all kinds are welcome — feel free to open a PR!
 
-### Branches and release channels
+### Release channels
 
-- **`main`** — the stable channel. Tagged `v*`, published as the **OpenCode**
-  add-on.
-- **`dev`** — the beta channel. `main` plus work still soaking. Tagged
+Channels are folders, not branches. Both live on `main`:
+
+- **`ha_opencode/`** — the stable channel. Tagged `v*`, published as the
+  **OpenCode** add-on.
+- **`ha_opencode_beta/`** — the beta channel, for work still soaking. Tagged
   `beta-v*`, published as the **OpenCode Beta** add-on.
 
-Target `dev` for anything experimental; target `main` only for fixes that
-should ship to stable users right away. Full details in
-[RELEASING.md](RELEASING.md).
+Each folder is a complete add-on with its own `Dockerfile` and `rootfs/`, so a
+stable release cannot contain something that only exists in beta. Put
+experimental work in `ha_opencode_beta/`; touch `ha_opencode/` only for changes
+that should reach stable users right away.
+
+Both add-ons can be installed side by side — they keep separate decision notes
+and separate storage. Full details in [RELEASING.md](RELEASING.md).
 
 ---
 
@@ -329,6 +339,7 @@ This distribution also includes third-party software, including OpenCode. Its co
 
 <!-- Links -->
 [docs]: ./ha_opencode/DOCS.md
+[cpu-req]: ./ha_opencode/DOCS.md#cpu-requirements
 [changelog]: ./ha_opencode/CHANGELOG.md
 [issues]: https://github.com/magnusoverli/opencode/issues
 [license]: UNLICENSE

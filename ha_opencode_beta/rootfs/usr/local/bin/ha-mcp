@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# =============================================================================
+# ha-mcp - Helper script to manage the Home Assistant MCP server for OpenCode
+# =============================================================================
+
+set -e
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+CONFIG_FILE="${CONFIG_DIR}/opencode.json"
+TEMPLATE_FILE="/opt/ha-mcp-server/opencode-ha.json"
+
+usage() {
+    echo "Usage: ha-mcp <command>"
+    echo ""
+    echo "Manage the Home Assistant MCP server integration for OpenCode."
+    echo ""
+    echo "Commands:"
+    echo "  enable     Enable the Home Assistant MCP server"
+    echo "  disable    Disable the Home Assistant MCP server"
+    echo "  status     Show current MCP server status"
+    echo "  test       Test the MCP server connection"
+    echo "  help       Show this help message"
+    echo ""
+    echo "When enabled, you can ask OpenCode to interact with Home Assistant:"
+    echo "  - 'What's the state of light.living_room?'"
+    echo "  - 'Turn on the bedroom lights'"
+    echo "  - 'List all temperature sensors'"
+    echo ""
+}
+
+ensure_config() {
+    mkdir -p "$CONFIG_DIR"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        cp "$TEMPLATE_FILE" "$CONFIG_FILE"
+        echo "Created OpenCode config at $CONFIG_FILE"
+    fi
+}
+
+enable_mcp() {
+    ensure_config
+    
+    # Use jq to enable the MCP server
+    if command -v jq &> /dev/null; then
+        jq '.mcp.homeassistant.enabled = true' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && \
+            mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+        echo "Home Assistant MCP server enabled!"
+        echo ""
+        echo "Restart OpenCode for changes to take effect."
+        echo "Then you can ask OpenCode to interact with Home Assistant."
+    else
+        echo "Error: jq is required but not installed"
+        exit 1
+    fi
+}
+
+disable_mcp() {
+    ensure_config
+    
+    if command -v jq &> /dev/null; then
+        jq '.mcp.homeassistant.enabled = false' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && \
+            mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+        echo "Home Assistant MCP server disabled."
+        echo ""
+        echo "Restart OpenCode for changes to take effect."
+    else
+        echo "Error: jq is required but not installed"
+        exit 1
+    fi
+}
+
+show_status() {
+    ensure_config
+    
+    if command -v jq &> /dev/null; then
+        local enabled
+        enabled=$(jq -r '.mcp.homeassistant.enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")
+        
+        if [ "$enabled" = "true" ]; then
+            echo "Home Assistant MCP server: ENABLED"
+        else
+            echo "Home Assistant MCP server: DISABLED"
+        fi
+        echo ""
+        echo "Config file: $CONFIG_FILE"
+    else
+        echo "Error: jq is required but not installed"
+        exit 1
+    fi
+}
+
+test_mcp() {
+    if [ -z "$SUPERVISOR_TOKEN" ]; then
+        echo "Error: SUPERVISOR_TOKEN not set. This script must run inside the app."
+        exit 1
+    fi
+    
+    echo "Testing Home Assistant API connection..."
+    
+    local response
+    response=$(curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        "http://supervisor/core/api/")
+    
+    if [ "$response" = "200" ] || [ "$response" = "201" ]; then
+        echo "API connection successful!"
+        echo ""
+        echo "Testing MCP server..."
+        
+        # Test MCP server by sending initialize request and checking response
+        # Uses timeout to prevent hanging, sends proper MCP JSON-RPC initialize
+        local mcp_response
+        mcp_response=$(echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | \
+            timeout 10s node /opt/ha-mcp-server/index.js 2>&1 | head -1)
+        
+        if echo "$mcp_response" | grep -q '"result"'; then
+            echo "MCP server is ready."
+            # Try to extract server info
+            local server_name
+            server_name=$(echo "$mcp_response" | jq -r '.result.serverInfo.name // "unknown"' 2>/dev/null || echo "unknown")
+            local server_version
+            server_version=$(echo "$mcp_response" | jq -r '.result.serverInfo.version // "unknown"' 2>/dev/null || echo "unknown")
+            echo "Server: $server_name v$server_version"
+        elif echo "$mcp_response" | grep -q 'Error\|error\|Cannot find'; then
+            echo "MCP server failed to start:"
+            echo "$mcp_response"
+            exit 1
+        else
+            echo "MCP server test completed (unexpected response)."
+            echo "Response: $mcp_response"
+        fi
+    else
+        echo "Error: API connection failed (HTTP $response)"
+        exit 1
+    fi
+}
+
+case "${1:-}" in
+    enable)
+        enable_mcp
+        ;;
+    disable)
+        disable_mcp
+        ;;
+    status)
+        show_status
+        ;;
+    test)
+        test_mcp
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        if [ -z "$1" ]; then
+            usage
+        else
+            echo "Error: Unknown command '$1'"
+            echo ""
+            usage
+            exit 1
+        fi
+        ;;
+esac

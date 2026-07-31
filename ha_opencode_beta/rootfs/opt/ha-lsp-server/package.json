@@ -1,0 +1,34 @@
+{
+  "name": "ha-lsp-server",
+  "version": "1.0.0",
+  "description": "Home Assistant Language Server Protocol server for OpenCode - provides intelligent editing features for HA YAML configurations",
+  "type": "module",
+  "main": "server.js",
+  "bin": {
+    "ha-lsp-server": "./server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "home-assistant",
+    "lsp",
+    "language-server",
+    "yaml",
+    "opencode"
+  ],
+  "devDependencies": {
+    "vitest": "^3.1.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "yaml": "^2.4.5"
+  },
+  "author": "OpenCode App",
+  "license": "Unlicense"
+}

@@ -4,11 +4,17 @@
 # Runs once at container startup to prepare the environment
 # ==============================================================================
 
-bashio::log.info "Initializing OpenCode..."
+# Which release channel this image is, and which paths in the shared
+# configuration directory belong to it.
+# shellcheck source=/usr/local/lib/opencode/channel.sh
+source /usr/local/lib/opencode/channel.sh
+
+bashio::log.info "Initializing ${ADDON_CHANNEL_LABEL} (${ADDON_CHANNEL} channel)..."
 
 # Save addon version for the terminal banner
 ADDON_VERSION=$(bashio::addon.version)
 printf '%s\n' "${ADDON_VERSION}" > /data/.addon_version
+printf '%s\n' "${ADDON_CHANNEL}" > /data/.addon_channel
 
 # ==============================================================================
 # Read configuration options
@@ -521,7 +527,34 @@ else
 fi
 
 # ==============================================================================
-# Deploy AGENTS.md to Home Assistant config directory
+# Carry decision notes over to this channel's own directory (one time)
+#
+# Notes live in the configuration directory so they survive a reinstall and are
+# included in Home Assistant backups. That directory is mounted by both add-ons,
+# so each channel now keeps its own set: a note recorded while trying something
+# out in beta must not be injected into every stable session for good.
+#
+# Beta previously shared stable's directory. Copy the notes across once so an
+# existing beta user does not open the add-on to an empty history. Copy rather
+# than move — stable may be installed too, and those notes are equally its own.
+# The directory itself is created lazily by the MCP server when the first note
+# is recorded, so nothing is created here unless there is something to carry.
+# ==============================================================================
+
+LEGACY_NOTES="/homeassistant/opencode/decisions.yaml"
+if [ "${ADDON_STATE_DIR}" != "/homeassistant/opencode" ] \
+    && [ ! -f "${ADDON_STATE_DIR}/decisions.yaml" ] \
+    && [ -f "${LEGACY_NOTES}" ]; then
+    if mkdir -p "${ADDON_STATE_DIR}" && cp "${LEGACY_NOTES}" "${ADDON_STATE_DIR}/decisions.yaml"; then
+        bashio::log.info "Copied your existing decision notes into ${ADDON_STATE_DIR}"
+        bashio::log.info "Each channel keeps its own notes now; the stable add-on still has ${LEGACY_NOTES}"
+    else
+        bashio::log.warning "Could not copy existing decision notes into ${ADDON_STATE_DIR} - starting empty"
+    fi
+fi
+
+# ==============================================================================
+# Deploy this channel's AGENTS.md
 # On first install: copy the full file
 # On update: refresh only when the deployed copy is byte-for-byte what this
 # add-on last wrote, so user edits are never overwritten.
@@ -534,20 +567,52 @@ fi
 #
 # A fresh help stamp means the deployed copy already has current help injected,
 # so both the refresh-copy and the injection passes are skipped.
+#
+# WHERE it is deployed depends on the channel — see channel.sh. Stable owns
+# /homeassistant/AGENTS.md; beta keeps its copy in /data and has OpenCode load
+# it through `instructions` instead, because only one file in the configuration
+# directory can carry the name OpenCode looks for.
 # ==============================================================================
 
-AGENTS_TARGET="/homeassistant/AGENTS.md"
-AGENTS_HASH_FILE="/data/.agents_md_hash"
+AGENTS_TARGET="${ADDON_AGENTS_FILE}"
+AGENTS_HASH_FILE="${ADDON_AGENTS_MARKER}"
+AGENTS_LEGACY_HASH_FILE="/data/.agents_md_hash"
 AGENTS_REFRESHED=false
 
 agents_md_hash() {
     sha256sum "$1" 2>/dev/null | cut -d' ' -f1
 }
 
+mkdir -p "$(dirname "${AGENTS_TARGET}")"
+
+if [ "${ADDON_AGENTS_IN_CONFIG_DIR}" = "true" ]; then
+    # The marker used to live in /data, which is wiped on reinstall while the
+    # configuration directory is not — so a reinstall looked like a hand edit
+    # and left a spurious .bak. Carry the old value over once.
+    if [ ! -f "${AGENTS_HASH_FILE}" ] && [ -f "${AGENTS_LEGACY_HASH_FILE}" ]; then
+        if cp "${AGENTS_LEGACY_HASH_FILE}" "${AGENTS_HASH_FILE}" 2>/dev/null; then
+            bashio::log.info "Migrated the AGENTS.md ownership marker into the configuration directory"
+        fi
+    fi
+else
+    # This channel no longer deploys to the configuration directory, but older
+    # versions of it did. Remove that leftover only when it is byte-for-byte
+    # what THIS add-on last wrote: any other content is either the user's own
+    # edit or the stable add-on's file, and neither is ours to delete.
+    LEGACY_CONFIG_AGENTS="/homeassistant/AGENTS.md"
+    if [ -f "${LEGACY_CONFIG_AGENTS}" ] && [ -f "${AGENTS_LEGACY_HASH_FILE}" ]; then
+        if [ "$(agents_md_hash "${LEGACY_CONFIG_AGENTS}")" = "$(cat "${AGENTS_LEGACY_HASH_FILE}" 2>/dev/null || echo "")" ]; then
+            rm -f "${LEGACY_CONFIG_AGENTS}"
+            bashio::log.info "Removed this add-on's old AGENTS.md from the configuration directory"
+            bashio::log.info "Its instructions now load from inside the add-on, so the stable add-on owns that file"
+        fi
+    fi
+fi
+
 if [ ! -f "${AGENTS_TARGET}" ]; then
     cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
     AGENTS_REFRESHED=true
-    bashio::log.info "Deployed default AGENTS.md to /homeassistant/"
+    bashio::log.info "Deployed default AGENTS.md to ${AGENTS_TARGET}"
     bashio::log.info "Add your own instructions in /homeassistant/AGENTS.local.md - it is loaded too and never overwritten"
 elif [ "${HELP_STAMP_FRESH}" = "true" ]; then
     bashio::log.info "AGENTS.md is current (addon version unchanged) - skipping refresh"
@@ -589,8 +654,8 @@ fi
 # Only runs when AGENTS.md was (re)deployed this boot.
 # ==============================================================================
 
-if [ "${AGENTS_REFRESHED}" = "true" ] && command -v hab &>/dev/null && [ -f "/homeassistant/AGENTS.md" ]; then
-    if grep -q "<!-- HAB_LIVE_HELP_START -->" /homeassistant/AGENTS.md 2>/dev/null; then
+if [ "${AGENTS_REFRESHED}" = "true" ] && command -v hab &>/dev/null && [ -f "${AGENTS_TARGET}" ]; then
+    if grep -q "<!-- HAB_LIVE_HELP_START -->" "${AGENTS_TARGET}" 2>/dev/null; then
         HAB_HELP_OUTPUT=$(hab --help 2>/dev/null || echo "")
         if [ -n "${HAB_HELP_OUTPUT}" ]; then
             printf '%s\n' "${HAB_HELP_OUTPUT}" > /tmp/hab_help.txt
@@ -609,8 +674,8 @@ if [ "${AGENTS_REFRESHED}" = "true" ] && command -v hab &>/dev/null && [ -f "/ho
                     next
                 }
                 !skip { print }
-            ' /homeassistant/AGENTS.md > /tmp/agents_tmp \
-                && mv /tmp/agents_tmp /homeassistant/AGENTS.md
+            ' "${AGENTS_TARGET}" > /tmp/agents_tmp \
+                && mv /tmp/agents_tmp "${AGENTS_TARGET}"
             rm -f /tmp/hab_help.txt
             bashio::log.info "Injected live hab help (v${HAB_VERSION}) into AGENTS.md"
         fi
@@ -623,8 +688,8 @@ fi
 # so the AI always sees the exact commands available in the installed version.
 # ==============================================================================
 
-if [ "${AGENTS_REFRESHED}" = "true" ] && command -v zigporter &>/dev/null && [ -f "/homeassistant/AGENTS.md" ]; then
-    if grep -q "<!-- ZIGPORTER_LIVE_HELP_START -->" /homeassistant/AGENTS.md 2>/dev/null; then
+if [ "${AGENTS_REFRESHED}" = "true" ] && command -v zigporter &>/dev/null && [ -f "${AGENTS_TARGET}" ]; then
+    if grep -q "<!-- ZIGPORTER_LIVE_HELP_START -->" "${AGENTS_TARGET}" 2>/dev/null; then
         ZIGPORTER_HELP_OUTPUT=$(zigporter --help 2>/dev/null || echo "")
         if [ -n "${ZIGPORTER_HELP_OUTPUT}" ]; then
             printf '%s\n' "${ZIGPORTER_HELP_OUTPUT}" > /tmp/zigporter_help.txt
@@ -643,8 +708,8 @@ if [ "${AGENTS_REFRESHED}" = "true" ] && command -v zigporter &>/dev/null && [ -
                     next
                 }
                 !skip { print }
-            ' /homeassistant/AGENTS.md > /tmp/agents_tmp \
-                && mv /tmp/agents_tmp /homeassistant/AGENTS.md
+            ' "${AGENTS_TARGET}" > /tmp/agents_tmp \
+                && mv /tmp/agents_tmp "${AGENTS_TARGET}"
             rm -f /tmp/zigporter_help.txt
             bashio::log.info "Injected live zigporter help (v${ZIGPORTER_VERSION}) into AGENTS.md"
         fi
@@ -698,7 +763,16 @@ FOCUS_BOOL=$([ "${FOCUS_MODE}" = "true" ] && echo "true" || echo "false")
 BRIEFING_BOOL=$([ "${HOME_BRIEFING_ENABLED}" = "true" ] && echo "true" || echo "false")
 NOTES_BOOL=$([ "${DECISION_NOTES_ENABLED}" = "true" ] && echo "true" || echo "false")
 
-jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" --argjson restrict "${RESTRICT_BOOL}" --argjson focus "${FOCUS_BOOL}" --argjson briefing "${BRIEFING_BOOL}" --argjson notes "${NOTES_BOOL}" '
+# Stable's AGENTS.md sits in the working directory, where OpenCode finds it by
+# convention and listing it again would load it twice. Beta's lives in /data
+# precisely so it is not in the configuration directory, so it has to be named
+# explicitly or it is never read.
+CHANNEL_AGENTS_INSTRUCTION=""
+if [ "${ADDON_AGENTS_IN_CONFIG_DIR}" != "true" ]; then
+    CHANNEL_AGENTS_INSTRUCTION="${ADDON_AGENTS_FILE}"
+fi
+
+jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --arg channel_agents "${CHANNEL_AGENTS_INSTRUCTION}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" --argjson restrict "${RESTRICT_BOOL}" --argjson focus "${FOCUS_BOOL}" --argjson briefing "${BRIEFING_BOOL}" --argjson notes "${NOTES_BOOL}" '
     .mcp.homeassistant.enabled = $mcp |
     .mcp.homeassistant.environment.HA_NATIVE_MCP_API_ID = $native_ha_mcp_api_id |
     .mcp.homeassistant_native.enabled = ($mcp and $native_ha_mcp) |
@@ -724,6 +798,9 @@ jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --argjson mcp "${MCP_BOO
     else . end |
     if $notes then
         .instructions = ((.instructions // []) + ["/data/context/decision-notes.md"])
+    else . end |
+    if ($channel_agents | length) > 0 then
+        .instructions = ((.instructions // []) + [$channel_agents])
     else . end |
     .instructions = ((.instructions // []) + ["/homeassistant/AGENTS.local.md"]) |
     if $ppq then

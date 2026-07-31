@@ -284,6 +284,42 @@ async function callSupervisor(endpoint, method = "GET", body = null, timeoutMs =
   return response.text();
 }
 
+/**
+ * The slug of the add-on this server is running inside.
+ *
+ * This cannot be a literal. It differs per channel (`…_ha_opencode` versus
+ * `…_ha_opencode_beta`) and its prefix depends on how the repository was added
+ * — `local_` for a local folder, a repository hash otherwise. The guard that
+ * uses it stops the agent from tearing down its own container mid-session, so a
+ * literal that matches only one channel silently disables the guard everywhere
+ * else.
+ *
+ * Resolved once and cached; the answer cannot change while the process lives.
+ */
+let selfAddonSlug;
+async function getSelfAddonSlug() {
+  if (selfAddonSlug !== undefined) return selfAddonSlug;
+  try {
+    const info = await callSupervisor("/addons/self/info");
+    selfAddonSlug = info?.slug || null;
+  } catch (e) {
+    sendLog("warning", "updates", { action: "self_slug_lookup_failed", error: e.message });
+    selfAddonSlug = null;
+  }
+  return selfAddonSlug;
+}
+
+/**
+ * Conservative fallback for when Supervisor would not tell us our own slug.
+ * Matches this add-on under either channel and any repository prefix. It can
+ * refuse an update of the *other* channel's add-on, which is a legitimate
+ * operation — but declining to press the button is the safe way to be wrong
+ * here, and the Home Assistant UI can always do it.
+ */
+function looksLikeThisAddon(slug) {
+  return /(^|_)ha_opencode(_beta)?$/.test(slug || "");
+}
+
 async function getErrorLogWithFallback(lines) {
   return readErrorLogWithFallback({
     readErrorLog: () => callHA("/error_log"),
@@ -5066,9 +5102,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { component, addon_slug, backup = true } = args;
         sendLog("notice", "updates", { action: "initiate_update", component, addon_slug, backup });
         
-        // Prevent self-update
-        if (component === "addon" && addon_slug === "local_ha_opencode") {
-          throw new Error("Cannot update OpenCode from within itself. The container will be stopped during update. Please use the Home Assistant UI to update this app.");
+        // Prevent self-update. Supervisor runs the update, so the pull itself
+        // survives — but it stops this container to do it, which kills the
+        // session that asked, before any progress or job id can come back.
+        if (component === "addon") {
+          const ownSlug = await getSelfAddonSlug();
+          const isSelf = ownSlug ? addon_slug === ownSlug : looksLikeThisAddon(addon_slug);
+          if (isSelf) {
+            throw new Error("Cannot update OpenCode from within itself. The container will be stopped during update. Please use the Home Assistant UI to update this app.");
+          }
         }
         
         let endpoint;

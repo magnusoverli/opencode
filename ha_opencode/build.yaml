@@ -1,11 +1,14 @@
 ---
-# NOTE: nothing in this file reaches a published stable image. CI
-# (.github/workflows/build.yaml) passes only BUILD_FROM, BUILD_VERSION and
-# BUILD_ARCH; every pin below resolves from the ARG defaults in
-# ha_opencode/Dockerfile instead. Home Assistant does not read this file
-# either, because config.yaml sets `image:`. The values are kept in sync with
-# the Dockerfile for documentation only — to change one for real, edit
-# ha_opencode/Dockerfile. See RELEASING.md.
+# NOTE: OPENCHAMBER_VERSION below IS read by CI (.github/workflows/build.yaml
+# scrapes it with sed and passes it as a build arg), so editing it changes what
+# gets built. It is a per-channel pin: the two channels build from identical
+# Dockerfiles, so anything allowed to differ between them has to arrive as a
+# build arg rather than an ARG default.
+#
+# Every other pin below is still inert and resolves from the ARG defaults in
+# ha_opencode/Dockerfile — to change one of those for real, edit the Dockerfile.
+# Home Assistant does not read this file at all, because config.yaml sets
+# `image:`. See RELEASING.md.
 #
 # Using Debian Trixie base for latest packages and glibc compatibility
 # (opencode-ai ships pre-compiled native binaries that require glibc)

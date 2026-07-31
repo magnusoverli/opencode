@@ -1,0 +1,6542 @@
+#!/usr/bin/env node
+/**
+ * Home Assistant MCP Server for OpenCode (Agent Capability Edition v2.8)
+ * 
+ * A cutting-edge MCP server providing deep integration with Home Assistant.
+ * Tracks current MCP server primitives (latest published spec: 2025-11-25)
+ * while preserving OpenCode client compatibility:
+ * 
+ * - Structured tool output with outputSchema
+ * - Tool annotations (destructive, idempotent, etc.)
+ * - Human-readable title fields
+ * - Resource links in tool results
+ * - Logging capability for debugging
+ * - Content annotations (audience/priority)
+ * - Live documentation fetching
+ * - Breaking changes awareness
+ * - Deprecation pattern detection (shared DB with remote GitHub updates)
+ * - Real-time update progress monitoring
+ * - ESPHome build and flash integration
+ * - Visual firmware update monitoring with timeline
+ * - Safe config writing with automatic validation and backup/restore
+ * - Jinja2 template pre-validation through HA's engine
+ * - Structural YAML validation for automations, scripts, templates
+ * - HA Repairs API integration (instance-specific deprecation warnings)
+ * - HA Alerts feed integration (global integration issue awareness)
+ * - Visual verification via headless Chromium screenshots
+ * 
+ * TOOLS (41):
+ * - Entity state management (get, search, history)
+ * - Service calls with intelligent targeting
+ * - Configuration validation and safe writing
+ * - Jinja2 template validation through HA's engine
+ * - Calendar, logbook, and history access
+ * - Anomaly detection and suggestions
+ * - Documentation fetching and syntax checking
+ * - Update management with real-time progress monitoring
+ * - ESPHome device management, compile, and upload
+ * - Visual verification screenshots of HA frontend pages
+ * 
+ * RESOURCES (10 + 4 templates):
+ * - Live entity states by domain
+ * - Automations, scripts, and scenes
+ * - Area and device mappings
+ * - System configuration
+ * 
+ * PROMPTS (6):
+ * - Troubleshooting workflows
+ * - Automation creation guides
+ * - Energy optimization analysis
+ * - Scene building assistance
+ * 
+ * Environment variables:
+ * - SUPERVISOR_TOKEN: The Home Assistant Supervisor token (auto-provided in app)
+ */
+
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  SetLevelRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import WebSocket from "ws";
+import { readFileSync, writeFileSync, copyFileSync, unlinkSync, existsSync, mkdirSync, renameSync } from "fs";
+import { createHash } from "crypto";
+import { execFile } from "child_process";
+import { dirname, join, resolve, isAbsolute, normalize } from "path";
+import { fileURLToPath } from "url";
+
+// Extracted pure-function modules (testable in isolation)
+import { detectAnomaly, searchEntities, generateSuggestions, generateStateSummary } from "./lib/intelligence.js";
+import { validateYamlStructure, resolveConfigPath } from "./lib/validation.js";
+import { extractContentFromHtml, extractConfigurationSection, extractYamlExamples } from "./lib/html-parser.js";
+import {
+  createCompactPayload,
+  createJsonTextContent,
+  createTextContent,
+  createImageContent,
+  createResourceLink,
+  truncateLines,
+  truncateText,
+} from "./lib/helpers.js";
+import { buildAgentCapabilities } from "./lib/agent-capabilities.js";
+import { buildHaLlmDevelopmentGuide } from "./lib/ha-llm-development.js";
+import {
+  NATIVE_MCP_ASSIST_API_ID,
+  normalizeNativeMcpApiId,
+  probeNativeMcpEndpoint,
+} from "./lib/ha-native-mcp.js";
+import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
+import {
+  buildServiceCallPath,
+  listResponseCapableServices,
+  planServiceCall,
+  readAffectedEntities,
+  readResponseMismatch,
+  readServiceResponseSupport,
+  splitServiceCallResult,
+} from "./lib/service-response.js";
+import { extractSecretValues } from "./lib/context-budget.js";
+import {
+  DECISION_NOTES_DIR,
+  DECISION_NOTES_PATH,
+  LIMITS as DECISION_LIMITS,
+  activeNotes,
+  addNote,
+  parseDecisionNotes,
+  renderDecisionDigest,
+  screenNotesForSecrets,
+  searchNoteMatches,
+  supersedeNotes,
+} from "./lib/decision-notes.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const SUPERVISOR_API = "http://supervisor/core/api";
+const HA_CONFIG_DIR = "/homeassistant";
+const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
+const HA_ACCESS_TOKEN = process.env.HA_ACCESS_TOKEN;   // Long-lived token for direct HA Core calls
+const HA_NATIVE_MCP_API_ID = normalizeNativeMcpApiId(
+  process.env.HA_NATIVE_MCP_API_ID ?? NATIVE_MCP_ASSIST_API_ID,
+  { allowBaseEndpoint: true }
+);
+
+// Clear error message when ESPHome tools are used without an access token
+const ESPHOME_TOKEN_ERROR = "ESPHome tools require a Long-Lived Access Token.\n\n" +
+  "To configure:\n" +
+  "1. Go to your Home Assistant Profile page (click your user icon)\n" +
+  "2. Scroll to Long-Lived Access Tokens and create one\n" +
+  "3. Go to Settings â†’ Add-ons â†’ OpenCode â†’ Configuration\n" +
+  "4. Paste the token into the 'access_token' field\n" +
+  "5. Restart the OpenCode add-on (with ESPHome already running)";
+
+// Decision notes: the durable "why" behind this installation's configuration.
+// Recorded only with the user's explicit approval; see lib/decision-notes.js.
+const DECISION_NOTES_ENABLED = process.env.OPENCODE_DECISION_NOTES === "true";
+
+const DECISION_NOTES_DISABLED_ERROR =
+  "Decision notes are turned off.\n\n" +
+  "To enable them:\n" +
+  "1. Go to Settings → Add-ons → OpenCode → Configuration\n" +
+  "2. Enable 'Decision notes'\n" +
+  "3. Restart the add-on";
+
+// Screenshot feature (visual verification of dashboards and UI)
+const SCREENSHOT_ENABLED = process.env.SCREENSHOT_ENABLED === "true";
+const CHROMIUM_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium";
+
+const SCREENSHOT_DISABLED_ERROR = "Screenshot tool is disabled.\n\n" +
+  "To enable visual verification:\n" +
+  "1. Go to Settings â†’ Add-ons â†’ OpenCode â†’ Configuration\n" +
+  "2. Enable 'Screenshot tool'\n" +
+  "3. Set a Long-Lived Access Token (Profile â†’ Long-Lived Access Tokens)\n" +
+  "4. Restart the OpenCode add-on";
+
+const SCREENSHOT_TOKEN_ERROR = "Screenshot tool requires a Long-Lived Access Token.\n\n" +
+  "To configure:\n" +
+  "1. Go to your Home Assistant Profile page (click your user icon)\n" +
+  "2. Scroll to Long-Lived Access Tokens and create one\n" +
+  "3. Go to Settings â†’ Add-ons â†’ OpenCode â†’ Configuration\n" +
+  "4. Paste the token into the 'access_token' field\n" +
+  "5. Restart the OpenCode add-on";
+
+// Home Assistant documentation base URLs
+const HA_DOCS_BASE = "https://www.home-assistant.io";
+const HA_INTEGRATIONS_URL = `${HA_DOCS_BASE}/integrations`;
+const HA_BLOG_URL = `${HA_DOCS_BASE}/blog`;
+
+if (!SUPERVISOR_TOKEN) {
+  console.error("Error: SUPERVISOR_TOKEN environment variable is required");
+  process.exit(1);
+}
+
+// ============================================================================
+// LOGGING SYSTEM
+// ============================================================================
+
+let currentLogLevel = "info";
+const LOG_LEVELS = ["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"];
+
+function getLogLevelIndex(level) {
+  return LOG_LEVELS.indexOf(level);
+}
+
+function shouldLog(level) {
+  return getLogLevelIndex(level) >= getLogLevelIndex(currentLogLevel);
+}
+
+function sendLog(level, logger, data) {
+  if (shouldLog(level)) {
+    // Log notifications are sent via server.notification
+    // For now, we log to stderr which the client can capture
+    console.error(JSON.stringify({
+      type: "log",
+      level,
+      logger,
+      data,
+      timestamp: new Date().toISOString(),
+    }));
+  }
+}
+
+// ============================================================================
+// HOME ASSISTANT API HELPERS
+// ============================================================================
+
+// Default timeout for local Supervisor/HA calls; long-running operations
+// (check_config, updates) pass explicit overrides
+const API_TIMEOUT_MS = 30000;
+const CHECK_CONFIG_TIMEOUT_MS = 120000;
+const UPDATE_TIMEOUT_MS = 600000;
+const NATIVE_MCP_PROBE_TIMEOUT_MS = 5000;
+
+/**
+ * Call Home Assistant via Supervisor API proxy
+ * Used for most endpoints that are proxied through supervisor
+ */
+async function callHA(endpoint, method = "GET", body = null, timeoutMs = API_TIMEOUT_MS) {
+  sendLog("debug", "ha-api", { action: "request", endpoint, method });
+
+  const options = {
+    method,
+    headers: {
+      "Authorization": `Bearer ${SUPERVISOR_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  };
+
+  if (body) {
+    options.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(`${SUPERVISOR_API}${endpoint}`, options);
+  
+  if (!response.ok) {
+    const text = await response.text();
+    sendLog("error", "ha-api", { action: "error", endpoint, status: response.status, error: text });
+    throw Object.assign(new Error(`HA API error (${response.status}): ${text}`), { status: response.status });
+  }
+
+  const contentType = response.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) {
+    const result = await response.json();
+    sendLog("debug", "ha-api", { action: "response", endpoint, success: true });
+    return result;
+  }
+  return response.text();
+}
+
+/**
+ * Call Home Assistant Supervisor API directly
+ * Used for add-on management, updates, jobs, and system operations
+ */
+async function callSupervisor(endpoint, method = "GET", body = null, timeoutMs = API_TIMEOUT_MS) {
+  sendLog("debug", "supervisor-api", { action: "request", endpoint, method });
+
+  const options = {
+    method,
+    headers: {
+      "Authorization": `Bearer ${SUPERVISOR_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  };
+
+  if (body) {
+    options.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(`http://supervisor${endpoint}`, options);
+  
+  if (!response.ok) {
+    const text = await response.text();
+    sendLog("error", "supervisor-api", { action: "error", endpoint, status: response.status, error: text });
+    throw new Error(`Supervisor API error (${response.status}): ${text}`);
+  }
+
+  const contentType = response.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) {
+    const result = await response.json();
+    sendLog("debug", "supervisor-api", { action: "response", endpoint, success: true });
+    // Supervisor API wraps data in { result: "ok", data: {...} }
+    return result.data !== undefined ? result.data : result;
+  }
+  return response.text();
+}
+
+/**
+ * The slug of the add-on this server is running inside.
+ *
+ * This cannot be a literal. It differs per channel (`…_ha_opencode` versus
+ * `…_ha_opencode_beta`) and its prefix depends on how the repository was added
+ * — `local_` for a local folder, a repository hash otherwise. The guard that
+ * uses it stops the agent from tearing down its own container mid-session, so a
+ * literal that matches only one channel silently disables the guard everywhere
+ * else.
+ *
+ * Resolved once and cached; the answer cannot change while the process lives.
+ */
+let selfAddonSlug;
+async function getSelfAddonSlug() {
+  if (selfAddonSlug !== undefined) return selfAddonSlug;
+  try {
+    const info = await callSupervisor("/addons/self/info");
+    selfAddonSlug = info?.slug || null;
+  } catch (e) {
+    sendLog("warning", "updates", { action: "self_slug_lookup_failed", error: e.message });
+    selfAddonSlug = null;
+  }
+  return selfAddonSlug;
+}
+
+/**
+ * Conservative fallback for when Supervisor would not tell us our own slug.
+ * Matches this add-on under either channel and any repository prefix. It can
+ * refuse an update of the *other* channel's add-on, which is a legitimate
+ * operation — but declining to press the button is the safe way to be wrong
+ * here, and the Home Assistant UI can always do it.
+ */
+function looksLikeThisAddon(slug) {
+  return /(^|_)ha_opencode(_beta)?$/.test(slug || "");
+}
+
+async function getErrorLogWithFallback(lines) {
+  return readErrorLogWithFallback({
+    readErrorLog: () => callHA("/error_log"),
+    readCoreLogs: (count) => callSupervisor(`/core/logs?lines=${encodeURIComponent(count)}`),
+    lines,
+  });
+}
+
+// Short-lived cache for the full state dump â€” many tools fetch /states and
+// filter in JS; this collapses repeat fetches within a burst of agent calls
+const statesCache = { data: null, fetchedAt: 0, inflight: null };
+const STATES_CACHE_TTL = 3000;
+
+async function getCachedStates() {
+  const now = Date.now();
+  if (statesCache.data && (now - statesCache.fetchedAt) < STATES_CACHE_TTL) {
+    return statesCache.data;
+  }
+  if (statesCache.inflight) {
+    return statesCache.inflight;
+  }
+  statesCache.inflight = callHA("/states")
+    .then((states) => {
+      statesCache.data = states;
+      statesCache.fetchedAt = Date.now();
+      return states;
+    })
+    .finally(() => { statesCache.inflight = null; });
+  return statesCache.inflight;
+}
+
+function invalidateStatesCache() {
+  statesCache.data = null;
+  statesCache.fetchedAt = 0;
+}
+
+// The service catalog changes only when an integration is set up or reloaded,
+// but every call_service now reads it to decide about `return_response`. Cache
+// it so that check costs nothing on the common path.
+const servicesCache = { data: null, fetchedAt: 0, inflight: null };
+const SERVICES_CACHE_TTL = 300000; // 5 minutes
+
+async function getCachedServices() {
+  const now = Date.now();
+  if (servicesCache.data && (now - servicesCache.fetchedAt) < SERVICES_CACHE_TTL) {
+    return servicesCache.data;
+  }
+  if (servicesCache.inflight) {
+    return servicesCache.inflight;
+  }
+  servicesCache.inflight = callHA("/services")
+    .then((services) => {
+      servicesCache.data = services;
+      servicesCache.fetchedAt = Date.now();
+      return services;
+    })
+    .finally(() => { servicesCache.inflight = null; });
+  return servicesCache.inflight;
+}
+
+function invalidateServicesCache() {
+  servicesCache.data = null;
+  servicesCache.fetchedAt = 0;
+}
+
+/**
+ * Read the catalog without letting its absence break a service call.
+ *
+ * A call that would have worked should not fail because the lookup that only
+ * informs it did; callers fall back to Home Assistant's own error, which says
+ * exactly which way the `return_response` flag was wrong.
+ */
+async function getServiceCatalogSafely() {
+  try {
+    return await getCachedServices();
+  } catch (error) {
+    sendLog("debug", "ha-service", { action: "catalog_unavailable", error: error.message });
+    return null;
+  }
+}
+
+// ============================================================================
+// HA CORE URL DISCOVERY
+// ============================================================================
+
+/**
+ * Discover the Home Assistant Core frontend URL.
+ *
+ * Tries internal_url / external_url from /api/config first, then falls back
+ * to network interface discovery via the Supervisor API.
+ *
+ * @returns {Promise<string>} The HA Core URL (e.g. "http://192.168.1.100:8123")
+ * @throws {Error} If the URL cannot be determined
+ */
+// The HA Core URL changes essentially never â€” cache it across calls
+const haCoreUrlCache = { url: null, fetchedAt: 0 };
+const HA_CORE_URL_TTL = 600000; // 10 minutes
+
+async function discoverHACoreUrl() {
+  if (haCoreUrlCache.url && (Date.now() - haCoreUrlCache.fetchedAt) < HA_CORE_URL_TTL) {
+    return haCoreUrlCache.url;
+  }
+
+  let haConfig;
+  try {
+    haConfig = await callHA("/config");
+  } catch (e) {
+    throw new Error(`Failed to get HA config: ${e.message}`);
+  }
+
+  let haCoreUrl = (haConfig.internal_url || haConfig.external_url || "").replace(/\/+$/, "");
+
+  if (!haCoreUrl) {
+    // internal_url is "automatic" (null) â€” discover from Supervisor APIs
+    try {
+      const [coreInfo, networkInfo] = await Promise.all([
+        callSupervisor("/core/info"),
+        callSupervisor("/network/info"),
+      ]);
+
+      const port = coreInfo.port || 8123;
+      const ssl = coreInfo.ssl || false;
+      const protocol = ssl ? "https" : "http";
+
+      let hostIp = null;
+      if (networkInfo.interfaces) {
+        const primary = networkInfo.interfaces.find(i => i.primary && i.connected);
+        const iface = primary || networkInfo.interfaces.find(i => i.connected);
+        if (iface?.ipv4?.address?.[0]) {
+          hostIp = iface.ipv4.address[0].split("/")[0];
+        }
+      }
+
+      if (hostIp) {
+        haCoreUrl = `${protocol}://${hostIp}:${port}`;
+      }
+    } catch (e) {
+      sendLog("warning", "ha-core-url", { action: "network_fallback_failed", error: e.message });
+    }
+  }
+
+  if (!haCoreUrl) {
+    throw new Error(
+      "Could not determine HA Core URL. " +
+      "Set internal_url in Settings â†’ System â†’ Network, " +
+      "or ensure the host has a connected network interface."
+    );
+  }
+
+  sendLog("debug", "ha-core-url", { action: "discovered", url: haCoreUrl });
+  haCoreUrlCache.url = haCoreUrl;
+  haCoreUrlCache.fetchedAt = Date.now();
+  return haCoreUrl;
+}
+
+// ============================================================================
+// SCREENSHOT HELPERS
+// ============================================================================
+
+/**
+ * Take a screenshot of a Home Assistant page using headless Chromium.
+ *
+ * Uses three complementary auth strategies to ensure the HA frontend
+ * authenticates correctly regardless of frontend version:
+ *
+ *   1. localStorage injection â€” sets hassTokens so the frontend's auth
+ *      module finds a valid session on startup
+ *   2. WebSocket monkey-patch â€” intercepts the auth_required handshake
+ *      and responds with the LLAT before the frontend's own handler
+ *   3. HTTP request interception â€” adds Authorization header to all
+ *      requests to the HA server (REST API fallback)
+ *
+ * @param {string} haCoreUrl - HA Core base URL (e.g. "http://192.168.1.100:8123")
+ * @param {string} urlPath - Page path to screenshot (e.g. "/lovelace/0")
+ * @param {object} options - Screenshot options
+ * @param {number} [options.width=1280] - Viewport width in pixels
+ * @param {number} [options.height=720] - Viewport height in pixels
+ * @param {number} [options.waitSeconds=3] - Extra wait time for dynamic content
+ * @param {boolean} [options.fullPage=false] - Capture full scrollable page
+ * @returns {Promise<string>} Base64-encoded PNG screenshot
+ */
+// Chromium launch dominates screenshot latency (1-4 s on add-on hardware) â€”
+// keep one browser alive across calls and close it after an idle period
+let sharedBrowser = null;
+let browserIdleTimer = null;
+const BROWSER_IDLE_MS = 120000;
+
+// puppeteer-core's module tree costs tens of MB of RSS; screenshots are
+// disabled by default, so load it only when the tool is actually used
+let puppeteerModule = null;
+
+async function getPuppeteer() {
+  if (!puppeteerModule) {
+    puppeteerModule = (await import("puppeteer-core")).default;
+  }
+  return puppeteerModule;
+}
+
+async function getSharedBrowser() {
+  if (browserIdleTimer) {
+    clearTimeout(browserIdleTimer);
+    browserIdleTimer = null;
+  }
+  if (sharedBrowser?.connected) {
+    return sharedBrowser;
+  }
+  const puppeteer = await getPuppeteer();
+  sharedBrowser = await puppeteer.launch({
+    executablePath: CHROMIUM_PATH,
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-first-run",
+      "--disable-extensions",
+    ],
+  });
+  return sharedBrowser;
+}
+
+function scheduleBrowserClose() {
+  if (browserIdleTimer) clearTimeout(browserIdleTimer);
+  browserIdleTimer = setTimeout(() => {
+    const browser = sharedBrowser;
+    sharedBrowser = null;
+    browserIdleTimer = null;
+    if (browser) {
+      browser.close().catch(() => {});
+    }
+  }, BROWSER_IDLE_MS);
+  // Don't keep the process alive just for the idle close
+  browserIdleTimer.unref?.();
+}
+
+async function takeScreenshot(haCoreUrl, urlPath, options = {}) {
+  const { width = 1280, height = 720, waitSeconds = 3, fullPage = false } = options;
+
+  const browser = await getSharedBrowser();
+  let page;
+
+  try {
+    page = await browser.newPage();
+    await page.setViewport({ width, height });
+
+    // â”€â”€ Auth Strategy 1: localStorage tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // The HA frontend reads "hassTokens" from localStorage on startup.
+    // We inject a token entry with a non-empty refresh_token (empty string
+    // is falsy and causes the auth module to reject the token) and a
+    // far-future expiry so it won't attempt a refresh during our brief
+    // screenshot window.
+    await page.evaluateOnNewDocument((config) => {
+      try {
+        localStorage.setItem("hassTokens", JSON.stringify({
+          hassUrl: config.hassUrl,
+          clientId: config.hassUrl + "/",
+          access_token: config.token,
+          token_type: "Bearer",
+          refresh_token: "ha-screenshot-tool",
+          expires_in: 1800,
+          expires: Date.now() + 1800000,
+        }));
+      } catch (e) {
+        // localStorage may be unavailable in rare cases â€” fall through
+        // to the other auth strategies
+      }
+
+      // â”€â”€ Auth Strategy 2: WebSocket interceptor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // Monkey-patch the WebSocket constructor so that when the HA
+      // frontend opens /api/websocket, we can auto-respond to the
+      // auth_required handshake with the LLAT.  This covers cases where
+      // localStorage auth fails or the frontend ignores it.
+      //
+      // Strategy 1 usually succeeds, in which case the frontend answers
+      // auth_required itself.  Both it and this interceptor see the same
+      // frame, so firing unconditionally sent a second auth frame that
+      // Home Assistant rejected and logged for every screenshot:
+      //   Received invalid command: {'type': 'auth', ...}
+      // The connection is already authenticated at that point, so the
+      // screenshot still worked and the only symptom was a Core error.
+      //
+      // The frontend therefore owns authentication and this stays a
+      // fallback: watch outgoing frames, and only authenticate if the page
+      // has not done so shortly after auth_required.
+      const AUTH_FALLBACK_MS = 500;
+      const _WebSocket = window.WebSocket;
+      window.WebSocket = function (url, protocols) {
+        const ws = protocols !== undefined
+          ? new _WebSocket(url, protocols)
+          : new _WebSocket(url);
+
+        if (url && url.includes("/api/websocket")) {
+          let pageAuthSent = false;
+          let fallbackAuthSent = false;
+
+          // Bound up front so the fallback cannot recurse through the patch.
+          const rawSend = ws.send.bind(ws);
+          ws.send = function (data) {
+            try {
+              if (typeof data === "string" && JSON.parse(data)?.type === "auth") {
+                pageAuthSent = true;
+              }
+            } catch (_) { /* non-JSON or binary frame - not an auth frame */ }
+            return rawSend(data);
+          };
+
+          ws.addEventListener("message", function (event) {
+            try {
+              const msg = JSON.parse(event.data);
+              if (msg.type !== "auth_required" || fallbackAuthSent) return;
+              setTimeout(() => {
+                if (pageAuthSent || fallbackAuthSent) return;
+                if (ws.readyState !== _WebSocket.OPEN) return;
+                fallbackAuthSent = true;
+                try {
+                  rawSend(JSON.stringify({
+                    type: "auth",
+                    access_token: config.token,
+                  }));
+                } catch (_) { /* socket closed between check and send */ }
+              }, AUTH_FALLBACK_MS);
+            } catch (_) { /* ignore parse errors on non-JSON frames */ }
+          });
+        }
+
+        return ws;
+      };
+      // Preserve prototype chain so instanceof checks still work
+      window.WebSocket.prototype = _WebSocket.prototype;
+      window.WebSocket.CONNECTING = _WebSocket.CONNECTING;
+      window.WebSocket.OPEN = _WebSocket.OPEN;
+      window.WebSocket.CLOSING = _WebSocket.CLOSING;
+      window.WebSocket.CLOSED = _WebSocket.CLOSED;
+    }, { hassUrl: haCoreUrl, token: HA_ACCESS_TOKEN });
+
+    // â”€â”€ Auth Strategy 3: HTTP request interception â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Add the Authorization header to every request targeting the HA
+    // server.  External requests (fonts, map tiles, etc.) are left
+    // untouched so we don't leak the token to third parties.
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (req.url().startsWith(haCoreUrl)) {
+        req.continue({
+          headers: { ...req.headers(), Authorization: `Bearer ${HA_ACCESS_TOKEN}` },
+        });
+      } else {
+        req.continue();
+      }
+    });
+
+    // Navigate to the target page
+    const normalizedPath = urlPath.startsWith("/") ? urlPath : `/${urlPath}`;
+    const fullUrl = `${haCoreUrl}${normalizedPath}`;
+
+    sendLog("info", "screenshot", { action: "navigating", url: fullUrl, width, height });
+
+    // Use "load" rather than "networkidle0"/"networkidle2" because the HA
+    // frontend keeps a persistent WebSocket open (/api/websocket) for the
+    // lifetime of the page.  "networkidle0" waits for zero active connections,
+    // which is never satisfied, causing every screenshot to time out.  "load"
+    // fires once the page and its subresources are fetched, ignoring ongoing
+    // connections.  Dynamic content rendering is handled by the waitSeconds
+    // delay below.
+    await page.goto(fullUrl, {
+      waitUntil: "load",
+      timeout: 30000,
+    });
+
+    // Wait for dynamic content to render (dashboards, cards, graphs, etc.)
+    const clampedWait = Math.max(0, Math.min(waitSeconds, 15));
+    if (clampedWait > 0) {
+      await new Promise(resolve => setTimeout(resolve, clampedWait * 1000));
+    }
+
+    // Take screenshot
+    const screenshotBuffer = await page.screenshot({
+      type: "png",
+      fullPage,
+      encoding: "base64",
+    });
+
+    sendLog("info", "screenshot", {
+      action: "captured",
+      path: normalizedPath,
+      size: `${Math.round(screenshotBuffer.length / 1024)}KB (base64)`,
+    });
+
+    return screenshotBuffer;
+  } finally {
+    if (page) {
+      await page.close().catch(() => {});
+    }
+    scheduleBrowserClose();
+  }
+}
+
+// ============================================================================
+// ESPHOME INTEGRATION HELPERS
+// ============================================================================
+
+/**
+ * Discover ESPHome add-on and return its URL via the Supervisor ingress proxy.
+ *
+ * ESPHome (since ~2026.2.x) no longer exposes the dashboard on a TCP port.
+ * The dashboard binds to a Unix socket, fronted by nginx with IP-based access
+ * rules that block requests from other addon containers.
+ *
+ * We discover HA Core's real LAN URL from /api/config (internal_url), create
+ * an ingress session via WebSocket (the only method that works), and route
+ * requests through HA Core's ingress proxy using a long-lived access token.
+ * This is the exact same path the external CLI uses.
+ *
+ * Returns { ok: true, ...result } on success,
+ *   or { ok: false, error: "...", diagnostics: {...} } on failure.
+ */
+async function discoverESPHome() {
+  const diag = {
+    steps: [],
+    addonFound: false,
+    addonSlug: null,
+    addonState: null,
+    ingressEntry: null,
+    hasAccessToken: !!HA_ACCESS_TOKEN,
+    internalUrl: null,
+    externalUrl: null,
+    haCoreUrl: null,
+    urlSource: null,
+    networkFallback: null,
+    wsSessionResult: null,
+  };
+  
+  function step(name, status, detail = null) {
+    diag.steps.push({ name, status, detail });
+    sendLog("debug", "esphome", { action: "discover_step", name, status, detail });
+  }
+
+  try {
+    // Steps 1 and 4 are independent â€” start the HA config fetch now and
+    // consume it after the addon checks
+    const haConfigPromise = callHA("/config");
+    haConfigPromise.catch(() => {});
+
+    // Step 1: Find ESPHome addon
+    let addonsInfo;
+    try {
+      addonsInfo = await callSupervisor("/addons");
+      step("fetch_addons", "ok", { addonCount: addonsInfo.addons?.length });
+    } catch (e) {
+      step("fetch_addons", "error", e.message);
+      return { ok: false, error: `Failed to list addons: ${e.message}`, diagnostics: diag };
+    }
+    
+    // The Supervisor /addons endpoint does NOT reliably set `installed: true`.
+    // Instead, an installed addon has a `state` field ("started", "stopped", etc.)
+    // and/or a `version` field with the installed version string.
+    const esphome = addonsInfo.addons?.find(a => 
+      a.slug.includes("esphome") && (a.state === "started" || a.state === "stopped" || a.version)
+    );
+    
+    if (!esphome) {
+      step("find_esphome", "error", "No installed addon with 'esphome' in slug");
+      // Include matching slugs and their fields for debugging
+      const slugs = (addonsInfo.addons || [])
+        .filter(a => a.slug.includes("esphome"))
+        .map(a => ({ slug: a.slug, installed: a.installed, version: a.version, state: a.state }));
+      diag.esphomeSlugs = slugs;
+      return { ok: false, error: "ESPHome addon not found in addon list.", diagnostics: diag };
+    }
+    
+    diag.addonFound = true;
+    diag.addonSlug = esphome.slug;
+    step("find_esphome", "ok", { slug: esphome.slug });
+    
+    // Step 2: Get addon info
+    let info;
+    try {
+      info = await callSupervisor(`/addons/${esphome.slug}/info`);
+      diag.addonState = info.state;
+      diag.ingressEntry = info.ingress_entry;
+      step("addon_info", "ok", { state: info.state, version: info.version, ingress_entry: info.ingress_entry });
+    } catch (e) {
+      step("addon_info", "error", e.message);
+      return { ok: false, error: `Failed to get addon info for ${esphome.slug}: ${e.message}`, diagnostics: diag };
+    }
+    
+    if (!info.ingress_entry) {
+      step("ingress_entry", "error", "ingress_entry is null/empty");
+      return { ok: false, error: "ESPHome addon has no ingress_entry configured.", diagnostics: diag };
+    }
+    step("ingress_entry", "ok", info.ingress_entry);
+    
+    // Step 3: Check access token
+    if (!HA_ACCESS_TOKEN) {
+      step("access_token", "error", "HA_ACCESS_TOKEN env var is not set");
+      return { ok: false, error: "ESPHome ingress requires a long-lived access token. " +
+        "Create one at Profile â†’ Long-Lived Access Tokens in the HA UI, " +
+        "then paste it into the addon's 'access_token' configuration option.", diagnostics: diag };
+    }
+    step("access_token", "ok");
+    
+    // Step 4: Discover HA Core URL
+    let haCoreUrl;
+    let haConfig;
+    try {
+      haConfig = await haConfigPromise;
+      diag.internalUrl = haConfig.internal_url || null;
+      diag.externalUrl = haConfig.external_url || null;
+      step("ha_config", "ok", { internal_url: diag.internalUrl, external_url: diag.externalUrl });
+    } catch (e) {
+      step("ha_config", "error", e.message);
+      return { ok: false, error: `Failed to get HA config: ${e.message}`, diagnostics: diag };
+    }
+    
+    haCoreUrl = (haConfig.internal_url || haConfig.external_url || "").replace(/\/+$/, "");
+    
+    if (haCoreUrl) {
+      diag.urlSource = "ha_config";
+    } else {
+      // internal_url is "automatic" (null) â€” discover from Supervisor APIs
+      step("url_fallback", "started", "internal_url and external_url are both null, trying network discovery");
+      try {
+        const [coreInfo, networkInfo] = await Promise.all([
+          callSupervisor("/core/info"),
+          callSupervisor("/network/info"),
+        ]);
+        
+        const port = coreInfo.port || 8123;
+        const ssl = coreInfo.ssl || false;
+        const protocol = ssl ? "https" : "http";
+        
+        diag.networkFallback = { port, ssl, interfaces: [] };
+        
+        // Find the primary connected interface and extract its LAN IP
+        let hostIp = null;
+        if (networkInfo.interfaces) {
+          for (const iface of networkInfo.interfaces) {
+            diag.networkFallback.interfaces.push({
+              name: iface.interface,
+              primary: iface.primary,
+              connected: iface.connected,
+              ipv4_addresses: iface.ipv4?.address || [],
+            });
+          }
+          const primary = networkInfo.interfaces.find(i => i.primary && i.connected);
+          const iface = primary || networkInfo.interfaces.find(i => i.connected);
+          if (iface?.ipv4?.address?.[0]) {
+            hostIp = iface.ipv4.address[0].split("/")[0];
+          }
+        }
+        
+        if (hostIp) {
+          haCoreUrl = `${protocol}://${hostIp}:${port}`;
+          diag.urlSource = "network_fallback";
+          step("url_fallback", "ok", { url: haCoreUrl, ip: hostIp, port, ssl });
+        } else {
+          step("url_fallback", "error", "Could not find a connected interface with an IPv4 address");
+        }
+      } catch (e) {
+        step("url_fallback", "error", e.message);
+      }
+    }
+    
+    diag.haCoreUrl = haCoreUrl;
+    
+    if (!haCoreUrl) {
+      return { ok: false, error: "Could not determine HA Core URL. " +
+        "Set internal_url in Settings â†’ System â†’ Network, " +
+        "or ensure the host has a connected network interface.", diagnostics: diag };
+    }
+    step("ha_core_url", "ok", { url: haCoreUrl, source: diag.urlSource });
+    
+    // Step 5: Create ingress session via WebSocket
+    let ingressSession;
+    try {
+      ingressSession = await createIngressSessionViaWebSocket(haCoreUrl, HA_ACCESS_TOKEN);
+      if (ingressSession) {
+        diag.wsSessionResult = "ok";
+        step("ws_session", "ok");
+      } else {
+        diag.wsSessionResult = "returned_null";
+        step("ws_session", "error", "createIngressSessionViaWebSocket returned null (auth failed or no session in response)");
+        return { ok: false, error: `WebSocket ingress session creation returned null. ` +
+          `Connected to ${haCoreUrl.replace(/^http/, "ws")}/api/websocket but did not get a session token. ` +
+          `Check that the access_token is valid.`, diagnostics: diag };
+      }
+    } catch (e) {
+      diag.wsSessionResult = `error: ${e.message}`;
+      step("ws_session", "error", e.message);
+      return { ok: false, error: `WebSocket ingress session creation failed: ${e.message}. ` +
+        `Tried connecting to ${haCoreUrl.replace(/^http/, "ws")}/api/websocket`, diagnostics: diag };
+    }
+    
+    // Step 6: Build final URL
+    // ingress_entry from the Supervisor already contains the full path
+    // (e.g. "/api/hassio_ingress/AbCdEf..."), so just append it to the base URL.
+    const ingressPath = info.ingress_entry.startsWith("/") ? info.ingress_entry : `/${info.ingress_entry}`;
+    const url = `${haCoreUrl}${ingressPath}`;
+    step("final_url", "ok", url);
+    
+    const result = {
+      ok: true,
+      slug: esphome.slug,
+      name: esphome.name,
+      url,
+      ingressSession,
+      state: info.state,
+      version: info.version,
+      diagnostics: diag,
+    };
+    
+    sendLog("debug", "esphome", { action: "discover", result: { ...result, ingressSession: "[redacted]" } });
+    return result;
+  } catch (error) {
+    step("unexpected", "error", error.message);
+    return { ok: false, error: `Unexpected error in discoverESPHome: ${error.message}`, diagnostics: diag };
+  }
+}
+
+// Full discovery costs 4-6 round trips plus a WebSocket handshake per call;
+// the slug, ingress entry, HA URL, and ingress session are all stable, so
+// cache the successful result across a typical list â†’ compile â†’ upload run
+let esphomeCache = { result: null, fetchedAt: 0 };
+const ESPHOME_CACHE_TTL = 300000; // 5 minutes â€” well within ingress session lifetime
+
+async function getESPHomeConnection() {
+  const now = Date.now();
+  if (esphomeCache.result?.ok && (now - esphomeCache.fetchedAt) < ESPHOME_CACHE_TTL) {
+    return esphomeCache.result;
+  }
+  const result = await discoverESPHome();
+  if (result.ok) {
+    esphomeCache = { result, fetchedAt: Date.now() };
+  }
+  return result;
+}
+
+function invalidateESPHomeCache() {
+  esphomeCache = { result: null, fetchedAt: 0 };
+}
+
+/**
+ * Create an ingress session via HA Core's WebSocket API.
+ * This is the ONLY method that works â€” REST-based session creation is rejected
+ * by the Supervisor regardless of token type.  The WebSocket `supervisor/api`
+ * command lets HA Core make the Supervisor call with its own credentials.
+ *
+ * @param {string} haCoreUrl - HA Core URL (e.g. http://192.168.1.100:8123)
+ * @param {string} token - Long-lived access token
+ * @returns {Promise<string|null>} Ingress session token, or null on failure
+ */
+async function createIngressSessionViaWebSocket(haCoreUrl, token) {
+  return new Promise((resolve, reject) => {
+    const wsUrl = haCoreUrl.replace(/^http/, "ws") + "/api/websocket";
+    sendLog("debug", "esphome", { action: "ws_session", url: wsUrl });
+
+    const ws = new WebSocket(wsUrl);
+    let msgId = 1;
+    const timeout = setTimeout(() => {
+      ws.close();
+      reject(new Error("WebSocket session creation timed out"));
+    }, 15000);
+
+    ws.on("open", () => {
+      sendLog("debug", "esphome", { action: "ws_session_open" });
+    });
+
+    ws.on("message", (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+
+        if (msg.type === "auth_required") {
+          ws.send(JSON.stringify({ type: "auth", access_token: token }));
+        } else if (msg.type === "auth_ok") {
+          // Create ingress session via supervisor/api command
+          const id = msgId++;
+          ws.send(JSON.stringify({
+            id,
+            type: "supervisor/api",
+            endpoint: "/ingress/session",
+            method: "post",
+          }));
+        } else if (msg.type === "auth_invalid") {
+          clearTimeout(timeout);
+          ws.close();
+          sendLog("error", "esphome", { action: "ws_session_auth_failed", message: msg.message });
+          resolve(null);
+        } else if (msg.type === "result") {
+          clearTimeout(timeout);
+          ws.close();
+          if (msg.success && msg.result?.session) {
+            sendLog("debug", "esphome", { action: "ws_session_created" });
+            resolve(msg.result.session);
+          } else {
+            sendLog("error", "esphome", { action: "ws_session_failed", result: msg });
+            resolve(null);
+          }
+        }
+      } catch (e) {
+        sendLog("error", "esphome", { action: "ws_session_parse_error", error: e.message });
+      }
+    });
+
+    ws.on("error", (err) => {
+      clearTimeout(timeout);
+      sendLog("error", "esphome", { action: "ws_session_error", error: err.message });
+      reject(err);
+    });
+
+    ws.on("close", () => {
+      clearTimeout(timeout);
+    });
+  });
+}
+
+/**
+ * Stream logs from ESPHome WebSocket endpoint
+ * @param {string} baseUrl - ESPHome dashboard URL (Supervisor ingress URL)
+ * @param {string} endpoint - WebSocket endpoint (e.g., "compile", "upload")
+ * @param {object} params - Parameters to send (e.g., { configuration: "device.yaml" })
+ * @param {function} onLine - Callback for each log line
+ * @param {number} timeout - Timeout in milliseconds (default: 10 minutes for builds)
+ * @param {string|null} ingressSession - Ingress session token for the Supervisor proxy
+ * @returns {Promise<{success: boolean, code: number, logs: string[]}>}
+ */
+async function streamESPHomeLogs(baseUrl, endpoint, params, onLine = null, timeout = 600000, ingressSession = null) {
+  return new Promise((resolve, reject) => {
+    const logs = [];
+    const startTime = Date.now();
+    
+    // Build WebSocket URL preserving the full path (important for ingress proxy)
+    const wsUrl = baseUrl.replace(/^http/, "ws").replace(/\/$/, "") + "/" + endpoint;
+    
+    sendLog("debug", "esphome", { action: "ws_connect", url: wsUrl, params });
+    
+    // Pass ingress session cookie + Bearer token in the WebSocket upgrade handshake.
+    // HA Core's ingress proxy requires the Bearer token for auth; the Supervisor
+    // ingress handler requires the session cookie.
+    const wsOptions = { headers: {} };
+    if (ingressSession) {
+      wsOptions.headers["Cookie"] = `ingress_session=${ingressSession}`;
+    }
+    if (HA_ACCESS_TOKEN) {
+      wsOptions.headers["Authorization"] = `Bearer ${HA_ACCESS_TOKEN}`;
+    }
+    
+    const ws = new WebSocket(wsUrl, wsOptions);
+    
+    // Set timeout
+    const timeoutId = setTimeout(() => {
+      ws.close();
+      reject(new Error(`ESPHome operation timed out after ${timeout / 1000} seconds`));
+    }, timeout);
+    
+    ws.on("open", () => {
+      sendLog("debug", "esphome", { action: "ws_open", endpoint });
+      ws.send(JSON.stringify({ type: "spawn", ...params }));
+    });
+    
+    ws.on("message", (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        
+        if (msg.event === "line") {
+          logs.push(msg.data);
+          if (onLine) onLine(msg.data);
+        }
+        
+        if (msg.event === "exit") {
+          clearTimeout(timeoutId);
+          ws.close();
+          const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+          sendLog("info", "esphome", { 
+            action: "ws_complete", 
+            endpoint, 
+            success: msg.code === 0, 
+            code: msg.code,
+            duration: `${duration}s`,
+            logLines: logs.length 
+          });
+          resolve({ 
+            success: msg.code === 0, 
+            code: msg.code, 
+            logs,
+            duration: `${duration}s`
+          });
+        }
+      } catch (parseError) {
+        sendLog("warning", "esphome", { action: "ws_parse_error", error: parseError.message });
+      }
+    });
+    
+    ws.on("error", (error) => {
+      clearTimeout(timeoutId);
+      sendLog("error", "esphome", { action: "ws_error", endpoint, error: error.message });
+      reject(new Error(`ESPHome WebSocket error: ${error.message}`));
+    });
+    
+    ws.on("close", (code, reason) => {
+      clearTimeout(timeoutId);
+      // Only log unexpected closes (not our intentional closes)
+      if (logs.length === 0) {
+        sendLog("warning", "esphome", { action: "ws_close_unexpected", code, reason: reason?.toString() });
+      }
+    });
+  });
+}
+
+/**
+ * Get list of ESPHome devices via REST API
+ * @param {string} esphomeUrl - ESPHome dashboard URL (Supervisor ingress URL)
+ * @param {string|null} ingressSession - Ingress session token for the Supervisor proxy
+ */
+async function getESPHomeDevices(esphomeUrl, ingressSession = null) {
+  const headers = {};
+  if (ingressSession) {
+    headers["Cookie"] = `ingress_session=${ingressSession}`;
+  }
+  // When routing through HA Core's ingress proxy, the Bearer token is
+  // required for HA Core auth; the cookie is for the Supervisor's ingress.
+  if (HA_ACCESS_TOKEN) {
+    headers["Authorization"] = `Bearer ${HA_ACCESS_TOKEN}`;
+  }
+  const url = `${esphomeUrl}/devices`;
+  sendLog("debug", "esphome", { action: "get_devices", url, hasSession: !!ingressSession, hasToken: !!HA_ACCESS_TOKEN });
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      invalidateESPHomeCache();
+    }
+    let body = "";
+    try { body = await response.text(); } catch (_) {}
+    const detail = `HTTP ${response.status} from ${url}` +
+      (body ? `\nResponse body: ${body.slice(0, 500)}` : "") +
+      `\nHeaders sent: Cookie=${ingressSession ? "ingress_session=<set>" : "<none>"}, Authorization=${HA_ACCESS_TOKEN ? "Bearer <set>" : "<none>"}`;
+    throw new Error(`Failed to get ESPHome devices: ${detail}`);
+  }
+  return await response.json();
+}
+
+// ============================================================================
+// COMMON SCHEMAS FOR STRUCTURED OUTPUT
+// ============================================================================
+
+const SCHEMAS = {
+  entityState: {
+    type: "object",
+    properties: {
+      entity_id: { type: "string", description: "Entity identifier" },
+      state: { type: "string", description: "Current state value" },
+      friendly_name: { type: "string", description: "Human-readable name" },
+      device_class: { type: "string", description: "Device classification" },
+      last_changed: { type: "string", description: "ISO timestamp of last state change" },
+      last_updated: { type: "string", description: "ISO timestamp of last update" },
+    },
+    required: ["entity_id", "state"],
+  },
+  
+  entityStateArray: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        entity_id: { type: "string" },
+        state: { type: "string" },
+        friendly_name: { type: "string" },
+        device_class: { type: "string" },
+      },
+      required: ["entity_id", "state"],
+    },
+  },
+  
+  searchResult: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        entity_id: { type: "string" },
+        state: { type: "string" },
+        friendly_name: { type: "string" },
+        device_class: { type: "string" },
+        score: { type: "number", description: "Search relevance score" },
+      },
+      required: ["entity_id", "state", "score"],
+    },
+  },
+  
+  entityDetails: {
+    type: "object",
+    properties: {
+      entity_id: { type: "string" },
+      friendly_name: { type: "string" },
+      state: { type: "string" },
+      domain: { type: "string" },
+      device_class: { type: "string" },
+      device_id: { type: "string" },
+      area_id: { type: "string" },
+      attributes: { type: "object" },
+      related_entities: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            entity_id: { type: "string" },
+            friendly_name: { type: "string" },
+            state: { type: "string" },
+            relationship: { type: "string", enum: ["same_device", "same_area"] },
+          },
+        },
+      },
+    },
+    required: ["entity_id", "state", "domain"],
+  },
+  
+  serviceCallResult: {
+    type: "object",
+    properties: {
+      success: { type: "boolean" },
+      domain: { type: "string" },
+      service: { type: "string" },
+      affected_entities: { type: "array", items: { type: "string" } },
+      returned_response: { type: "boolean" },
+      service_response: { type: "object" },
+    },
+    required: ["success", "domain", "service"],
+  },
+  
+  anomaly: {
+    type: "object",
+    properties: {
+      entity_id: { type: "string" },
+      reason: { type: "string" },
+      severity: { type: "string", enum: ["info", "warning", "error"] },
+    },
+    required: ["entity_id", "reason", "severity"],
+  },
+  
+  anomalyArray: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        entity_id: { type: "string" },
+        reason: { type: "string" },
+        severity: { type: "string", enum: ["info", "warning", "error"] },
+      },
+      required: ["entity_id", "reason", "severity"],
+    },
+  },
+  
+  suggestion: {
+    type: "object",
+    properties: {
+      type: { type: "string" },
+      title: { type: "string" },
+      description: { type: "string" },
+      entities: { type: "array", items: { type: "string" } },
+    },
+    required: ["type", "title", "description"],
+  },
+  
+  suggestionArray: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        title: { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["type", "title", "description"],
+    },
+  },
+  
+  diagnostics: {
+    type: "object",
+    properties: {
+      entity_id: { type: "string" },
+      timestamp: { type: "string" },
+      current_state: { type: "object" },
+      checks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            check: { type: "string" },
+            status: { type: "string", enum: ["ok", "info", "warning", "error"] },
+            details: { type: "string" },
+          },
+        },
+      },
+      history_summary: { type: "object" },
+      relationships: { type: "object" },
+    },
+    required: ["entity_id", "timestamp", "checks"],
+  },
+  
+  configValidation: {
+    type: "object",
+    properties: {
+      result: { type: "string", enum: ["valid", "invalid"] },
+      errors: { type: "string" },
+    },
+    required: ["result"],
+  },
+  
+  integrationDocs: {
+    type: "object",
+    properties: {
+      integration: { type: "string", description: "Integration name" },
+      url: { type: "string", description: "Documentation URL" },
+      title: { type: "string", description: "Integration title" },
+      description: { type: "string", description: "Integration description" },
+      configuration: { type: "string", description: "Configuration section content" },
+      ha_version: { type: "string", description: "Current HA version" },
+      fetched_at: { type: "string", description: "Timestamp when docs were fetched" },
+    },
+    required: ["integration", "url"],
+  },
+  
+  breakingChanges: {
+    type: "object",
+    properties: {
+      ha_version: { type: "string", description: "Current Home Assistant version" },
+      changes: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            version: { type: "string" },
+            title: { type: "string" },
+            description: { type: "string" },
+            integration: { type: "string" },
+            url: { type: "string" },
+          },
+        },
+      },
+    },
+    required: ["ha_version", "changes"],
+  },
+  
+  configSyntaxCheck: {
+    type: "object",
+    properties: {
+      valid: { type: "boolean", description: "Whether the syntax appears valid" },
+      deprecated: { type: "boolean", description: "Whether deprecated syntax was detected" },
+      warnings: { 
+        type: "array", 
+        items: { type: "string" },
+        description: "List of warnings about the configuration" 
+      },
+      suggestions: { 
+        type: "array", 
+        items: { type: "string" },
+        description: "Suggestions for improving the configuration" 
+      },
+      docs_url: { type: "string", description: "URL to relevant documentation" },
+    },
+    required: ["valid", "deprecated", "warnings", "suggestions"],
+  },
+  
+  safeWriteResult: {
+    type: "object",
+    properties: {
+      success: { type: "boolean", description: "Whether the config was successfully written and validated" },
+      dry_run: { type: "boolean", description: "Whether this was a dry-run (no file written)" },
+      file_path: { type: "string", description: "The resolved file path" },
+      validation_result: { type: "string", enum: ["valid", "invalid", "skipped"], description: "Result of HA core config validation" },
+      validation_errors: { type: "string", description: "HA config validation error details" },
+      deprecation_warnings: { type: "array", items: { type: "string" }, description: "Deprecation patterns detected" },
+      template_results: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            template: { type: "string" },
+            status: { type: "string", enum: ["valid", "error", "skipped"] },
+            error: { type: "string" },
+          },
+        },
+        description: "Template validation results",
+      },
+      structural_issues: { type: "array", items: { type: "string" }, description: "Structural YAML issues found" },
+      suggestions: { type: "array", items: { type: "string" }, description: "Improvement suggestions" },
+      file_written: { type: "boolean", description: "Whether the file was actually written to disk" },
+      backup_restored: { type: "boolean", description: "Whether the backup was restored due to validation failure" },
+    },
+    required: ["success", "dry_run", "validation_result"],
+  },
+  
+  area: {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      name: { type: "string" },
+    },
+    required: ["id", "name"],
+  },
+  
+  areaArray: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+      },
+      required: ["id", "name"],
+    },
+  },
+};
+
+// ============================================================================
+// INTELLIGENCE LAYER - imported from ./lib/intelligence.js
+//   detectAnomaly, searchEntities, generateSuggestions, generateStateSummary
+// ============================================================================
+
+/**
+ * Get entity relationships
+ */
+async function getEntityRelationships(entityId, prefetchedStates = null) {
+  const states = prefetchedStates || await getCachedStates();
+  const entity = states.find(s => s.entity_id === entityId);
+  
+  if (!entity) {
+    return { error: "Entity not found" };
+  }
+  
+  const [domain] = entityId.split(".");
+  const deviceId = entity.attributes?.device_id;
+  const areaId = entity.attributes?.area_id;
+  
+  const related = states.filter(s => {
+    if (s.entity_id === entityId) return false;
+    if (deviceId && s.attributes?.device_id === deviceId) return true;
+    if (areaId && s.attributes?.area_id === areaId) return true;
+    return false;
+  }).map(s => ({
+    entity_id: s.entity_id,
+    friendly_name: s.attributes?.friendly_name,
+    state: s.state,
+    relationship: s.attributes?.device_id === deviceId ? "same_device" : "same_area",
+  }));
+  
+  return {
+    entity_id: entityId,
+    friendly_name: entity.attributes?.friendly_name,
+    state: entity.state,
+    domain,
+    device_class: entity.attributes?.device_class,
+    device_id: deviceId,
+    area_id: areaId,
+    attributes: entity.attributes,
+    related_entities: related.slice(0, 10),
+  };
+}
+
+// ============================================================================
+// DOCUMENTATION FETCHING HELPERS
+// ============================================================================
+
+/**
+ * Fetch a URL and return its text content
+ */
+async function fetchUrl(url) {
+  sendLog("debug", "docs", { action: "fetch", url });
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "HomeAssistant-MCP-Server/2.1.0",
+        "Accept": "text/html,application/xhtml+xml,text/plain",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    return await response.text();
+  } catch (error) {
+    sendLog("error", "docs", { action: "fetch_error", url, error: error.message });
+    throw error;
+  }
+}
+
+// Parsed documentation cache â€” agents frequently re-request the same page,
+// and each fetch is ~1 MB of HTML plus a heavy regex parsing pass
+const docsCache = new Map();
+const DOCS_CACHE_TTL = 3600000; // 1 hour
+
+function getCachedDoc(key) {
+  const hit = docsCache.get(key);
+  return hit && (Date.now() - hit.fetchedAt) < DOCS_CACHE_TTL ? hit.data : null;
+}
+
+function setCachedDoc(key, data) {
+  docsCache.set(key, { data, fetchedAt: Date.now() });
+}
+
+/**
+ * Extract meaningful content from HTML (basic extraction)
+ */
+// extractContentFromHtml, extractConfigurationSection, extractYamlExamples
+// imported from ./lib/html-parser.js
+
+/**
+ * Load deprecation patterns from the shared JSON file (local bundled copy).
+ * Returns compiled regex patterns ready for use.
+ */
+function loadLocalDeprecationPatterns() {
+  try {
+    const patternsPath = resolve(__dirname, "../shared/deprecation-patterns.json");
+    const raw = readFileSync(patternsPath, "utf-8");
+    const patterns = JSON.parse(raw);
+    return patterns.map(p => ({
+      ...p,
+      pattern: new RegExp(p.pattern, p.flags || "m"),
+    }));
+  } catch (error) {
+    console.error("Warning: Could not load local deprecation patterns:", error.message);
+    return [];
+  }
+}
+
+/**
+ * GitHub URL for the latest deprecation patterns.
+ * This allows pattern updates between add-on releases.
+ */
+const GITHUB_PATTERNS_URL = "https://raw.githubusercontent.com/magnusoverli/opencode/main/ha_opencode/rootfs/opt/shared/deprecation-patterns.json";
+
+/**
+ * HA Alerts JSON endpoint (public, no auth required).
+ * Contains known integration issues with version ranges.
+ */
+const HA_ALERTS_URL = "https://alerts.home-assistant.io/alerts.json";
+
+/**
+ * Cache for dynamically loaded data with TTL.
+ */
+const dynamicCache = {
+  patterns: { data: null, fetchedAt: 0, lastAttemptAt: 0 },
+  alerts: { data: null, fetchedAt: 0, lastAttemptAt: 0 },
+  repairs: { data: null, fetchedAt: 0, lastAttemptAt: 0 },
+};
+const DYNAMIC_CACHE_TTL = 3600000; // 1 hour
+// Back off failed fetches so offline installs don't pay a full timeout on every call
+const DYNAMIC_CACHE_RETRY_TTL = 600000; // 10 minutes
+
+/**
+ * Fetch the latest deprecation patterns from our GitHub repo.
+ * Falls back to local bundled patterns if fetch fails.
+ */
+async function fetchRemoteDeprecationPatterns() {
+  const now = Date.now();
+  if (dynamicCache.patterns.data && (now - dynamicCache.patterns.fetchedAt) < DYNAMIC_CACHE_TTL) {
+    return dynamicCache.patterns.data;
+  }
+  if ((now - dynamicCache.patterns.lastAttemptAt) < DYNAMIC_CACHE_RETRY_TTL) {
+    return dynamicCache.patterns.data;
+  }
+  dynamicCache.patterns.lastAttemptAt = now;
+
+  try {
+    sendLog("debug", "patterns", { action: "fetch_remote", url: GITHUB_PATTERNS_URL });
+    const response = await fetch(GITHUB_PATTERNS_URL, {
+      headers: { "User-Agent": "HomeAssistant-MCP-Server/2.6.0", "Accept": "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const patterns = await response.json();
+    if (!Array.isArray(patterns) || patterns.length === 0) {
+      throw new Error("Invalid patterns format");
+    }
+    
+    const compiled = patterns.map(p => ({
+      ...p,
+      pattern: new RegExp(p.pattern, p.flags || "m"),
+    }));
+    
+    dynamicCache.patterns.data = compiled;
+    dynamicCache.patterns.fetchedAt = now;
+    sendLog("info", "patterns", { action: "remote_loaded", count: compiled.length });
+    return compiled;
+  } catch (error) {
+    sendLog("debug", "patterns", { action: "remote_fetch_failed", error: error.message });
+    // Fall through to local patterns
+    return null;
+  }
+}
+
+/**
+ * Fetch HA alerts from alerts.home-assistant.io (public JSON feed).
+ * Returns alerts relevant to specific integrations with version info.
+ */
+async function fetchHAAlerts() {
+  const now = Date.now();
+  if (dynamicCache.alerts.data && (now - dynamicCache.alerts.fetchedAt) < DYNAMIC_CACHE_TTL) {
+    return dynamicCache.alerts.data;
+  }
+  if ((now - dynamicCache.alerts.lastAttemptAt) < DYNAMIC_CACHE_RETRY_TTL) {
+    return dynamicCache.alerts.data || [];
+  }
+  dynamicCache.alerts.lastAttemptAt = now;
+
+  try {
+    sendLog("debug", "alerts", { action: "fetch", url: HA_ALERTS_URL });
+    const response = await fetch(HA_ALERTS_URL, {
+      headers: { "User-Agent": "HomeAssistant-MCP-Server/2.6.0", "Accept": "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const alerts = await response.json();
+    dynamicCache.alerts.data = alerts;
+    dynamicCache.alerts.fetchedAt = now;
+    sendLog("info", "alerts", { action: "loaded", count: alerts.length });
+    return alerts;
+  } catch (error) {
+    sendLog("debug", "alerts", { action: "fetch_failed", error: error.message });
+    return dynamicCache.alerts.data || [];
+  }
+}
+
+/**
+ * Query HA Core's repair issues via WebSocket API.
+ * Returns deprecations and issues specific to this installation.
+ */
+async function fetchHARepairs() {
+  const now = Date.now();
+  if (dynamicCache.repairs.data && (now - dynamicCache.repairs.fetchedAt) < DYNAMIC_CACHE_TTL) {
+    return dynamicCache.repairs.data;
+  }
+  if ((now - dynamicCache.repairs.lastAttemptAt) < DYNAMIC_CACHE_RETRY_TTL) {
+    return dynamicCache.repairs.data || [];
+  }
+  dynamicCache.repairs.lastAttemptAt = now;
+
+  return new Promise((resolve) => {
+    const wsUrl = "ws://supervisor/core/websocket";
+    let msgId = 1;
+    const timeout = setTimeout(() => {
+      try { ws.close(); } catch (_) {}
+      sendLog("debug", "repairs", { action: "ws_timeout" });
+      resolve(dynamicCache.repairs.data || []);
+    }, 5000);
+
+    let ws;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (error) {
+      clearTimeout(timeout);
+      sendLog("debug", "repairs", { action: "ws_connect_failed", error: error.message });
+      resolve(dynamicCache.repairs.data || []);
+      return;
+    }
+
+    ws.on("message", (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        
+        // Step 1: HA sends auth_required
+        if (msg.type === "auth_required") {
+          ws.send(JSON.stringify({
+            type: "auth",
+            access_token: SUPERVISOR_TOKEN,
+          }));
+          return;
+        }
+        
+        // Step 2: Auth result
+        if (msg.type === "auth_ok") {
+          ws.send(JSON.stringify({
+            id: msgId++,
+            type: "repairs/list_issues",
+          }));
+          return;
+        }
+        
+        if (msg.type === "auth_invalid") {
+          clearTimeout(timeout);
+          ws.close();
+          sendLog("debug", "repairs", { action: "auth_failed" });
+          resolve(dynamicCache.repairs.data || []);
+          return;
+        }
+        
+        // Step 3: Repairs result
+        if (msg.type === "result" && msg.success && msg.result?.issues) {
+          clearTimeout(timeout);
+          ws.close();
+          const issues = msg.result.issues;
+          dynamicCache.repairs.data = issues;
+          dynamicCache.repairs.fetchedAt = now;
+          sendLog("info", "repairs", { action: "loaded", count: issues.length });
+          resolve(issues);
+          return;
+        }
+        
+        // Handle unexpected responses
+        if (msg.type === "result" && !msg.success) {
+          clearTimeout(timeout);
+          ws.close();
+          sendLog("debug", "repairs", { action: "api_error", error: msg.error });
+          resolve(dynamicCache.repairs.data || []);
+        }
+      } catch (parseError) {
+        // Ignore parse errors, wait for timeout
+      }
+    });
+
+    ws.on("error", (error) => {
+      clearTimeout(timeout);
+      sendLog("debug", "repairs", { action: "ws_error", error: error.message });
+      resolve(dynamicCache.repairs.data || []);
+    });
+
+    ws.on("close", () => {
+      clearTimeout(timeout);
+    });
+  });
+}
+
+/**
+ * Run a single HA WebSocket API command (auth, send, close).
+ * Used for registry dumps that have no REST equivalent.
+ */
+function callHAWebSocketCommand(commandType, timeoutMs = 5000) {
+  return new Promise((promiseResolve, promiseReject) => {
+    let settled = false;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { ws.close(); } catch (_) {}
+      fn(value);
+    };
+    const timeout = setTimeout(() => {
+      settle(promiseReject, new Error(`WebSocket command '${commandType}' timed out`));
+    }, timeoutMs);
+
+    let ws;
+    try {
+      ws = new WebSocket("ws://supervisor/core/websocket");
+    } catch (error) {
+      clearTimeout(timeout);
+      promiseReject(error);
+      return;
+    }
+
+    ws.on("message", (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === "auth_required") {
+          ws.send(JSON.stringify({ type: "auth", access_token: SUPERVISOR_TOKEN }));
+        } else if (msg.type === "auth_ok") {
+          ws.send(JSON.stringify({ id: 1, type: commandType }));
+        } else if (msg.type === "auth_invalid") {
+          settle(promiseReject, new Error("WebSocket authentication failed"));
+        } else if (msg.type === "result") {
+          if (msg.success) {
+            settle(promiseResolve, msg.result);
+          } else {
+            settle(promiseReject, new Error(msg.error?.message || `WebSocket command '${commandType}' failed`));
+          }
+        }
+      } catch (_) { /* ignore parse errors, wait for timeout */ }
+    });
+
+    ws.on("error", (error) => {
+      settle(promiseReject, error);
+    });
+  });
+}
+
+// Area/device registries change rarely; cache them to avoid a WS round trip per call
+const registryCache = new Map();
+const REGISTRY_CACHE_TTL = 300000; // 5 minutes
+
+async function getRegistry(commandType) {
+  const cached = registryCache.get(commandType);
+  const now = Date.now();
+  if (cached && (now - cached.fetchedAt) < REGISTRY_CACHE_TTL) {
+    return cached.data;
+  }
+  const data = await callHAWebSocketCommand(commandType);
+  registryCache.set(commandType, { data, fetchedAt: now });
+  return data;
+}
+
+function normalizeForMatch(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function buildHomeContext(args = {}) {
+  const requestedLimit = Number.isFinite(args?.limit) ? args.limit : HOME_CONTEXT_RESULT_CAP;
+  const limit = Math.max(1, Math.min(requestedLimit, HOME_CONTEXT_RESULT_CAP));
+  const requestedArea = normalizeForMatch(args?.area);
+  const requestedDomain = normalizeForMatch(args?.domain);
+  const requestedEntity = normalizeForMatch(args?.entity_id);
+
+  const [states, areas, devices, entityRegistry] = await Promise.all([
+    getCachedStates(),
+    getRegistry("config/area_registry/list"),
+    getRegistry("config/device_registry/list"),
+    getRegistry("config/entity_registry/list"),
+  ]);
+
+  const areasById = new Map(areas.map((area) => [area.area_id, area]));
+  const devicesById = new Map(devices.map((device) => [device.id, device]));
+  const entitiesById = new Map(entityRegistry.map((entity) => [entity.entity_id, entity]));
+  const matchedAreaIds = new Set();
+
+  if (requestedArea) {
+    for (const area of areas) {
+      const names = [area.area_id, area.name, ...(area.aliases || [])].map(normalizeForMatch);
+      if (names.some((name) => name === requestedArea || name.includes(requestedArea))) {
+        matchedAreaIds.add(area.area_id);
+      }
+    }
+  }
+
+  let entities = states.map((state) => {
+    const registryEntry = entitiesById.get(state.entity_id) || {};
+    const device = registryEntry.device_id ? devicesById.get(registryEntry.device_id) : null;
+    const areaId = registryEntry.area_id || device?.area_id || null;
+    const area = areaId ? areasById.get(areaId) : null;
+    const [domain] = state.entity_id.split(".");
+
+    return {
+      entity_id: state.entity_id,
+      name: state.attributes?.friendly_name || registryEntry.name || registryEntry.original_name || state.entity_id,
+      domain,
+      state: state.state,
+      area_id: areaId,
+      area: area?.name || null,
+      device_id: registryEntry.device_id || null,
+      device: device?.name_by_user || device?.name || null,
+      device_class: state.attributes?.device_class || null,
+      unit_of_measurement: state.attributes?.unit_of_measurement || null,
+      last_changed: state.last_changed,
+    };
+  });
+
+  if (requestedEntity) {
+    entities = entities.filter((entity) => normalizeForMatch(entity.entity_id) === requestedEntity);
+  }
+  if (requestedDomain) {
+    entities = entities.filter((entity) => entity.domain === requestedDomain);
+  }
+  if (requestedArea) {
+    entities = entities.filter((entity) => entity.area_id && matchedAreaIds.has(entity.area_id));
+  }
+  if (!args?.include_unavailable && !requestedEntity) {
+    entities = entities.filter((entity) => !["unknown", "unavailable"].includes(entity.state));
+  }
+
+  entities.sort((a, b) => {
+    const areaCompare = String(a.area || "").localeCompare(String(b.area || ""));
+    if (areaCompare !== 0) return areaCompare;
+    return a.entity_id.localeCompare(b.entity_id);
+  });
+
+  const domainCounts = {};
+  for (const entity of entities) {
+    domainCounts[entity.domain] = (domainCounts[entity.domain] || 0) + 1;
+  }
+
+  const returned = entities.slice(0, limit);
+  return {
+    summary: `Returned ${returned.length} of ${entities.length} matching entities`,
+    filters: {
+      area: args?.area || null,
+      domain: args?.domain || null,
+      entity_id: args?.entity_id || null,
+      include_unavailable: args?.include_unavailable === true,
+      limit,
+    },
+    matched_areas: requestedArea
+      ? [...matchedAreaIds].map((areaId) => ({ area_id: areaId, name: areasById.get(areaId)?.name || areaId }))
+      : [],
+    domain_counts: domainCounts,
+    total_matches: entities.length,
+    returned: returned.length,
+    truncated: entities.length > returned.length,
+    entities: returned,
+  };
+}
+
+/**
+ * Get the best available deprecation patterns.
+ * Tries remote (GitHub) first, falls back to local bundled patterns.
+ * This is called lazily on first use, not at module load time.
+ */
+async function getDeprecationPatterns() {
+  // Try remote patterns first (cached for 1 hour)
+  const remote = await fetchRemoteDeprecationPatterns();
+  if (remote && remote.length > 0) {
+    return remote;
+  }
+  // Fall back to local bundled patterns
+  return DEPRECATION_PATTERNS;
+}
+
+/**
+ * Get relevant HA alerts for a specific integration.
+ * Returns alerts that affect the given integration on the current HA version.
+ */
+async function getAlertsForIntegration(integration, haVersion = null) {
+  const alerts = await fetchHAAlerts();
+  if (!alerts || !Array.isArray(alerts)) return [];
+  
+  return alerts.filter(alert => {
+    // Check if this alert affects the given integration
+    const integrations = alert.integrations || [];
+    const matchesIntegration = integrations.some(i => 
+      i.package === integration || i.package === `homeassistant.components.${integration}`
+    );
+    if (!matchesIntegration) return false;
+    
+    // If we know the HA version, check version range
+    if (haVersion && alert.homeassistant) {
+      const minVersion = alert.homeassistant.min || alert.homeassistant.affected_from_version;
+      const maxVersion = alert.homeassistant.max || alert.homeassistant.resolved_in_version;
+      // Simple string comparison works for CalVer (YYYY.M.P)
+      if (minVersion && haVersion < minVersion) return false;
+      if (maxVersion && haVersion >= maxVersion) return false;
+    }
+    
+    return true;
+  });
+}
+
+/**
+ * Get relevant repair issues for a set of integrations.
+ * Filters repairs to only those matching the given domains.
+ */
+async function getRepairsForDomains(domains) {
+  const repairs = await fetchHARepairs();
+  if (!repairs || !Array.isArray(repairs)) return [];
+  
+  if (!domains || domains.length === 0) return repairs;
+  
+  return repairs.filter(issue =>
+    domains.includes(issue.domain) || domains.includes(issue.issue_domain)
+  );
+}
+
+// Load local patterns synchronously at startup (always available as fallback)
+const DEPRECATION_PATTERNS = loadLocalDeprecationPatterns();
+
+/**
+ * Check YAML configuration for deprecated patterns.
+ * Uses the best available patterns (remote if cached, local as fallback).
+ * Also checks HA alerts and repair issues for relevant warnings.
+ */
+async function checkConfigForDeprecations(yamlConfig, integration = null) {
+  const warnings = [];
+  const suggestions = [];
+  let deprecated = false;
+
+  // Get the best available patterns (tries remote/cached, falls back to local)
+  // and fetch integration alerts concurrently
+  const [patterns, alerts] = await Promise.all([
+    getDeprecationPatterns(),
+    integration ? getAlertsForIntegration(integration).catch(() => []) : Promise.resolve([]),
+  ]);
+
+  for (const pattern of patterns) {
+    // Skip patterns not relevant to the specified integration
+    if (integration && pattern.integration && pattern.integration !== integration) {
+      continue;
+    }
+    
+    if (pattern.pattern.test(yamlConfig)) {
+      deprecated = deprecated || pattern.deprecated_in !== undefined;
+      
+      const severity = pattern.severity || (pattern.deprecated_in ? "warning" : "info");
+      const warning = pattern.deprecated_in 
+        ? `[DEPRECATED since ${pattern.deprecated_in}] ${pattern.message}`
+        : `[INFO] ${pattern.message}`;
+      
+      warnings.push(warning);
+      if (pattern.suggestion) {
+        suggestions.push(pattern.suggestion);
+      }
+    }
+  }
+  
+  // Check HA alerts for the specified integration
+  for (const alert of alerts) {
+    warnings.push(`[HA ALERT] ${alert.title || alert.id}: Known issue affecting '${integration}'. See: ${alert.alert_url || ""}`);
+  }
+
+  return { deprecated, warnings, suggestions };
+}
+
+// ============================================================================
+// CONFIG VALIDATION HELPERS
+// ============================================================================
+
+/**
+ * Extract Jinja2 templates from YAML content and validate each through HA's
+ * template engine. Templates containing automation context variables (trigger.*,
+ * this.*, etc.) are flagged as unverifiable rather than failed.
+ */
+async function extractAndValidateTemplates(yamlContent) {
+  const results = [];
+  
+  // Match {{ ... }} template expressions (handles multiline)
+  const templateRegex = /\{\{[\s\S]*?\}\}/g;
+  // Match {% ... %} template blocks
+  const blockRegex = /\{%[\s\S]*?%\}/g;
+  
+  const templates = new Set();
+  
+  let match;
+  while ((match = templateRegex.exec(yamlContent)) !== null) {
+    templates.add(match[0]);
+  }
+  while ((match = blockRegex.exec(yamlContent)) !== null) {
+    templates.add(match[0]);
+  }
+  
+  // Context variables that can't be validated statically
+  const contextVars = [
+    "trigger.", "this.", "context.", "wait.", "repeat.", "response.",
+  ];
+
+  const truncate = (t) => t.substring(0, 100) + (t.length > 100 ? "..." : "");
+
+  const validateOne = async (template) => {
+    if (contextVars.some(v => template.includes(v))) {
+      return {
+        template: truncate(template),
+        status: "skipped",
+        reason: "Contains runtime context variables (trigger/this/wait/repeat) that cannot be validated statically.",
+      };
+    }
+
+    try {
+      const rendered = await callHA("/template", "POST", { template });
+      return {
+        template: truncate(template),
+        status: "valid",
+        result: String(rendered).substring(0, 200),
+      };
+    } catch (error) {
+      return {
+        template: truncate(template),
+        status: "error",
+        error: error.message,
+      };
+    }
+  };
+
+  // Validate concurrently in small batches to avoid hammering HA core
+  const queue = [...templates];
+  const batchSize = 5;
+  for (let i = 0; i < queue.length; i += batchSize) {
+    results.push(...await Promise.all(queue.slice(i, i + batchSize).map(validateOne)));
+  }
+
+  return results;
+}
+
+// Content-validation results are memoized briefly so the recommended
+// dry-run â†’ write workflow doesn't re-validate identical content twice
+const validationMemo = new Map();
+const VALIDATION_MEMO_TTL = 60000;
+
+function getValidationMemo(key) {
+  const hit = validationMemo.get(key);
+  return hit && (Date.now() - hit.at) < VALIDATION_MEMO_TTL ? hit.data : null;
+}
+
+function setValidationMemo(key, data) {
+  if (validationMemo.size >= 10) {
+    validationMemo.delete(validationMemo.keys().next().value);
+  }
+  validationMemo.set(key, { data, at: Date.now() });
+}
+
+/**
+ * Validate YAML structure for common HA configuration patterns.
+ * Checks for required keys, correct nesting, and structural issues.
+ * This is a lightweight structural check, not a full schema validation.
+ */
+// validateYamlStructure, resolveConfigPath imported from ./lib/validation.js
+// createTextContent, createResourceLink imported from ./lib/helpers.js
+
+// ============================================================================
+// DECISION NOTES STORAGE
+// ============================================================================
+
+// Storage locations, overridable so the write path can be exercised in tests
+// without touching a live Home Assistant configuration directory.
+const DECISION_NOTES_BASE_DIR = process.env.OPENCODE_DECISION_NOTES_DIR || DECISION_NOTES_DIR;
+const DECISION_NOTES_FILE = DECISION_NOTES_BASE_DIR === DECISION_NOTES_DIR
+  ? DECISION_NOTES_PATH
+  : join(DECISION_NOTES_BASE_DIR, "decisions.yaml");
+
+/**
+ * Read the user's decision notes.
+ *
+ * A missing file is the normal starting state, not an error — notes only exist
+ * once the user has approved recording one.
+ */
+function readDecisionNotes() {
+  if (!existsSync(DECISION_NOTES_FILE)) {
+    return { ok: true, version: 1, notes: [], errors: [], exists: false };
+  }
+  const parsed = parseDecisionNotes(readFileSync(DECISION_NOTES_FILE, "utf8"));
+  return { ...parsed, exists: true };
+}
+
+/**
+ * Values from `secrets.yaml`, used only to reject notes that would leak one.
+ *
+ * The MCP server can read this file even when OpenCode's own read tool is
+ * blocked from it, which is precisely why the check belongs here rather than in
+ * a prompt instruction. The values are compared and discarded, never stored.
+ */
+function readSecretValues() {
+  try {
+    const path = join(HA_CONFIG_DIR, "secrets.yaml");
+    if (!existsSync(path)) return [];
+    return extractSecretValues(readFileSync(path, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Write through a temporary file and rename over the target.
+ *
+ * Rename is atomic within a filesystem, so a reader never sees half a file and
+ * an interrupted write cannot leave the user's notes truncated. That matters
+ * more here than usual: a corrupt `decisions.yaml` is refused by the parser, so
+ * a torn write would block every future note until the user repaired it by hand.
+ */
+function writeFileAtomicSync(path, contents) {
+  // Unique per process so two writers cannot share a temp file, and cleaned up
+  // on failure so a partial copy of the user's notes is never left lying around.
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, contents, "utf8");
+    renameSync(temporary, path);
+  } catch (error) {
+    try {
+      if (existsSync(temporary)) unlinkSync(temporary);
+    } catch {
+      /* nothing more to do */
+    }
+    throw error;
+  }
+}
+
+/**
+ * Persist notes. The injected digest is deliberately not touched.
+ *
+ * `/data/context/decision-notes.md` is listed in OpenCode's `instructions`, and
+ * OpenCode re-reads every instruction file from disk on each request rather
+ * than once per session. Rewriting the digest mid-conversation therefore edits
+ * the system prompt underneath a live session, discarding the cached prefix
+ * from that point on — the digest is ordered newest-first and carries a note
+ * count, so a new note changes it at the top and invalidates everything after,
+ * including the whole message history. On a hosted model that is a lost cache
+ * discount; on a local one it is a full re-prefill mid-task.
+ *
+ * The digest is derived from this file, and generate-home-context.mjs already
+ * rebuilds it at add-on start and on `ha-context refresh`. One writer, at one
+ * moment, is the whole point — so recording a note is a write to the notes
+ * file and nothing else.
+ */
+function persistDecisionNotes(serialized) {
+  mkdirSync(DECISION_NOTES_BASE_DIR, { recursive: true });
+  writeFileAtomicSync(DECISION_NOTES_FILE, serialized);
+}
+
+/**
+ * Render the digest the next rebuild would produce, without writing it.
+ *
+ * This is what lets the tools still tell the user whether a note will fit the
+ * standing context. It is a forecast, not a description of a file on disk, and
+ * the wording at the call sites says so.
+ *
+ * Screened again here, not just on the note being added: the file may also
+ * hold notes a user wrote by hand, and this render is what would reach the
+ * model. No `unreadable` count: both write paths refuse to save while the file
+ * has entries the parser rejected, so what is written is always the whole file.
+ */
+function previewDecisionDigest(notes) {
+  return renderDecisionDigest(notes, { secretValues: readSecretValues() });
+}
+
+/**
+ * Say plainly how much of the record a future session will actually carry.
+ *
+ * The stored-note limit and the digest budget are different limits, and the
+ * digest one bites first. Reporting only the stored count would read as "there
+ * is plenty of room" while notes were quietly falling out of the standing
+ * context.
+ *
+ * This describes a rendered preview, not a file on disk — the digest is
+ * rebuilt by generate-home-context.mjs, and the user can edit the notes file
+ * before that happens. The wording is a forecast for that reason.
+ */
+function describeDigestCoverage(digest) {
+  const shown = digest?.includedNotes?.length ?? 0;
+  const dropped = digest?.droppedNotes?.length ?? 0;
+  const withheld = digest?.withheldNotes?.length ?? 0;
+  const bytes = digest?.bytes ?? 0;
+
+  const withheldNote = withheld
+    ? ` ${withheld} further note${withheld === 1 ? " is" : "s are"} withheld from the digest for containing ` +
+      "credential-shaped text and must be corrected in the file."
+    : "";
+
+  if (!dropped) {
+    return `All ${shown} active note${shown === 1 ? "" : "s"} fit the session digest (${bytes} bytes).${withheldNote}`;
+  }
+
+  return (
+    `**${shown} of ${shown + dropped} active notes fit the session digest** (${bytes} bytes). The other ${dropped} ` +
+    "stay in the file and remain in force, but will not be in the standing context of future sessions — they are " +
+    "reachable with `recall_decisions`. To keep a note in the digest, record it with `pin: true`; to shorten the " +
+    `list, supersede notes that no longer apply.${withheldNote}`
+  );
+}
+
+/** Shared refusal when the notes file cannot be parsed, so nothing is clobbered. */
+function decisionNotesParseError(parsed) {
+  return (
+    `# Decision notes — cannot write\n\n` +
+    `\`${DECISION_NOTES_FILE}\` could not be fully parsed, so it will not be overwritten:\n\n` +
+    parsed.errors.map((error) => `- ${error}`).join("\n") +
+    `\n\nAsk the user to fix or remove those entries, then try again. ` +
+    `The notes that do parse are still readable with \`recall_decisions\`.`
+  );
+}
+
+function formatNoteForDisplay(note) {
+  const status = note.pin && note.status === "active" ? "active (pinned)" : note.status;
+  const lines = [`### ${note.title}`, `- id: \`${note.id}\``, `- date: ${note.date}`, `- status: ${status}`];
+  lines.push(`- decision: ${note.decision}`);
+  if (note.rationale) lines.push(`- rationale: ${note.rationale}`);
+  for (const field of ["entities", "files", "integrations"]) {
+    if (note[field]?.length) lines.push(`- ${field}: ${note[field].join(", ")}`);
+  }
+  if (note.superseded_by) lines.push(`- superseded by: \`${note.superseded_by}\``);
+  return lines.join("\n");
+}
+
+// ============================================================================
+// MCP SERVER SETUP
+// ============================================================================
+
+const EMPTY_INPUT_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+});
+
+// The ceiling on any get_states list.
+const STATE_RESULT_CAP = 500;
+
+// A tighter ceiling when no domain was given. An unfiltered get_states is the
+// largest thing this server can put in a conversation, and it is paid for again
+// on every request that follows it — at 500 a mid-sized home returned roughly
+// as much as the entire system prompt. Filtering by domain is the behaviour
+// AGENTS.md and INSTRUCTIONS.md steer toward, so it keeps the wider ceiling:
+// narrowing a query should not cost the model results.
+const UNFILTERED_STATE_RESULT_CAP = 150;
+const HOME_CONTEXT_RESULT_CAP = 80;
+const HISTORY_RESULT_CAP = 200;
+const LOGBOOK_RESULT_CAP = 200;
+const DOCS_MAX_CHARS = 12000;
+const CHANGELOG_MAX_CHARS = 16000;
+const CLI_OUTPUT_MAX_CHARS = 20000;
+// Statistics and forecast responses are the large ones; generous enough to hold
+// a useful window without letting a single call swamp the context.
+const SERVICE_RESPONSE_MAX_CHARS = 20000;
+
+const server = new Server(
+  {
+    name: "home-assistant",
+    version: "2.8.0",
+    description: "OpenCode Home Assistant MCP server for configuration editing, diagnostics, admin workflows, and HA-native LLM readiness reporting.",
+  },
+  {
+    capabilities: {
+      tools: {
+        listChanged: false,
+      },
+      resources: {
+        subscribe: false,
+        listChanged: false,
+      },
+      prompts: {
+        listChanged: false,
+      },
+      logging: {},
+    },
+  }
+);
+
+// ============================================================================
+// TOOLS DEFINITION - With titles, outputSchema, and annotations
+// ============================================================================
+
+const TOOLS = [
+  // === STATE MANAGEMENT ===
+  {
+    name: "get_states",
+    title: "Get Entity States",
+    description: `Get the current state of entities: one entity, a domain, or the whole installation. Returns entity_id, state, and key attributes. A call with no domain is capped at ${UNFILTERED_STATE_RESULT_CAP} entities, a domain-filtered one at ${STATE_RESULT_CAP}, in Home Assistant's own arbitrary order — so prefer domain or entity_id when you know what you are after, and summarize when you want a complete picture of what exists.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_id: {
+          type: "string",
+          description: "Specific entity ID (e.g., 'light.living_room'). If not provided, returns all/filtered entities.",
+        },
+        domain: {
+          type: "string",
+          description: "Filter by domain (e.g., 'light', 'switch', 'sensor', 'automation')",
+        },
+        summarize: {
+          type: "boolean",
+          description: "If true, returns a human-readable summary instead of raw data",
+        },
+      },
+      additionalProperties: false,
+    },
+    outputSchema: SCHEMAS.entityStateArray,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+      openWorld: false,
+    },
+  },
+  {
+    name: "search_entities",
+    title: "Search Entities",
+    description: "Search for entities by name, type, or description. Uses semantic matching to find relevant entities.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search query (e.g., 'bedroom lights', 'temperature sensors', 'front door')",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    outputSchema: SCHEMAS.searchResult,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_entity_details",
+    title: "Get Entity Details",
+    description: "Get detailed information about an entity including its relationships to devices, areas, and related entities.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_id: {
+          type: "string",
+          description: "The entity ID to get details for",
+        },
+      },
+      required: ["entity_id"],
+      additionalProperties: false,
+    },
+    outputSchema: SCHEMAS.entityDetails,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_home_context",
+    title: "Get Home Context",
+    description: "Get a compact, area/domain/entity-filtered view of Home Assistant entities with area and device context. Prefer this over broad get_states dumps when you need to understand a room, device class, or focused slice of the home.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        area: {
+          type: "string",
+          description: "Area name, alias, or area ID to focus on, for example 'Kitchen' or 'living_room'.",
+        },
+        domain: {
+          type: "string",
+          description: "Entity domain to focus on, for example 'light', 'sensor', 'climate', or 'binary_sensor'.",
+        },
+        entity_id: {
+          type: "string",
+          description: "Specific entity ID to return with registry-derived area/device context.",
+        },
+        include_unavailable: {
+          type: "boolean",
+          description: "Include entities whose state is unknown or unavailable. Defaults to false unless entity_id is provided.",
+        },
+        limit: {
+          type: "number",
+          description: `Maximum entities to return, capped at ${HOME_CONTEXT_RESULT_CAP}. Defaults to ${HOME_CONTEXT_RESULT_CAP}.`,
+          minimum: 1,
+          maximum: HOME_CONTEXT_RESULT_CAP,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  
+  // === SERVICE CALLS ===
+  {
+    name: "call_service",
+    title: "Call Home Assistant Service",
+    description:
+      "Call a Home Assistant service to control devices or trigger actions. Use for turning on/off lights, " +
+      "running scripts, triggering automations, etc. THIS MODIFIES DEVICE STATE. " +
+      "Services that answer with data (recorder.get_statistics, weather.get_forecasts, calendar.get_events, " +
+      "todo.get_items) work here too — their response comes back with the result, no extra argument needed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: {
+          type: "string",
+          description: "Service domain (e.g., 'light', 'switch', 'automation', 'script', 'climate')",
+        },
+        service: {
+          type: "string",
+          description: "Service name (e.g., 'turn_on', 'turn_off', 'toggle', 'trigger', 'set_temperature')",
+        },
+        target: {
+          type: "object",
+          description: "Target for the service call",
+          properties: {
+            entity_id: {
+              oneOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } }
+              ],
+              description: "Entity ID(s) to target"
+            },
+            area_id: {
+              oneOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } }
+              ],
+              description: "Area ID(s) to target"
+            },
+            device_id: {
+              oneOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } }
+              ],
+              description: "Device ID(s) to target"
+            },
+          },
+        },
+        data: {
+          type: "object",
+          description: "Additional service data (e.g., brightness: 255, color_temp: 400, temperature: 72)",
+        },
+        return_response: {
+          type: "boolean",
+          description:
+            "Ask for the service's response data. Leave unset for the normal case: services that always " +
+            "return data request it automatically. Set true only to opt into a service whose response is " +
+            "optional — get_services marks which services in a domain can return one.",
+        },
+      },
+      required: ["domain", "service"],
+      additionalProperties: false,
+    },
+    outputSchema: SCHEMAS.serviceCallResult,
+    annotations: {
+      destructive: true,
+      idempotent: false,
+      requiresConfirmation: true,
+    },
+  },
+  {
+    name: "get_services",
+    title: "List Available Services",
+    description: "List available services, optionally filtered by domain. Shows what actions can be performed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: {
+          type: "string",
+          description: "Filter services by domain (e.g., 'light', 'climate')",
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  
+  // === HISTORY & LOGBOOK ===
+  {
+    name: "get_history",
+    title: "Get Entity History",
+    description: "Get historical state data for entities. Essential for analyzing trends, debugging issues, or understanding patterns.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_id: {
+          type: "string",
+          description: "Entity ID to get history for (required)",
+        },
+        start_time: {
+          type: "string",
+          description: "Start time in ISO format (e.g., '2024-01-15T00:00:00'). Defaults to 24 hours ago.",
+        },
+        end_time: {
+          type: "string",
+          description: "End time in ISO format. Defaults to now.",
+        },
+        minimal: {
+          type: "boolean",
+          description: "Defaults to true (faster, less data). Set false to include full attribute payloads.",
+        },
+      },
+      required: ["entity_id"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_logbook",
+    title: "Get Activity Logbook",
+    description: "Get logbook entries showing what happened in Home Assistant. Useful for understanding recent activity and debugging.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_id: { type: "string", description: "Filter by specific entity" },
+        start_time: { type: "string", description: "Start time in ISO format. Defaults to 24 hours ago." },
+        end_time: { type: "string", description: "End time in ISO format. Defaults to now." },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  
+  // === CONFIGURATION ===
+  {
+    name: "get_config",
+    title: "Get Home Assistant Configuration",
+    description: "Get Home Assistant configuration including location, units, version, and loaded components.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_agent_capabilities",
+    title: "Get Agent Capability Status",
+    description: "Summarize OpenCode's current Home Assistant agent capabilities and detect whether the running Home Assistant instance exposes the native llm component and native MCP endpoints such as /api/mcp/<API ID>. Use this when deciding how to combine OpenCode MCP tools with Home Assistant's emerging native LLM platform.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_ha_llm_development_guide",
+    title: "Get HA Native LLM Development Guide",
+    description: "Return a concise guide and starter template for building Home Assistant native <integration>/llm.py tool providers. Use when helping users develop or review custom integrations for HA's native LLM platform.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        integration_domain: {
+          type: "string",
+          description: "Integration domain to use in the starter template, for example 'my_integration'.",
+        },
+        tool_class: {
+          type: "string",
+          description: "Python class name for the example tool. Defaults to ExampleStatusTool.",
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_areas",
+    title: "List All Areas",
+    description: "List all areas defined in Home Assistant with their IDs and names.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    outputSchema: SCHEMAS.areaArray,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_devices",
+    title: "List Devices",
+    description: "List devices registered in Home Assistant, optionally filtered by area.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        area_id: { type: "string", description: "Filter devices by area ID" },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "validate_config",
+    title: "Validate Configuration",
+    description: "Validate Home Assistant configuration files. Run this before restarting to catch errors.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    outputSchema: SCHEMAS.configValidation,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_error_log",
+    title: "Get Error Log",
+    description: "Get the Home Assistant error log. On Supervisor systems where the file-backed error log is unavailable, returns Core journal logs instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        lines: { type: "integer", minimum: 1, maximum: 500, description: "Number of lines to return (default: 100, max: 500)" },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  
+  // === EVENTS & TEMPLATES ===
+  {
+    name: "fire_event",
+    title: "Fire Custom Event",
+    description: "Fire a custom event in Home Assistant. Can be used to trigger automations or communicate between systems.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        event_type: { type: "string", description: "Event type to fire (e.g., 'custom_event', 'my_notification')" },
+        event_data: { type: "object", description: "Optional data to include with the event" },
+      },
+      required: ["event_type"],
+      additionalProperties: false,
+    },
+    annotations: {
+      destructive: true,
+      idempotent: false,
+    },
+  },
+  {
+    name: "render_template",
+    title: "Render Jinja2 Template",
+    description: "Render a Jinja2 template using Home Assistant's template engine. Powerful for complex data extraction and formatting.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        template: { type: "string", description: "Jinja2 template (e.g., '{{ states(\"sensor.temperature\") }}', '{{ now() }}')" },
+      },
+      required: ["template"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  
+  // === CALENDARS ===
+  {
+    name: "get_calendars",
+    title: "List Calendars",
+    description: "List all calendar entities in Home Assistant.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_calendar_events",
+    title: "Get Calendar Events",
+    description: "Get events from a specific calendar within a time range.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        calendar_entity: { type: "string", description: "Calendar entity ID (e.g., 'calendar.family')" },
+        start: { type: "string", description: "Start time in ISO format" },
+        end: { type: "string", description: "End time in ISO format" },
+      },
+      required: ["calendar_entity"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  
+  // === INTELLIGENCE ===
+  {
+    name: "detect_anomalies",
+    title: "Detect Anomalies",
+    description: "Scan all entities for potential anomalies like low batteries, unusual sensor readings, or devices in unexpected states.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: { type: "string", description: "Limit scan to specific domain" },
+      },
+      additionalProperties: false,
+    },
+    outputSchema: SCHEMAS.anomalyArray,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_suggestions",
+    title: "Get Automation Suggestions",
+    description: "Get intelligent automation and optimization suggestions based on your current Home Assistant setup.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    outputSchema: SCHEMAS.suggestionArray,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "diagnose_entity",
+    title: "Diagnose Entity",
+    description: "Run diagnostics on an entity to help troubleshoot issues. Checks state history, related entities, and common problems.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_id: { type: "string", description: "Entity to diagnose" },
+      },
+      required: ["entity_id"],
+      additionalProperties: false,
+    },
+    outputSchema: SCHEMAS.diagnostics,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  
+  // === DOCUMENTATION ===
+  {
+    name: "get_integration_docs",
+    title: "Get Integration Documentation",
+    description: "Fetch current documentation for a Home Assistant integration. Use this BEFORE writing configuration to ensure you use the latest syntax. Returns configuration examples, setup instructions, and deprecation notices.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        integration: {
+          type: "string",
+          description: "Integration name (e.g., 'template', 'mqtt', 'rest', 'sensor', 'automation')",
+        },
+        section: {
+          type: "string",
+          enum: ["all", "configuration", "examples"],
+          description: "Which section to focus on (default: 'configuration')",
+        },
+      },
+      required: ["integration"],
+      additionalProperties: false,
+    },
+    outputSchema: SCHEMAS.integrationDocs,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_breaking_changes",
+    title: "Get Breaking Changes",
+    description: "Fetch recent breaking changes from Home Assistant release notes. Use this when troubleshooting configurations that stopped working after an update, or to check compatibility before suggesting configurations.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        integration: {
+          type: "string",
+          description: "Filter by specific integration name (optional)",
+        },
+        version: {
+          type: "string",
+          description: "Get changes for a specific HA version (e.g., '2024.12'). Defaults to recent versions.",
+        },
+      },
+      additionalProperties: false,
+    },
+    outputSchema: SCHEMAS.breakingChanges,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "check_config_syntax",
+    title: "Check Configuration Syntax",
+    description: "Analyze YAML configuration for deprecated syntax patterns and suggest modern alternatives. Use this to validate configuration before presenting it to the user.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        yaml_config: {
+          type: "string",
+          description: "The YAML configuration to check",
+        },
+        integration: {
+          type: "string",
+          description: "The integration this config is for (helps with specific checks)",
+        },
+      },
+      required: ["yaml_config"],
+      additionalProperties: false,
+    },
+    outputSchema: SCHEMAS.configSyntaxCheck,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "write_config_safe",
+    title: "Safe Config Writer",
+    description: "Write YAML configuration to a file with automatic validation and content protection. Checks for deprecations, validates Jinja2 templates through HA's engine, verifies structural correctness, and runs HA's full config check. If validation fails, the original file is restored and errors are returned for correction. IMPORTANT: This tool blocks writes that would accidentally reduce content â€” removing list entries, dropping top-level keys, or significantly shrinking the file. Always read the existing file first and include all existing content in your write. Use dry_run=true to validate without writing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file_path: {
+          type: "string",
+          description: "Path relative to /homeassistant/ (e.g., 'configuration.yaml', 'automations.yaml', 'packages/lights.yaml')",
+        },
+        content: {
+          type: "string",
+          description: "The YAML content to write",
+        },
+        dry_run: {
+          type: "boolean",
+          description: "If true, validate without writing to disk (default: false). Use this to pre-check config before committing.",
+        },
+        validate_templates: {
+          type: "boolean",
+          description: "If true (default), extract and validate Jinja2 templates through HA's template engine.",
+        },
+        confirm_deletions: {
+          type: "boolean",
+          description: "If true, confirms that you intentionally want to reduce content in this file. Default: false. Without this flag, writes are blocked if they would: (1) reduce list entries in automations.yaml/scripts.yaml/scenes.yaml, (2) remove top-level keys from mapping files like configuration.yaml, or (3) reduce the file size by more than 50%. This prevents accidental data loss when the AI writes without reading the existing file first.",
+        },
+      },
+      required: ["file_path", "content"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: false,
+      destructive: false,
+    },
+  },
+  
+  // === DECISION NOTES ===
+  {
+    name: "remember_decision",
+    title: "Remember a Decision",
+    description:
+      "Record a lasting decision or constraint about this Home Assistant installation so future sessions honor it — " +
+      "for example 'this integration was removed deliberately', 'the privacy toggle is inverted on purpose', or " +
+      "'leave the Node-RED automations alone'. " +
+      "ASK THE USER FIRST and only call this after they agree; set user_approved=true to confirm they did. " +
+      "Record durable reasoning, not activity: what was decided and why it should stay that way. Do not log routine " +
+      "actions, troubleshooting steps, or anything already visible in the configuration files. " +
+      "Never include passwords, tokens, or any value from secrets.yaml — such notes are rejected. " +
+      `Up to ${DECISION_LIMITS.maxActive} active notes are stored; how many of them fit the session digest depends ` +
+      "on their length, and the digest states how many it is showing. Supersede notes that no longer apply.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: `Short claim, up to ${DECISION_LIMITS.title} characters (e.g. 'Node-RED automations are off limits').`,
+        },
+        decision: {
+          type: "string",
+          description:
+            `What was decided, up to ${DECISION_LIMITS.decision} characters. This text is injected into every ` +
+            "future session, so keep it to the decision itself.",
+        },
+        rationale: {
+          type: "string",
+          description:
+            `Why, up to ${DECISION_LIMITS.rationale} characters. Stored but not injected — it is retrieved on ` +
+            "demand with recall_decisions.",
+        },
+        entities: {
+          type: "array",
+          items: { type: "string" },
+          description: "Entity IDs this decision concerns.",
+        },
+        files: {
+          type: "array",
+          items: { type: "string" },
+          description: "Configuration files this decision concerns, relative to /homeassistant.",
+        },
+        integrations: {
+          type: "array",
+          items: { type: "string" },
+          description: "Integration domains this decision concerns.",
+        },
+        supersedes: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Ids of existing notes this one replaces. They are marked superseded rather than deleted, which is how " +
+            "the digest is kept small.",
+        },
+        pin: {
+          type: "boolean",
+          description:
+            "Keep this note in the session digest even when older notes no longer fit. Use sparingly — only for a " +
+            `constraint that must never be reversed by accident. At most ${DECISION_LIMITS.maxPinned} notes can be ` +
+            "pinned, and the user should agree to the pin as well as to the note.",
+        },
+        user_approved: {
+          type: "boolean",
+          description:
+            "Set to true only after the user has explicitly agreed to record this note. Ask them first; do not " +
+            "assume approval from a general request.",
+        },
+      },
+      required: ["title", "decision", "user_approved"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: false,
+      destructive: false,
+    },
+  },
+  {
+    name: "recall_decisions",
+    title: "Recall Decisions",
+    description:
+      "Read the full decision notes for this installation, including the rationale, any notes that did not fit the " +
+      "session digest, and superseded history. Use this when you need the reasoning behind a note, when a request " +
+      "appears to conflict with one, when you are about to change something that looks deliberate, or when the user " +
+      "asks what has been decided before. The session digest is a summary that may be incomplete — this tool is the " +
+      "authority on what has been decided.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Words to match against title, decision, rationale, and references. Ranked by relevance, so a plain " +
+            "question ('why is the camera toggle inverted') works. Omit to list every note.",
+        },
+        include_superseded: {
+          type: "boolean",
+          description: "Include notes that have been superseded (default: false).",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum notes to return (default: 20, max: 100).",
+          minimum: 1,
+          maximum: 100,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "supersede_decision",
+    title: "Supersede a Decision",
+    description:
+      "Retire decision notes that no longer apply. They are marked superseded rather than deleted, so the history " +
+      "stays in decisions.yaml while dropping out of the session digest. " +
+      "ASK THE USER FIRST — retiring a note changes how future sessions behave.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Note ids to supersede, as reported by recall_decisions.",
+        },
+        user_approved: {
+          type: "boolean",
+          description: "Set to true only after the user has explicitly agreed to retire these notes.",
+        },
+      },
+      required: ["ids", "user_approved"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: true,
+      destructive: false,
+    },
+  },
+
+  // === UPDATE MANAGEMENT ===
+  {
+    name: "get_available_updates",
+    title: "Get Available Updates",
+    description: "Check for available updates across Home Assistant Core, OS, Supervisor, and all installed apps. Returns version info and update status for each component.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        component: {
+          type: "string",
+          enum: ["all", "core", "os", "supervisor", "addons"],
+          description: "Which component to check (default: 'all')",
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_addon_changelog",
+    title: "Get App Changelog",
+    description: "Get the changelog for an installed app to see what changes are included in updates.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        addon_slug: {
+          type: "string",
+          description: "The slug identifier of the app (e.g., 'core_configurator', 'a0d7b954_vscode')",
+        },
+      },
+      required: ["addon_slug"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "update_component",
+    title: "Update Component",
+    description: "Initiate an update for a Home Assistant component (Core, OS, Supervisor) or an app. Returns a job_id for progress monitoring. NOTE: Cannot update OpenCode itself from within - use Home Assistant UI for self-updates.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        component: {
+          type: "string",
+          enum: ["core", "os", "supervisor", "addon"],
+          description: "Type of component to update",
+        },
+        addon_slug: {
+          type: "string",
+          description: "Required if component is 'addon' - the app's slug identifier",
+        },
+        backup: {
+          type: "boolean",
+          description: "Create a backup before updating (default: true for core/addons)",
+        },
+      },
+      required: ["component"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      destructive: false,
+      idempotent: false,
+    },
+  },
+  {
+    name: "get_update_progress",
+    title: "Get Update Progress",
+    description: "Monitor the progress of a running update job. Poll this endpoint to get real-time progress updates including percentage, current stage, and completion status.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: {
+          type: "string",
+          description: "The job UUID returned when initiating an update",
+        },
+      },
+      required: ["job_id"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_running_jobs",
+    title: "Get Running Jobs",
+    description: "List all currently running or recently completed Supervisor jobs. Useful for monitoring ongoing operations like updates, backups, or restores.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  
+  // === ESPHOME INTEGRATION ===
+  {
+    name: "esphome_list_devices",
+    title: "List ESPHome Devices",
+    description: "List all configured ESPHome devices with current and deployed firmware versions. Requires ESPHome add-on to be installed and running.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "esphome_compile",
+    title: "Compile ESPHome Firmware",
+    description: "Compile firmware for an ESPHome device. Returns the full build log including any errors. This may take 1-5 minutes depending on device complexity.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        device: {
+          type: "string",
+          description: "Device name or configuration file name (e.g., 'living-room-sensor' or 'living-room-sensor.yaml')",
+        },
+      },
+      required: ["device"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: true,
+    },
+  },
+  {
+    name: "esphome_upload",
+    title: "Upload ESPHome Firmware",
+    description: "Upload compiled firmware to an ESPHome device via OTA (Over-The-Air) or USB. For OTA, the device must be online and reachable.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        device: {
+          type: "string",
+          description: "Device name or configuration file name",
+        },
+        port: {
+          type: "string",
+          description: "Upload target - device IP/hostname for OTA (e.g., '192.168.1.100') or USB path (e.g., '/dev/ttyUSB0')",
+        },
+      },
+      required: ["device", "port"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: false,
+    },
+  },
+  
+  // === FIRMWARE UPDATE MONITORING ===
+  {
+    name: "watch_firmware_update",
+    title: "Watch Firmware Update Progress",
+    description: "Check firmware update status or start an update. Returns current state immediately (does not block). Call repeatedly to monitor progress. For ESPHome, WLED, Zigbee coordinators, and other device updates.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_id: {
+          type: "string",
+          description: "The update entity to check (e.g., 'update.garage_sensor_firmware', 'update.wled_living_room_update')",
+        },
+        start_update: {
+          type: "boolean",
+          description: "If true, start the update. If false (default), just check current status.",
+        },
+      },
+      required: ["entity_id"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: false,
+    },
+  },
+  {
+    name: "hab_run",
+    title: "Run hab CLI Command",
+    description: "Run a Home Assistant Builder (hab) CLI command. hab is a comprehensive admin CLI that covers the full Home Assistant admin area via REST and WebSocket APIs. Use this for: dashboard CRUD (create views, sections, cards), area/floor/zone/label/person/category management, helper entity creation, automation/script/scene CRUD, backup/restore, blueprint management, calendar and todo list management, notification management, integration reload/enable/disable, repair issue management, event firing, template rendering, device management, and search. hab outputs human-readable text by default; add --json for structured JSON output. Examples: 'entity list --domain light --json', 'area create Kitchen', 'scene activate \"Movie Time\"', 'todo item add todo.shopping Milk', 'notification create --message \"Done\" --title \"Status\"', 'integration reload hue', 'repairs list --json', 'template render --expression \"{{ states(\\'sensor.temp\\') }}\"'. Run with just 'help' to see all available command groups.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description: "The hab command and arguments to run (without the 'hab' prefix). Examples: 'entity list --json', 'area create Kitchen', 'dashboard list', 'automation get my-automation', 'helper create input_boolean --name \"Guest Mode\"', 'scene list --json', 'todo item add todo.shopping \"Buy milk\"', 'notification list --json', 'integration reload hue', 'repairs list --json', 'person list --json', 'backup create', 'system info', 'overview --json'",
+        },
+      },
+      required: ["command"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: false,
+    },
+  },
+  {
+    name: "zigporter_run",
+    title: "Run zigporter CLI Command",
+    description:
+      "Run a zigporter CLI command for Zigbee device management. " +
+      "zigporter handles cascade entity/device renames (updating ALL references " +
+      "in automations, scripts, scenes, and dashboards), device inspection across " +
+      "ZHA and Z2M, stale device cleanup, and mesh visualization. Key commands: " +
+      "'rename-entity old new --apply' (cascade rename), " +
+      "'rename-device \"Old\" \"New\" --apply', " +
+      "'inspect \"Device\" --json', 'list-devices --json', 'list-z2m --json', " +
+      "'stale \"Device\" --action remove', 'fix-device \"Device\" --apply', " +
+      "'network-map --format table', 'check'. " +
+      "Always dry-run renames first (omit --apply).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description:
+            "The zigporter command and arguments to run (without the 'zigporter' prefix). " +
+            "Examples: 'list-devices --json', 'inspect \"Kitchen\" --json', " +
+            "'rename-entity light.old light.new', " +
+            "'rename-entity light.old light.new --apply', " +
+            "'stale \"Device\" --action remove'",
+        },
+      },
+      required: ["command"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: false,
+    },
+  },
+  {
+    name: "screenshot_url",
+    title: "Screenshot Home Assistant Page",
+    description: "Take a screenshot of any Home Assistant page for visual verification. Use this after making dashboard changes, creating views or cards via hab, or any time you need to visually verify a result. Requires a model that accepts image input: the PNG comes back as an image part in the tool result, and a model without image input receives a short rejection notice in place of the picture. If that happens, say plainly that your current model cannot see images and suggest switching to one that can - do not describe the page, and do not claim the screenshot was saved anywhere, because nothing is written to disk. Requires the 'screenshot_enabled' option and a Long-Lived Access Token. Examples: '/lovelace/0' (default dashboard), '/energy' (energy panel), '/config/dashboard' (settings), '/dashboard-custom/my-view' (custom dashboard).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url_path: {
+          type: "string",
+          description: "The HA page path to screenshot (e.g., '/lovelace/0', '/energy', '/config/dashboard', '/dashboard-name/view-index')",
+        },
+        width: {
+          type: "number",
+          minimum: 320,
+          maximum: 3840,
+          description: "Viewport width in pixels (default: 1280, range: 320-3840)",
+        },
+        height: {
+          type: "number",
+          minimum: 240,
+          maximum: 2160,
+          description: "Viewport height in pixels (default: 720, range: 240-2160)",
+        },
+        wait_seconds: {
+          type: "number",
+          minimum: 0,
+          maximum: 15,
+          description: "Seconds to wait after page load for dynamic content to render (default: 3, max: 15)",
+        },
+        full_page: {
+          type: "boolean",
+          description: "Capture full scrollable page instead of just viewport (default: false)",
+        },
+      },
+      required: ["url_path"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+];
+
+// ============================================================================
+// RESOURCES DEFINITION - With titles
+// ============================================================================
+
+const RESOURCES = [
+  {
+    uri: "ha://states/summary",
+    name: "state_summary",
+    title: "State Summary",
+    description: "Human-readable summary of all Home Assistant entity states",
+    mimeType: "text/markdown",
+  },
+  {
+    uri: "ha://automations",
+    name: "automations",
+    title: "Automations List",
+    description: "List of all automations with their current state and last triggered time",
+    mimeType: "application/json",
+  },
+  {
+    uri: "ha://scripts",
+    name: "scripts",
+    title: "Scripts List",
+    description: "List of all scripts available in Home Assistant",
+    mimeType: "application/json",
+  },
+  {
+    uri: "ha://scenes",
+    name: "scenes",
+    title: "Scenes List",
+    description: "List of all scenes that can be activated",
+    mimeType: "application/json",
+  },
+  {
+    uri: "ha://areas",
+    name: "areas",
+    title: "Areas List",
+    description: "All areas defined in Home Assistant with associated entities",
+    mimeType: "application/json",
+  },
+  {
+    uri: "ha://config",
+    name: "config",
+    title: "HA Configuration",
+    description: "Home Assistant configuration details",
+    mimeType: "application/json",
+  },
+  {
+    uri: "ha://agent/capabilities",
+    name: "agent_capabilities",
+    title: "Agent Capabilities",
+    description: "OpenCode MCP capabilities and Home Assistant native LLM readiness status",
+    mimeType: "application/json",
+  },
+  {
+    uri: "ha://integrations",
+    name: "integrations",
+    title: "Loaded Integrations",
+    description: "List of loaded integrations/components",
+    mimeType: "application/json",
+  },
+  {
+    uri: "ha://anomalies",
+    name: "anomalies",
+    title: "Detected Anomalies",
+    description: "Currently detected anomalies and potential issues",
+    mimeType: "application/json",
+  },
+  {
+    uri: "ha://suggestions",
+    name: "suggestions",
+    title: "Automation Suggestions",
+    description: "Automation and optimization suggestions",
+    mimeType: "application/json",
+  },
+];
+
+const RESOURCE_TEMPLATES = [
+  {
+    uriTemplate: "ha://states/{domain}",
+    name: "states_by_domain",
+    title: "States by Domain",
+    description: "Get all entity states for a specific domain (e.g., light, switch, sensor)",
+    mimeType: "application/json",
+  },
+  {
+    uriTemplate: "ha://entity/{entity_id}",
+    name: "entity_details",
+    title: "Entity Details",
+    description: "Detailed information about a specific entity",
+    mimeType: "application/json",
+  },
+  {
+    uriTemplate: "ha://area/{area_id}",
+    name: "area_details",
+    title: "Area Details",
+    description: "All entities and devices in a specific area",
+    mimeType: "application/json",
+  },
+  {
+    uriTemplate: "ha://history/{entity_id}",
+    name: "entity_history",
+    title: "Entity History",
+    description: "Recent state history for an entity (last 24 hours)",
+    mimeType: "application/json",
+  },
+];
+
+// ============================================================================
+// PROMPTS DEFINITION - With titles
+// ============================================================================
+
+const PROMPTS = [
+  {
+    name: "troubleshoot_entity",
+    title: "Troubleshoot Entity",
+    description: "Guided troubleshooting for a problematic entity. Analyzes state, history, and related entities to identify issues.",
+    arguments: [
+      { name: "entity_id", description: "The entity ID that's having problems", required: true },
+      { name: "problem_description", description: "Brief description of the problem", required: false },
+    ],
+  },
+  {
+    name: "create_automation",
+    title: "Create Automation",
+    description: "Step-by-step guide to create a new automation. Helps identify triggers, conditions, and actions.",
+    arguments: [
+      { name: "goal", description: "What you want the automation to accomplish", required: true },
+    ],
+  },
+  {
+    name: "energy_audit",
+    title: "Energy Audit",
+    description: "Analyze energy usage and suggest optimizations. Reviews power sensors, lights, climate, and usage patterns.",
+    arguments: [],
+  },
+  {
+    name: "scene_builder",
+    title: "Scene Builder",
+    description: "Interactive scene creation assistant. Captures current states or helps design new scenes.",
+    arguments: [
+      { name: "area", description: "Area to create scene for (optional)", required: false },
+      { name: "mood", description: "Desired mood/atmosphere (e.g., 'relaxing', 'movie night', 'energizing')", required: false },
+    ],
+  },
+  {
+    name: "security_review",
+    title: "Security Review",
+    description: "Review security-related entities and suggest improvements. Checks locks, sensors, cameras, and alarm systems.",
+    arguments: [],
+  },
+  {
+    name: "morning_routine",
+    title: "Morning Routine Designer",
+    description: "Design a morning routine automation based on your devices and preferences.",
+    arguments: [
+      { name: "wake_time", description: "Usual wake-up time (e.g., '7:00 AM')", required: false },
+    ],
+  },
+];
+
+async function getAgentCapabilities() {
+  const [config, nativeMcp] = await Promise.all([
+    callHA("/config"),
+    probeNativeHaMcpReadiness(),
+  ]);
+  return buildAgentCapabilities({
+    haConfig: config,
+    nativeMcp,
+    tools: TOOLS,
+    resources: RESOURCES,
+    resourceTemplates: RESOURCE_TEMPLATES,
+    prompts: PROMPTS,
+  });
+}
+
+async function probeNativeHaMcpReadiness() {
+  const baseProbe = probeNativeMcpEndpoint({
+    supervisorToken: SUPERVISOR_TOKEN,
+    baseUrl: SUPERVISOR_API,
+    timeoutMs: NATIVE_MCP_PROBE_TIMEOUT_MS,
+  });
+  const configuredProbe = HA_NATIVE_MCP_API_ID
+    ? probeNativeMcpEndpoint({
+      supervisorToken: SUPERVISOR_TOKEN,
+      baseUrl: SUPERVISOR_API,
+      apiId: HA_NATIVE_MCP_API_ID,
+      timeoutMs: NATIVE_MCP_PROBE_TIMEOUT_MS,
+    })
+    : baseProbe;
+  const assistProbe = HA_NATIVE_MCP_API_ID === NATIVE_MCP_ASSIST_API_ID
+    ? configuredProbe
+    : probeNativeMcpEndpoint({
+      supervisorToken: SUPERVISOR_TOKEN,
+      baseUrl: SUPERVISOR_API,
+      apiId: NATIVE_MCP_ASSIST_API_ID,
+      timeoutMs: NATIVE_MCP_PROBE_TIMEOUT_MS,
+    });
+
+  const [base, configured, assist] = await Promise.all([baseProbe, configuredProbe, assistProbe]);
+
+  return {
+    upstream: {
+      llm_integration_pr: "home-assistant/core#174253",
+      assist_api_pr: "home-assistant/core#175659",
+      keyed_endpoint_pr: "home-assistant/core#175570",
+      tool_schema_fix_pr: "home-assistant/core#176814",
+      llm_docs_pr: "home-assistant/developers.home-assistant#3236",
+      tool_platform_docs_pr: "home-assistant/developers.home-assistant#3201",
+      first_release: "2026.8.0",
+      endpoint_pattern: "/api/mcp/<API ID>",
+      configured_endpoint: "/api/mcp",
+      assist_api_id: NATIVE_MCP_ASSIST_API_ID,
+    },
+    configured_api_id: HA_NATIVE_MCP_API_ID,
+    configured_endpoint_mode: HA_NATIVE_MCP_API_ID ? "keyed_api" : "configured_api",
+    base,
+    configured,
+    assist,
+  };
+}
+
+/**
+ * Build a compact JSON content block.
+ *
+ * `pretty` is forwarded rather than defaulted here, so the single statement of
+ * the default lives in createJsonTextContent (lib/helpers.js), which is off.
+ * Indentation is whitespace the model pays for on every request the result
+ * stays in history: on a large get_states payload compact measured roughly a
+ * quarter fewer characters (23-28%, depending on how many entities carry a
+ * friendly_name and device_class), and nothing reads these blocks but the model.
+ */
+function createCompactJsonContent(summary, data, meta = {}, options = {}) {
+  return createJsonTextContent(createCompactPayload(summary, data, meta), {
+    pretty: options.pretty,
+    audience: options.audience || ["assistant"],
+    priority: options.priority ?? 0.7,
+  });
+}
+
+function createCommandOutputContent(toolName, command, output, options = {}) {
+  const text = String(output ?? "").trim();
+  const baseMeta = { tool: toolName, command };
+
+  try {
+    const parsed = JSON.parse(text);
+    const rawJson = JSON.stringify(parsed);
+    if (rawJson.length <= CLI_OUTPUT_MAX_CHARS) {
+      return createCompactJsonContent(
+        `${toolName} command completed`,
+        parsed,
+        { ...baseMeta, format: "json", truncated: false, original_chars: rawJson.length },
+        options
+      );
+    }
+
+    const truncated = truncateText(rawJson, { maxChars: CLI_OUTPUT_MAX_CHARS });
+    return createCompactJsonContent(
+      `${toolName} command completed with large JSON output`,
+      { raw_json_preview: truncated.text },
+      { ...baseMeta, format: "json", ...truncated, text: undefined },
+      options
+    );
+  } catch {
+    const truncated = truncateText(text, { maxChars: CLI_OUTPUT_MAX_CHARS });
+    return createCompactJsonContent(
+      `${toolName} command completed`,
+      { output: truncated.text },
+      { ...baseMeta, format: "text", ...truncated, text: undefined },
+      options
+    );
+  }
+}
+
+// ============================================================================
+// REQUEST HANDLERS
+// ============================================================================
+
+// --- Logging: Set Level ---
+server.setRequestHandler(SetLevelRequestSchema, async (request) => {
+  const { level } = request.params;
+  if (LOG_LEVELS.includes(level)) {
+    currentLogLevel = level;
+    sendLog("info", "mcp-server", { action: "log_level_changed", level });
+    return {};
+  }
+  throw new Error(`Invalid log level: ${level}`);
+});
+
+// --- List Tools ---
+// Tools for features the user has turned off are not advertised at all, so
+// they neither cost tool-list tokens nor invite calls that can only fail.
+const DECISION_NOTE_TOOLS = new Set(["remember_decision", "recall_decisions", "supersede_decision"]);
+// screenshot_url needs both the option and a token; without either it could only
+// ever return the setup error, so it is not advertised at all.
+const SCREENSHOT_TOOLS = new Set(["screenshot_url"]);
+const SCREENSHOT_AVAILABLE = SCREENSHOT_ENABLED && Boolean(HA_ACCESS_TOKEN);
+
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  sendLog("debug", "mcp-server", { action: "list_tools" });
+  // Strip newer MCP spec fields that some clients may not support
+  // Keep only: name, description, inputSchema (standard fields)
+  const compatibleTools = TOOLS
+    .filter(tool => DECISION_NOTES_ENABLED || !DECISION_NOTE_TOOLS.has(tool.name))
+    .filter(tool => SCREENSHOT_AVAILABLE || !SCREENSHOT_TOOLS.has(tool.name))
+    .map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    }));
+  return { tools: compatibleTools };
+});
+
+// --- Call Tool ---
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  sendLog("info", "mcp-server", { action: "call_tool", tool: name, args });
+
+  // Helper to strip unsupported MCP features from response for OpenCode compatibility
+  const makeCompatibleResponse = (result) => {
+    // Keep only standard fields: content, isError
+    // Remove: structuredContent, resourceLinks (not supported by OpenCode)
+    return {
+      content: result.content,
+      ...(result.isError && { isError: result.isError }),
+    };
+  };
+
+  try {
+    let result;
+    switch (name) {
+      // === STATE MANAGEMENT ===
+      case "get_states": {
+        if (args?.entity_id) {
+          const state = await callHA(`/states/${args.entity_id}`);
+          return makeCompatibleResponse({
+            content: [
+              createCompactJsonContent(
+                `State for ${args.entity_id}`,
+                state,
+                { returned: 1, truncated: false },
+                { audience: ["assistant"], priority: 0.8 }
+              ),
+            ],
+          });
+        }
+        
+        let states = await getCachedStates();
+        if (args?.domain) {
+          states = states.filter((s) => s.entity_id.startsWith(`${args.domain}.`));
+        }
+
+        if (args?.summarize) {
+          const summary = generateStateSummary(states);
+          return makeCompatibleResponse({
+            content: [createTextContent(summary, { audience: ["user", "assistant"], priority: 0.9 })],
+          });
+        }
+
+        const simplified = states.map((s) => ({
+          entity_id: s.entity_id,
+          state: s.state,
+          friendly_name: s.attributes?.friendly_name,
+          device_class: s.attributes?.device_class,
+        }));
+        const cap = args?.domain ? STATE_RESULT_CAP : UNFILTERED_STATE_RESULT_CAP;
+        const truncated = simplified.length > cap;
+        const returned = truncated ? simplified.slice(0, cap) : simplified;
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            truncated
+              ? `Showing ${returned.length} of ${simplified.length} entities, in the order Home Assistant ` +
+                "returned them — this is an arbitrary window, not a ranked or alphabetical one, so absence " +
+                "from it proves nothing about what exists. " +
+                (args?.domain
+                  ? "Narrow with entity_id, or use summarize for a complete per-domain census."
+                  : "Narrow with domain or entity_id, or use summarize for a complete per-domain census.")
+              : `Returned ${returned.length} entities`,
+            returned,
+            {
+              total: simplified.length,
+              returned: returned.length,
+              truncated,
+              filters: {
+                domain: args?.domain || null,
+              },
+            },
+            { audience: ["assistant"], priority: 0.7 }
+          )],
+        });
+      }
+
+      case "search_entities": {
+        const states = await getCachedStates();
+        const results = searchEntities(states, args.query);
+        
+        return makeCompatibleResponse({
+          content: [
+            createTextContent(
+              results.length > 0 
+                ? JSON.stringify(results, null, 2)
+                : `No entities found matching "${args.query}"`,
+              { audience: ["assistant"], priority: 0.8 }
+            ),
+          ],
+        });
+      }
+
+      case "get_entity_details": {
+        const relationships = await getEntityRelationships(args.entity_id);
+        return makeCompatibleResponse({
+          content: [createTextContent(JSON.stringify(relationships, null, 2), { audience: ["assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "get_home_context": {
+        const context = await buildHomeContext(args || {});
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            context.summary,
+            {
+              filters: context.filters,
+              matched_areas: context.matched_areas,
+              domain_counts: context.domain_counts,
+              entities: context.entities,
+            },
+            {
+              total_matches: context.total_matches,
+              returned: context.returned,
+              truncated: context.truncated,
+            },
+            { audience: ["assistant"], priority: 0.85 }
+          )],
+        });
+      }
+
+      // === SERVICE CALLS ===
+      case "call_service": {
+        const { domain, service, target, data, return_response: requestedResponse } = args;
+        sendLog("notice", "ha-service", { action: "call", domain, service, target });
+
+        const payload = { ...data };
+        if (target) {
+          Object.assign(payload, target);
+        }
+
+        const support = readServiceResponseSupport(await getServiceCatalogSafely(), domain, service);
+        const plan = planServiceCall(support, requestedResponse);
+        const notes = plan.note ? [plan.note] : [];
+        let returnResponse = plan.returnResponse;
+
+        let result;
+        try {
+          result = await callHA(buildServiceCallPath(domain, service, returnResponse), "POST", payload);
+        } catch (error) {
+          // A cached catalog can lag a reloaded integration. Home Assistant's
+          // 400 says exactly which way the flag was wrong, so take it at its
+          // word and retry once rather than handing back an error the caller
+          // could only fix by repeating the call itself.
+          const corrected = error?.status === 400 ? readResponseMismatch(error.message) : null;
+          if (corrected === null || corrected === returnResponse) throw error;
+
+          invalidateServicesCache();
+          returnResponse = corrected;
+          result = await callHA(buildServiceCallPath(domain, service, returnResponse), "POST", payload);
+          notes.push(corrected
+            ? "Home Assistant requires a response for this service; retried with return_response."
+            : "Home Assistant returns no response for this service; retried without return_response.");
+        }
+
+        invalidateStatesCache();
+
+        const { changedStates, serviceResponse, hasResponse } = splitServiceCallResult(result);
+        const lines = [`Service ${domain}.${service} called successfully.`];
+
+        if (hasResponse) {
+          const affected = readAffectedEntities(changedStates);
+          if (affected.length) {
+            lines.push(`Changed entities (${affected.length}): ${affected.join(", ")}`);
+          }
+          // The response is what the caller wanted; the changed-state dump that
+          // shares the envelope is noise beside it, and statistics responses
+          // are large enough that printing both would crowd out the answer.
+          // Compact for the same reason the other tool payloads are: a
+          // statistics response is among the largest things this server can put
+          // in a conversation, and indentation is re-read on every later request.
+          const rendered = truncateText(JSON.stringify(serviceResponse), {
+            maxChars: SERVICE_RESPONSE_MAX_CHARS,
+          });
+          lines.push("Response data:", rendered.text);
+          if (rendered.truncated) {
+            lines.push(`(response truncated: ${rendered.omitted_chars} of ${rendered.original_chars} chars omitted — narrow the request to see the rest)`);
+          }
+        } else {
+          lines.push(JSON.stringify(result, null, 2));
+        }
+
+        lines.push(...notes);
+
+        return makeCompatibleResponse({
+          content: [
+            createTextContent(lines.join("\n"), { audience: ["user", "assistant"], priority: 0.9 }),
+          ],
+        });
+      }
+
+      case "get_services": {
+        const services = await getCachedServices();
+        if (args?.domain) {
+          const filtered = services.filter((s) => s.domain === args.domain);
+          const responseServices = filtered.flatMap((s) =>
+            listResponseCapableServices(s.services).map((name) => `${s.domain}.${name}`));
+          const header = responseServices.length
+            ? `Answers with data (call_service returns it automatically): ${responseServices.join(", ")}\n`
+            : "";
+          return makeCompatibleResponse({
+            content: [createTextContent(header + JSON.stringify(filtered, null, 2), { audience: ["assistant"], priority: 0.6 })],
+          });
+        }
+        // Full catalog with field docs is enormous; unfiltered calls get the
+        // domain/service index and a hint to re-query with a domain. The
+        // `response` flag survives that trim: it is the one field that changes
+        // how a service must be called, so dropping it here would cost a round
+        // trip on exactly the services that need one.
+        const index = services.map((s) => {
+          const entry = {
+            domain: s.domain,
+            services: Object.keys(s.services || {}),
+          };
+          const withResponse = listResponseCapableServices(s.services);
+          if (withResponse.length) entry.returns_response = withResponse;
+          return entry;
+        });
+        return makeCompatibleResponse({
+          content: [createTextContent(
+            `Service index (${index.length} domains). Pass domain for full schemas.\n` +
+            `'returns_response' lists services that answer with data; call_service returns it automatically.\n` +
+            JSON.stringify(index),
+            { audience: ["assistant"], priority: 0.6 }
+          )],
+        });
+      }
+
+      // === HISTORY & LOGBOOK ===
+      case "get_history": {
+        const entityId = args.entity_id;
+        const startTime = args.start_time || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const params = new URLSearchParams({ filter_entity_id: entityId });
+        if (args.end_time) params.append("end_time", args.end_time);
+        // Full attribute payloads are opt-in; minimal keeps chatty sensors cheap
+        if (args.minimal !== false) {
+          params.append("minimal_response", "true");
+          params.append("no_attributes", "true");
+        }
+
+        const history = await callHA(`/history/period/${encodeURIComponent(startTime)}?${params}`);
+        const events = Array.isArray(history?.[0]) ? history[0] : [];
+        const truncated = events.length > HISTORY_RESULT_CAP;
+        const returnedEvents = truncated ? events.slice(-HISTORY_RESULT_CAP) : events;
+        const compactHistory = Array.isArray(history) && history.length > 0 ? [returnedEvents] : history;
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            truncated
+              ? `Returned last ${returnedEvents.length} of ${events.length} history events for ${entityId}`
+              : `Returned ${events.length} history events for ${entityId}`,
+            compactHistory,
+            {
+              entity_id: entityId,
+              start_time: startTime,
+              end_time: args.end_time || null,
+              minimal: args.minimal !== false,
+              total_events: events.length,
+              returned_events: returnedEvents.length,
+              truncated,
+            },
+            { audience: ["assistant"], priority: 0.7, pretty: false }
+          )],
+        });
+      }
+
+      case "get_logbook": {
+        const startTime = args.start_time || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const params = new URLSearchParams();
+        if (args.entity_id) params.append("entity", args.entity_id);
+        if (args.end_time) params.append("end_time", args.end_time);
+
+        const logbook = await callHA(`/logbook/${encodeURIComponent(startTime)}?${params}`);
+        const entries = Array.isArray(logbook) ? logbook : [];
+        const truncated = entries.length > LOGBOOK_RESULT_CAP;
+        const returnedEntries = truncated ? entries.slice(-LOGBOOK_RESULT_CAP) : entries;
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            truncated
+              ? `Returned last ${returnedEntries.length} of ${entries.length} logbook entries`
+              : `Returned ${returnedEntries.length} logbook entries`,
+            returnedEntries,
+            {
+              entity_id: args.entity_id || null,
+              start_time: startTime,
+              end_time: args.end_time || null,
+              total_entries: entries.length,
+              returned_entries: returnedEntries.length,
+              truncated,
+            },
+            { audience: ["assistant"], priority: 0.7, pretty: false }
+          )],
+        });
+      }
+
+      // === CONFIGURATION ===
+      case "get_config": {
+        const config = await callHA("/config");
+        return makeCompatibleResponse({
+          content: [createTextContent(JSON.stringify(config, null, 2), { audience: ["assistant"], priority: 0.6 })],
+        });
+      }
+
+      case "get_agent_capabilities": {
+        const capabilities = await getAgentCapabilities();
+        return makeCompatibleResponse({
+          content: [createTextContent(JSON.stringify(capabilities, null, 2), { audience: ["assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "get_ha_llm_development_guide": {
+        return makeCompatibleResponse({
+          content: [createTextContent(buildHaLlmDevelopmentGuide(args || {}), { audience: ["assistant"], priority: 0.85 })],
+        });
+      }
+
+      case "get_areas": {
+        const areas = await getRegistry("config/area_registry/list");
+        const result = JSON.stringify(areas.map((a) => ({ id: a.area_id, name: a.name })));
+        return makeCompatibleResponse({
+          content: [createTextContent(result, { audience: ["assistant"], priority: 0.7 })],
+        });
+      }
+
+      case "get_devices": {
+        let devices = await getRegistry("config/device_registry/list");
+        if (args?.area_id) {
+          devices = devices.filter((d) => d.area_id === args.area_id);
+        }
+        const result = JSON.stringify(devices.map((d) => ({
+          id: d.id,
+          name: d.name_by_user || d.name,
+          manufacturer: d.manufacturer,
+          model: d.model,
+          ...(args?.area_id ? {} : { area: d.area_id }),
+        })));
+        return makeCompatibleResponse({
+          content: [createTextContent(result, { audience: ["assistant"], priority: 0.6 })],
+        });
+      }
+
+      case "validate_config": {
+        const result = await callHA("/config/core/check_config", "POST", null, CHECK_CONFIG_TIMEOUT_MS);
+        return makeCompatibleResponse({
+          content: [
+            createTextContent(
+              JSON.stringify(result, null, 2),
+              { audience: ["user", "assistant"], priority: 0.9 }
+            ),
+          ],
+        });
+      }
+
+      case "get_error_log": {
+        // Supervisor proxies http://supervisor/core/api/* to HA's /api/*
+        const requestedLines = Number.isFinite(args?.lines) ? args.lines : 100;
+        const lines = Math.max(1, Math.min(500, Math.trunc(requestedLines)));
+        const { text: log, source } = await getErrorLogWithFallback(lines);
+        const result = formatErrorLogResult({ text: log, source, requestedLines, lines });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            result.summary,
+            result.data,
+            result.meta,
+            { audience: ["assistant"], priority: 0.8 }
+          )],
+        });
+      }
+
+      // === EVENTS & TEMPLATES ===
+      case "fire_event": {
+        const { event_type, event_data } = args;
+        sendLog("notice", "ha-event", { action: "fire", event_type });
+        await callHA(`/events/${event_type}`, "POST", event_data || {});
+        return makeCompatibleResponse({
+          content: [createTextContent(`Event '${event_type}' fired successfully.`, { audience: ["user"], priority: 0.9 })],
+        });
+      }
+
+      case "render_template": {
+        const result = await callHA("/template", "POST", { template: args.template });
+        return makeCompatibleResponse({
+          content: [createTextContent(result, { audience: ["assistant"], priority: 0.8 })],
+        });
+      }
+
+      // === CALENDARS ===
+      case "get_calendars": {
+        const calendars = await callHA("/calendars");
+        return makeCompatibleResponse({
+          content: [createTextContent(JSON.stringify(calendars, null, 2), { audience: ["assistant"], priority: 0.6 })],
+        });
+      }
+
+      case "get_calendar_events": {
+        const { calendar_entity } = args;
+        const start = args.start || new Date().toISOString();
+        const end = args.end || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const events = await callHA(
+          `/calendars/${calendar_entity}?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+        );
+        return makeCompatibleResponse({
+          content: [createTextContent(JSON.stringify(events, null, 2), { audience: ["assistant"], priority: 0.7 })],
+        });
+      }
+
+      // === INTELLIGENCE ===
+      case "detect_anomalies": {
+        let states = await getCachedStates();
+        if (args?.domain) {
+          states = states.filter((s) => s.entity_id.startsWith(`${args.domain}.`));
+        }
+        
+        const anomalies = states
+          .map(detectAnomaly)
+          .filter(Boolean)
+          .sort((a, b) => (b.severity === "warning" ? 1 : 0) - (a.severity === "warning" ? 1 : 0));
+        
+        if (anomalies.length === 0) {
+          return makeCompatibleResponse({
+            content: [createTextContent("No anomalies detected. All entities appear to be operating normally.", { audience: ["user"], priority: 0.9 })],
+          });
+        }
+        
+        return makeCompatibleResponse({
+          content: [
+            createTextContent(
+              `Found ${anomalies.length} potential anomalies:\n\n${JSON.stringify(anomalies, null, 2)}`,
+              { audience: ["user", "assistant"], priority: 0.9 }
+            ),
+          ],
+        });
+      }
+
+      case "get_suggestions": {
+        const states = await getCachedStates();
+        const suggestions = generateSuggestions(states);
+        
+        if (suggestions.length === 0) {
+          return makeCompatibleResponse({
+            content: [createTextContent("No suggestions at this time. Your Home Assistant setup looks well configured!", { audience: ["user"], priority: 0.8 })],
+          });
+        }
+        
+        return makeCompatibleResponse({
+          content: [createTextContent(JSON.stringify(suggestions, null, 2), { audience: ["user", "assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "diagnose_entity": {
+        const { entity_id } = args;
+        sendLog("info", "diagnostics", { action: "diagnose", entity_id });
+        
+        const diagnostics = {
+          entity_id,
+          timestamp: new Date().toISOString(),
+          checks: [],
+        };
+        
+        try {
+          const startTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          const params = new URLSearchParams({
+            filter_entity_id: entity_id,
+            minimal_response: "true",
+          });
+          // One states fetch serves both the entity lookup and relationships;
+          // history runs concurrently
+          const [states, history] = await Promise.all([
+            getCachedStates(),
+            callHA(`/history/period/${encodeURIComponent(startTime)}?${params}`),
+          ]);
+
+          const state = states.find(s => s.entity_id === entity_id);
+          if (!state) {
+            throw new Error(`Entity ${entity_id} not found`);
+          }
+          diagnostics.current_state = state;
+          diagnostics.checks.push({ check: "Current State", status: "ok", details: state.state });
+
+          if (state.state === "unavailable" || state.state === "unknown") {
+            diagnostics.checks.push({
+              check: "Availability",
+              status: "warning",
+              details: `Entity is ${state.state}. Check device connectivity.`
+            });
+          }
+
+          const relationships = await getEntityRelationships(entity_id, states);
+          diagnostics.relationships = relationships;
+          diagnostics.checks.push({
+            check: "Relationships",
+            status: "ok",
+            details: `Found ${relationships.related_entities?.length || 0} related entities`
+          });
+          
+          if (history && history[0]) {
+            const stateChanges = history[0].length;
+            diagnostics.history_summary = {
+              state_changes_24h: stateChanges,
+              last_changed: state.last_changed,
+              last_updated: state.last_updated,
+            };
+            
+            diagnostics.checks.push({ 
+              check: "Activity", 
+              status: stateChanges === 0 ? "info" : "ok", 
+              details: stateChanges === 0 ? "No state changes in last 24 hours" : `${stateChanges} state changes in last 24 hours`
+            });
+          }
+          
+          const anomaly = detectAnomaly(state);
+          if (anomaly) {
+            diagnostics.checks.push({ 
+              check: "Anomaly Detection", 
+              status: anomaly.severity, 
+              details: anomaly.reason 
+            });
+          }
+          
+        } catch (error) {
+          diagnostics.checks.push({ 
+            check: "Entity Lookup", 
+            status: "error", 
+            details: error.message 
+          });
+        }
+        
+        return makeCompatibleResponse({
+          content: [createTextContent(JSON.stringify(diagnostics, null, 2), { audience: ["assistant"], priority: 0.9 })],
+        });
+      }
+
+      // === DOCUMENTATION ===
+      case "get_integration_docs": {
+        const { integration, section = "configuration" } = args;
+        sendLog("info", "docs", { action: "get_integration_docs", integration, section });
+        
+        const url = `${HA_INTEGRATIONS_URL}/${integration}/`;
+
+        // Resolve the HA version while the docs page is fetched/parsed
+        const versionPromise = callHA("/config")
+          .then((config) => config.version || "unknown")
+          .catch((e) => {
+            sendLog("warning", "docs", { action: "version_fetch_failed", error: e.message });
+            return "unknown";
+          });
+        let haVersion = "unknown";
+
+        try {
+          const cacheKey = `integration-docs:${integration}:${section}`;
+          let parsed = getCachedDoc(cacheKey);
+          if (!parsed) {
+            const html = await fetchUrl(url);
+            const { title, description, content } = extractContentFromHtml(html);
+
+            let resultContent = content;
+            const examples = extractYamlExamples(content);
+
+            // Filter to configuration section if requested
+            if (section === "configuration") {
+              const configSection = extractConfigurationSection(content);
+              if (configSection) {
+                resultContent = configSection;
+              }
+            } else if (section === "examples" && examples.length > 0) {
+              resultContent = "## YAML Examples\n\n" + examples.map((ex, i) => `### Example ${i + 1}\n\`\`\`yaml\n${ex}\n\`\`\``).join("\n\n");
+            }
+
+            const truncatedDocs = truncateText(resultContent, { maxChars: DOCS_MAX_CHARS });
+            parsed = {
+              title: title || integration,
+              resultContent: truncatedDocs.text,
+              truncated: truncatedDocs.truncated,
+              original_chars: truncatedDocs.original_chars,
+              returned_chars: truncatedDocs.returned_chars,
+              omitted_chars: truncatedDocs.omitted_chars,
+              fetched_at: new Date().toISOString(),
+            };
+            setCachedDoc(cacheKey, parsed);
+          }
+          haVersion = await versionPromise;
+
+          return makeCompatibleResponse({
+            content: [
+              createTextContent(
+                `# ${parsed.title}\n\n` +
+                `**Integration:** ${integration}\n` +
+                `**Docs URL:** ${url}\n` +
+                `**Your HA Version:** ${haVersion}\n` +
+                `**Truncated:** ${parsed.truncated ? `Yes (${parsed.omitted_chars} chars omitted)` : "No"}\n` +
+                `**Fetched:** ${parsed.fetched_at}\n\n` +
+                `---\n\n${parsed.resultContent}`,
+                { audience: ["assistant"], priority: 0.9 }
+              ),
+            ],
+          });
+        } catch (error) {
+          haVersion = await versionPromise;
+          // Provide helpful fallback if docs can't be fetched
+          return makeCompatibleResponse({
+            content: [
+              createTextContent(
+                `Unable to fetch documentation for '${integration}'.\n\n` +
+                `**Docs URL:** ${url}\n` +
+                `**Error:** ${error.message}\n\n` +
+                `**Suggestion:** You can:\n` +
+                `1. Try visiting the URL directly: ${url}\n` +
+                `2. Check if the integration name is correct\n` +
+                `3. Use \`validate_config\` to check your configuration\n\n` +
+                `**Your HA Version:** ${haVersion}`,
+                { audience: ["assistant"], priority: 0.8 }
+              ),
+            ],
+          });
+        }
+      }
+
+      case "get_breaking_changes": {
+        const { integration, version } = args;
+        sendLog("info", "docs", { action: "get_breaking_changes", integration, version });
+        
+        let haVersion = "unknown";
+        try {
+          const config = await callHA("/config");
+          haVersion = config.version || "unknown";
+        } catch (e) {
+          sendLog("warning", "docs", { action: "version_fetch_failed", error: e.message });
+        }
+        
+        // Build a list of known breaking changes (curated, since parsing release notes is complex)
+        // This provides immediate value without complex web scraping
+        const knownBreakingChanges = [
+          {
+            version: "2024.12",
+            title: "Template sensor/binary_sensor syntax change",
+            description: "Legacy 'platform: template' under sensor/binary_sensor is deprecated. Use top-level 'template:' key.",
+            integration: "template",
+            url: "https://www.home-assistant.io/integrations/template/",
+          },
+          {
+            version: "2024.11",
+            title: "MQTT discovery changes",
+            description: "MQTT discovery payload format updated for better device support.",
+            integration: "mqtt",
+            url: "https://www.home-assistant.io/integrations/mqtt/",
+          },
+          {
+            version: "2024.10",
+            title: "REST sensor authentication",
+            description: "REST sensors now support digest authentication; some configurations may need updating.",
+            integration: "rest",
+            url: "https://www.home-assistant.io/integrations/rest/",
+          },
+          {
+            version: "2024.8",
+            title: "Automation trigger variables",
+            description: "Trigger variables are now more strictly typed in automations.",
+            integration: "automation",
+            url: "https://www.home-assistant.io/docs/automation/trigger/",
+          },
+          {
+            version: "2024.6",
+            title: "Time & Date sensor deprecation",
+            description: "The time_date platform is deprecated. Use template sensors with now() instead.",
+            integration: "time_date",
+            url: "https://www.home-assistant.io/integrations/time_date/",
+          },
+          {
+            version: "2024.4",
+            title: "Template switch/cover/fan syntax",
+            description: "Template platforms for switch, cover, and fan can now use the top-level 'template:' key.",
+            integration: "template",
+            url: "https://www.home-assistant.io/integrations/template/",
+          },
+          {
+            version: "2024.1",
+            title: "Legacy template sensor syntax deprecated",
+            description: "The 'platform: template' syntax under sensor: is deprecated in favor of the template: integration.",
+            integration: "template",
+            url: "https://www.home-assistant.io/integrations/template/",
+          },
+          {
+            version: "2023.12",
+            title: "Entity naming convention changes",
+            description: "Entities now follow stricter naming conventions. Some entity IDs may have changed.",
+            integration: null,
+            url: "https://www.home-assistant.io/blog/2023/12/",
+          },
+          {
+            version: "2023.8",
+            title: "entity_namespace deprecated",
+            description: "The entity_namespace option is deprecated. Use unique_id instead.",
+            integration: null,
+            url: "https://www.home-assistant.io/blog/2023/08/",
+          },
+          {
+            version: "2023.3",
+            title: "white_value deprecated in light services",
+            description: "Use 'white' instead of 'white_value' in light service calls.",
+            integration: "light",
+            url: "https://www.home-assistant.io/integrations/light/",
+          },
+        ];
+        
+        // Filter by integration if specified
+        let filteredChanges = knownBreakingChanges;
+        if (integration) {
+          filteredChanges = knownBreakingChanges.filter(
+            c => c.integration === integration || c.integration === null
+          );
+        }
+        
+        // Filter by version if specified
+        if (version) {
+          filteredChanges = filteredChanges.filter(c => c.version === version);
+        }
+        
+        // Try to fetch the release notes page for additional context
+        let releaseNotesContent = "";
+        const targetVersion = version || haVersion.split(".").slice(0, 2).join(".");
+
+        const notesCacheKey = `release-notes:${targetVersion}`;
+        const cachedNotes = getCachedDoc(notesCacheKey);
+        if (cachedNotes !== null) {
+          releaseNotesContent = cachedNotes;
+        } else {
+          try {
+            const releaseUrl = `${HA_BLOG_URL}/${targetVersion.replace(".", "/")}/`;
+            const html = await fetchUrl(releaseUrl);
+            const { content } = extractContentFromHtml(html);
+
+            // Extract breaking changes section if present
+            const breakingMatch = content.match(/breaking changes?[\s\S]*?(?=\n## |$)/i);
+            if (breakingMatch) {
+              releaseNotesContent = breakingMatch[0].substring(0, 5000);
+            }
+            setCachedDoc(notesCacheKey, releaseNotesContent);
+          } catch (e) {
+            sendLog("debug", "docs", { action: "release_notes_fetch_failed", error: e.message });
+          }
+        }
+        
+        const result = {
+          ha_version: haVersion,
+          queried_version: version || "recent",
+          queried_integration: integration || "all",
+          changes: filteredChanges,
+          release_notes_excerpt: releaseNotesContent || null,
+        };
+        
+        let responseText = `# Breaking Changes\n\n` +
+          `**Your HA Version:** ${haVersion}\n` +
+          `**Queried:** ${integration ? `integration '${integration}'` : "all integrations"}` +
+          `${version ? ` for version ${version}` : ""}\n\n`;
+        
+        if (filteredChanges.length > 0) {
+          responseText += `## Known Breaking Changes\n\n`;
+          for (const change of filteredChanges) {
+            responseText += `### ${change.version}: ${change.title}\n`;
+            responseText += `${change.description}\n`;
+            responseText += `**More info:** ${change.url}\n\n`;
+          }
+        } else {
+          responseText += `No specific breaking changes found for the query.\n\n`;
+        }
+        
+        if (releaseNotesContent) {
+          responseText += `## From Release Notes\n\n${releaseNotesContent}\n`;
+        }
+        
+        responseText += `\n---\n**Tip:** Always check ${HA_BLOG_URL}/categories/release-notes/ for the latest changes.`;
+        
+        return makeCompatibleResponse({
+          content: [createTextContent(responseText, { audience: ["assistant"], priority: 0.9 })],
+        });
+      }
+
+      case "check_config_syntax": {
+        const { yaml_config, integration } = args;
+        sendLog("info", "docs", { action: "check_config_syntax", integration });
+        
+        const { deprecated, warnings, suggestions } = await checkConfigForDeprecations(yaml_config, integration);
+        
+        // Additional basic YAML validation hints
+        const additionalWarnings = [];
+        const additionalSuggestions = [];
+        
+        // Check for common YAML issues
+        if (yaml_config.includes("\t")) {
+          additionalWarnings.push("Tab characters detected. YAML requires spaces for indentation.");
+          additionalSuggestions.push("Replace all tabs with spaces (2 spaces per indent level is standard for Home Assistant).");
+        }
+        
+        if (!/^[a-z_]+:/m.test(yaml_config)) {
+          additionalWarnings.push("No top-level key detected. Configuration should start with a domain key.");
+        }
+        
+        // Check for common mistakes
+        if (/: \|$/m.test(yaml_config)) {
+          additionalSuggestions.push("Multi-line strings with '|' should have content on the following lines, indented.");
+        }
+        
+        if (/entity_id:.*,/m.test(yaml_config)) {
+          additionalSuggestions.push("Multiple entity_ids should be formatted as a YAML list, not comma-separated.");
+        }
+        
+        const allWarnings = [...warnings, ...additionalWarnings];
+        const allSuggestions = [...suggestions, ...additionalSuggestions];
+        
+        const docsUrl = integration 
+          ? `${HA_INTEGRATIONS_URL}/${integration}/`
+          : "https://www.home-assistant.io/docs/configuration/";
+        
+        const result = {
+          valid: allWarnings.filter(w => w.includes("DEPRECATED")).length === 0,
+          deprecated,
+          warnings: allWarnings,
+          suggestions: allSuggestions,
+          docs_url: docsUrl,
+        };
+        
+        let responseText = `# Configuration Syntax Check\n\n`;
+        responseText += `**Status:** ${result.valid ? "OK" : "Issues Found"}\n`;
+        responseText += `**Deprecated Syntax:** ${deprecated ? "Yes" : "No"}\n`;
+        responseText += `**Docs:** ${docsUrl}\n\n`;
+        
+        if (allWarnings.length > 0) {
+          responseText += `## Warnings\n\n`;
+          for (const warning of allWarnings) {
+            responseText += `- ${warning}\n`;
+          }
+          responseText += "\n";
+        }
+        
+        if (allSuggestions.length > 0) {
+          responseText += `## Suggestions\n\n`;
+          for (const suggestion of allSuggestions) {
+            responseText += `- ${suggestion}\n`;
+          }
+          responseText += "\n";
+        }
+        
+        if (allWarnings.length === 0 && allSuggestions.length === 0) {
+          responseText += "No issues detected in the configuration syntax.\n\n";
+          responseText += "**Note:** This is a basic syntax check. Use `validate_config` for full Home Assistant validation.\n";
+        }
+        
+        return makeCompatibleResponse({
+          content: [createTextContent(responseText, { audience: ["assistant"], priority: 0.9 })],
+        });
+      }
+
+      // === SAFE CONFIG WRITER ===
+      case "write_config_safe": {
+        const { file_path, content, dry_run = false, validate_templates = true, confirm_deletions = false } = args;
+        sendLog("info", "config", { action: "write_config_safe", file_path, dry_run });
+        
+        // Step 1: Validate and resolve the file path
+        const resolvedPath = resolveConfigPath(file_path);
+        if (!resolvedPath) {
+          return makeCompatibleResponse({
+            content: [createTextContent(
+              `# Safe Config Write - BLOCKED\n\n` +
+              `**Error:** Invalid or unsafe file path: \`${file_path}\`\n\n` +
+              `The path must be relative to /homeassistant/ and cannot point to internal directories (.storage, .cloud, deps, etc.).\n` +
+              `Example valid paths: \`configuration.yaml\`, \`automations.yaml\`, \`packages/lights.yaml\``,
+              { audience: ["user", "assistant"], priority: 1.0 }
+            )],
+            isError: true,
+          });
+        }
+        
+        // Steps 2-6 depend only on the content â€” reuse a recent dry-run's results
+        const memoKey = createHash("sha256").update(`${validate_templates}:${content}`).digest("hex");
+        let contentChecks = getValidationMemo(memoKey);
+
+        if (!contentChecks) {
+          // Step 3: Run structural YAML checks
+          const structuralIssues = validateYamlStructure(content);
+
+          // Step 4: Basic YAML lint checks (same as check_config_syntax)
+          const lintWarnings = [];
+          if (content.includes("\t")) {
+            lintWarnings.push("Tab characters detected. YAML requires spaces for indentation.");
+          }
+          if (/: \|$/m.test(content)) {
+            lintWarnings.push("Multi-line strings with '|' should have content on the following lines, indented.");
+          }
+          if (/entity_id:.*,/m.test(content)) {
+            lintWarnings.push("Multiple entity_ids should be formatted as a YAML list, not comma-separated.");
+          }
+
+          // Steps 2 (deprecations), 5 (repairs), and 6 (templates) are
+          // independent network checks â€” run them concurrently
+          const [deprecationResult, repairWarnings, templateResults] = await Promise.all([
+            checkConfigForDeprecations(content),
+            (async () => {
+              const warnings = [];
+              try {
+                // Extract integration domains from the YAML content
+                const domainMatches = content.match(/^([a-z_]+):/gm);
+                const domains = domainMatches
+                  ? [...new Set(domainMatches.map(m => m.replace(":", "").trim()))]
+                  : [];
+
+                if (domains.length > 0) {
+                  const repairs = await getRepairsForDomains(domains);
+                  for (const issue of repairs) {
+                    const breaksIn = issue.breaks_in_ha_version ? ` (breaks in ${issue.breaks_in_ha_version})` : "";
+                    const url = issue.learn_more_url ? ` See: ${issue.learn_more_url}` : "";
+                    warnings.push(
+                      `[HA REPAIR - ${issue.severity || "warning"}] ${issue.domain}: ${issue.translation_key || issue.issue_id}${breaksIn}${url}`
+                    );
+                  }
+                }
+              } catch (_) { /* non-critical â€” repairs check is best-effort */ }
+              return warnings;
+            })(),
+            (async () => {
+              if (!validate_templates) return [];
+              try {
+                return await extractAndValidateTemplates(content);
+              } catch (error) {
+                sendLog("warning", "config", { action: "template_validation_failed", error: error.message });
+                return [{ template: "(all)", status: "skipped", reason: `Template validation unavailable: ${error.message}` }];
+              }
+            })(),
+          ]);
+
+          contentChecks = { deprecationResult, structuralIssues, lintWarnings, repairWarnings, templateResults };
+          setValidationMemo(memoKey, contentChecks);
+        }
+
+        const { warnings: depWarnings, suggestions: depSuggestions } = contentChecks.deprecationResult;
+        const { structuralIssues, lintWarnings, repairWarnings, templateResults } = contentChecks;
+
+        const templateErrors = templateResults.filter(r => r.status === "error");
+        const structuralErrors = structuralIssues.filter(i => i.severity === "error");
+        
+        // Step 6b: Content protection checks â€” prevent accidental data loss
+        // These checks compare the new content against the existing file to catch
+        // cases where the AI writes a replacement instead of an augmentation.
+        // Three layers of defense:
+        //   1. List-entry reduction  (automations.yaml, scripts.yaml, scenes.yaml)
+        //   2. Top-level key removal (mapping files like configuration.yaml)
+        //   3. Significant size reduction (generic safety net for all files)
+        let contentProtectionError = null;
+
+        if (!confirm_deletions && existsSync(resolvedPath)) {
+          try {
+            const existingContent = readFileSync(resolvedPath, "utf-8");
+
+            // --- Check 1: List-entry reduction (list-based config files) ---
+            const LIST_CONFIG_FILES = ["automations.yaml", "scripts.yaml", "scenes.yaml"];
+            const isListConfig = LIST_CONFIG_FILES.some(f => resolvedPath.endsWith("/" + f));
+
+            if (isListConfig) {
+              const existingCount = (existingContent.match(/^- /gm) || []).length;
+              const newCount = (content.match(/^- /gm) || []).length;
+              if (existingCount > 0 && newCount < existingCount) {
+                contentProtectionError = {
+                  type: "entry_reduction",
+                  detail: `The existing file has ${existingCount} top-level list entries but the new content only has ${newCount} (${existingCount - newCount} would be lost).`,
+                  action: `Read the existing \`${file_path}\` first, then include ALL existing entries plus your changes in the content you write. If you intentionally want to remove entries, pass \`confirm_deletions: true\`.`,
+                };
+              }
+            }
+
+            // --- Check 2: Top-level key preservation (mapping-based files) ---
+            // For files like configuration.yaml that use top-level keys (homeassistant:,
+            // automation:, sensor:, etc.), block writes that would remove existing keys.
+            if (!contentProtectionError && !isListConfig) {
+              const keyRegex = /^([a-z_][a-z0-9_]*):/gm;
+              const existingKeys = new Set();
+              const newKeys = new Set();
+              let m;
+              while ((m = keyRegex.exec(existingContent)) !== null) existingKeys.add(m[1]);
+              keyRegex.lastIndex = 0;
+              while ((m = keyRegex.exec(content)) !== null) newKeys.add(m[1]);
+
+              const removedKeys = [...existingKeys].filter(k => !newKeys.has(k));
+              if (existingKeys.size > 0 && removedKeys.length > 0) {
+                contentProtectionError = {
+                  type: "key_removal",
+                  detail: `The existing file has ${existingKeys.size} top-level keys but the new content is missing ${removedKeys.length}: \`${removedKeys.join("`, `")}\`.`,
+                  action: `Read the existing \`${file_path}\` first, then include ALL existing top-level keys plus your changes. If you intentionally want to remove keys, pass \`confirm_deletions: true\`.`,
+                };
+              }
+            }
+
+            // --- Check 3: Significant size reduction (generic safety net) ---
+            // For ANY config file, if the new content is dramatically smaller than
+            // the existing file, it likely means the AI didn't read the file first.
+            if (!contentProtectionError) {
+              const existingLines = existingContent.split("\n").length;
+              const newLines = content.split("\n").length;
+              if (existingLines > 10 && newLines < existingLines * 0.5) {
+                contentProtectionError = {
+                  type: "size_reduction",
+                  detail: `The existing file has ${existingLines} lines but the new content only has ${newLines} lines (${Math.round((1 - newLines / existingLines) * 100)}% reduction).`,
+                  action: `Read the existing \`${file_path}\` first and ensure your new content includes all intended configuration. If this reduction is intentional, pass \`confirm_deletions: true\`.`,
+                };
+              }
+            }
+
+          } catch (_) { /* best effort â€” don't block if we can't read the existing file */ }
+        }
+
+        // Step 6c: Check for pre-write blocking errors (template errors + structural errors + content protection)
+        const hasBlockingErrors = templateErrors.length > 0 || structuralErrors.length > 0 || contentProtectionError !== null;
+        
+        // If dry_run, report results without touching disk
+        if (dry_run) {
+          let responseText = `# Safe Config Write - Dry Run\n\n`;
+          responseText += `**File:** \`${file_path}\`\n`;
+          responseText += `**Mode:** Validation only (no file changes)\n\n`;
+          
+          if (hasBlockingErrors) {
+            responseText += `## BLOCKING ERRORS (must fix before writing)\n\n`;
+            for (const te of templateErrors) {
+              responseText += `- **Template Error:** \`${te.template}\` - ${te.error}\n`;
+            }
+            for (const si of structuralErrors) {
+              responseText += `- **Structural Error:** ${si.message}\n`;
+            }
+            if (contentProtectionError) {
+              const label = contentProtectionError.type === "entry_reduction" ? "Entry Reduction Blocked"
+                : contentProtectionError.type === "key_removal" ? "Top-Level Key Removal Blocked"
+                : "Significant Size Reduction Blocked";
+              responseText += `- **${label}:** ${contentProtectionError.detail}\n`;
+              responseText += `  **Action:** ${contentProtectionError.action}\n`;
+            }
+            responseText += `\n`;
+          }
+          
+          if (depWarnings.length > 0) {
+            responseText += `## Deprecation Warnings\n\n`;
+            for (const w of depWarnings) responseText += `- ${w}\n`;
+            responseText += `\n`;
+          }
+          
+          if (lintWarnings.length > 0) {
+            responseText += `## Lint Warnings\n\n`;
+            for (const w of lintWarnings) responseText += `- ${w}\n`;
+            responseText += `\n`;
+          }
+          
+          const structuralWarnings = structuralIssues.filter(i => i.severity === "warning");
+          if (structuralWarnings.length > 0) {
+            responseText += `## Structural Warnings\n\n`;
+            for (const w of structuralWarnings) responseText += `- ${w.message}\n`;
+            responseText += `\n`;
+          }
+          
+          if (repairWarnings.length > 0) {
+            responseText += `## HA Repair Issues (from your installation)\n\n`;
+            for (const w of repairWarnings) responseText += `- ${w}\n`;
+            responseText += `\n`;
+          }
+          
+          if (templateResults.length > 0) {
+            const validTemplates = templateResults.filter(r => r.status === "valid");
+            const skippedTemplates = templateResults.filter(r => r.status === "skipped");
+            responseText += `## Template Validation\n\n`;
+            responseText += `- Valid: ${validTemplates.length}\n`;
+            responseText += `- Errors: ${templateErrors.length}\n`;
+            responseText += `- Skipped (runtime context): ${skippedTemplates.length}\n\n`;
+          }
+          
+          if (depSuggestions.length > 0) {
+            responseText += `## Suggestions\n\n`;
+            for (const s of depSuggestions) responseText += `- ${s}\n`;
+            responseText += `\n`;
+          }
+          
+          const dryRunPassed = !hasBlockingErrors;
+          responseText += `---\n**Result:** ${dryRunPassed ? "PASSED - Safe to write" : "FAILED - Fix errors above before writing"}\n`;
+          
+          if (dryRunPassed && (depWarnings.length > 0 || lintWarnings.length > 0 || repairWarnings.length > 0)) {
+            responseText += `**Note:** Warnings were found but won't block writing. Consider addressing them for best practices.\n`;
+          }
+          
+          return makeCompatibleResponse({
+            content: [createTextContent(responseText, { audience: ["assistant"], priority: 1.0 })],
+          });
+        }
+        
+        // Step 7: If blocking errors exist, refuse to write
+        if (hasBlockingErrors) {
+          let responseText = `# Safe Config Write - REFUSED\n\n`;
+          responseText += `**File:** \`${file_path}\`\n`;
+          responseText += `**Reason:** Blocking errors detected. File was NOT written.\n\n`;
+          responseText += `## Errors (must fix)\n\n`;
+          for (const te of templateErrors) {
+            responseText += `- **Template Error:** \`${te.template}\` - ${te.error}\n`;
+          }
+          for (const si of structuralErrors) {
+            responseText += `- **Structural Error:** ${si.message}\n`;
+          }
+          if (contentProtectionError) {
+            const label = contentProtectionError.type === "entry_reduction" ? "Entry Reduction Blocked"
+              : contentProtectionError.type === "key_removal" ? "Top-Level Key Removal Blocked"
+              : "Significant Size Reduction Blocked";
+            responseText += `- **${label}:** ${contentProtectionError.detail}\n`;
+            responseText += `\n**Action:** ${contentProtectionError.action}\n`;
+          } else {
+            responseText += `\n**Action:** Fix the errors above and retry. Use \`dry_run: true\` to validate before writing.\n`;
+          }
+          
+          return makeCompatibleResponse({
+            content: [createTextContent(responseText, { audience: ["assistant"], priority: 1.0 })],
+          });
+        }
+        
+        // Step 8: Backup existing file (if it exists)
+        const backupPath = resolvedPath + ".bak";
+        let hadExistingFile = false;
+        try {
+          if (existsSync(resolvedPath)) {
+            copyFileSync(resolvedPath, backupPath);
+            hadExistingFile = true;
+            sendLog("info", "config", { action: "backup_created", path: backupPath });
+          }
+        } catch (error) {
+          return makeCompatibleResponse({
+            content: [createTextContent(
+              `# Safe Config Write - ERROR\n\n` +
+              `**Error:** Could not create backup of existing file: ${error.message}\n` +
+              `File was NOT modified.`,
+              { audience: ["user", "assistant"], priority: 1.0 }
+            )],
+            isError: true,
+          });
+        }
+        
+        // Step 9: Write the new content
+        try {
+          // Ensure parent directory exists
+          const parentDir = dirname(resolvedPath);
+          if (!existsSync(parentDir)) {
+            mkdirSync(parentDir, { recursive: true });
+          }
+          writeFileSync(resolvedPath, content, "utf-8");
+          sendLog("info", "config", { action: "file_written", path: resolvedPath });
+        } catch (error) {
+          // Restore backup if write failed
+          if (hadExistingFile) {
+            try { copyFileSync(backupPath, resolvedPath); } catch (_) { /* best effort */ }
+          }
+          return makeCompatibleResponse({
+            content: [createTextContent(
+              `# Safe Config Write - ERROR\n\n` +
+              `**Error:** Could not write file: ${error.message}\n` +
+              `${hadExistingFile ? "Original file has been restored from backup." : "No file was created."}`,
+              { audience: ["user", "assistant"], priority: 1.0 }
+            )],
+            isError: true,
+          });
+        }
+        
+        // Step 10: Run HA's full config validation
+        let validationResult = "skipped";
+        let validationErrors = "";
+        let backupRestored = false;
+        
+        try {
+          const haCheck = await callHA("/config/core/check_config", "POST", null, CHECK_CONFIG_TIMEOUT_MS);
+          validationResult = haCheck.result || "valid";
+          validationErrors = haCheck.errors || "";
+          
+          if (validationResult === "invalid") {
+            sendLog("warning", "config", { action: "validation_failed", errors: validationErrors });
+            
+            // Restore the backup
+            if (hadExistingFile) {
+              try {
+                copyFileSync(backupPath, resolvedPath);
+                backupRestored = true;
+                sendLog("info", "config", { action: "backup_restored", path: resolvedPath });
+              } catch (restoreError) {
+                sendLog("error", "config", { action: "backup_restore_failed", error: restoreError.message });
+              }
+            } else {
+              // No original file existed - remove the invalid one
+              try {
+                unlinkSync(resolvedPath);
+                backupRestored = true;
+              } catch (_) { /* best effort */ }
+            }
+          }
+        } catch (error) {
+          sendLog("error", "config", { action: "validation_call_failed", error: error.message });
+          validationResult = "skipped";
+          validationErrors = `Could not run HA config check: ${error.message}`;
+          
+          // Cannot confirm the config is valid â€” restore backup same as "invalid"
+          if (hadExistingFile) {
+            try {
+              copyFileSync(backupPath, resolvedPath);
+              backupRestored = true;
+              sendLog("info", "config", { action: "backup_restored", path: resolvedPath });
+            } catch (restoreError) {
+              sendLog("error", "config", { action: "backup_restore_failed", error: restoreError.message });
+            }
+          } else {
+            // No original file existed â€” remove the unvalidated one
+            try {
+              unlinkSync(resolvedPath);
+              backupRestored = true;
+            } catch (_) { /* best effort */ }
+          }
+        }
+        
+        // Retain .bak file as a recovery point â€” do NOT delete on success.
+        // The backup always contains the file content from right before this write.
+        // The next write_config_safe call to this file will overwrite it with the
+        // then-current version, so there is always one recovery point available.
+        
+        // Step 11: Build response
+        const success = validationResult === "valid";
+        let responseText = `# Safe Config Write - ${success ? "SUCCESS" : "FAILED"}\n\n`;
+        responseText += `**File:** \`${file_path}\`\n`;
+        responseText += `**HA Config Validation:** ${validationResult}\n`;
+        responseText += `**File Written:** ${success ? "Yes" : "No (restored original)"}\n\n`;
+        
+        if (!success) {
+          responseText += `## Validation Errors\n\n`;
+          responseText += `\`\`\`\n${validationErrors}\n\`\`\`\n\n`;
+          responseText += `**The original file has been restored.** Fix the errors above and retry.\n\n`;
+          
+          // Include any error log entries that might help
+          try {
+            const { text: log, source } = await getErrorLogWithFallback(20);
+            const recentLines = log.split("\n").slice(-20).join("\n");
+            if (recentLines.trim()) {
+              const heading = source === "core_journal"
+                ? "Recent Core Journal Logs (Error Log Unavailable)"
+                : "Recent Error Log";
+              responseText += `## ${heading}\n\n\`\`\`\n${recentLines}\n\`\`\`\n\n`;
+            }
+          } catch (_) { /* best effort */ }
+        }
+        
+        if (depWarnings.length > 0) {
+          responseText += `## Deprecation Warnings\n\n`;
+          for (const w of depWarnings) responseText += `- ${w}\n`;
+          responseText += `\n`;
+        }
+        
+        if (lintWarnings.length > 0) {
+          responseText += `## Lint Warnings\n\n`;
+          for (const w of lintWarnings) responseText += `- ${w}\n`;
+          responseText += `\n`;
+        }
+        
+        const structuralWarnings = structuralIssues.filter(i => i.severity === "warning");
+        if (structuralWarnings.length > 0) {
+          responseText += `## Structural Warnings\n\n`;
+          for (const w of structuralWarnings) responseText += `- ${w.message}\n`;
+          responseText += `\n`;
+        }
+        
+        if (repairWarnings.length > 0) {
+          responseText += `## HA Repair Issues (from your installation)\n\n`;
+          for (const w of repairWarnings) responseText += `- ${w}\n`;
+          responseText += `\n`;
+        }
+        
+        if (templateResults.length > 0) {
+          const validCount = templateResults.filter(r => r.status === "valid").length;
+          const skippedCount = templateResults.filter(r => r.status === "skipped").length;
+          responseText += `## Template Validation: ${validCount} valid, ${skippedCount} skipped (runtime context)\n\n`;
+        }
+        
+        if (depSuggestions.length > 0) {
+          responseText += `## Suggestions\n\n`;
+          for (const s of depSuggestions) responseText += `- ${s}\n`;
+          responseText += `\n`;
+        }
+        
+        if (success) {
+          responseText += `---\n**Config is valid and has been written to disk.** You can reload or restart HA to apply changes.\n`;
+        }
+        
+        return makeCompatibleResponse({
+          content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 1.0 })],
+          ...((!success) && { isError: true }),
+        });
+      }
+
+      // === DECISION NOTES ===
+      case "remember_decision": {
+        if (!DECISION_NOTES_ENABLED) {
+          return makeCompatibleResponse({
+            content: [createTextContent(DECISION_NOTES_DISABLED_ERROR, { audience: ["user"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        if (args?.user_approved !== true) {
+          return makeCompatibleResponse({
+            content: [createTextContent(
+              "# Decision note not recorded\n\n" +
+              "`user_approved` was not set. Ask the user whether they want this recorded — quote the exact note you " +
+              "propose to store — and call this tool again only after they agree.",
+              { audience: ["assistant"], priority: 1.0 }
+            )],
+            isError: true,
+          });
+        }
+
+        const existing = readDecisionNotes();
+        if (!existing.ok) {
+          return makeCompatibleResponse({
+            content: [createTextContent(decisionNotesParseError(existing), { audience: ["user", "assistant"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        const result = addNote(
+          { version: existing.version, notes: existing.notes },
+          args,
+          { now: new Date(), secretValues: readSecretValues() },
+        );
+
+        if (result.error) {
+          sendLog("info", "decision-notes", { action: "rejected" });
+          return makeCompatibleResponse({
+            content: [createTextContent(`# Decision note not recorded\n\n${result.error}`, { audience: ["user", "assistant"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        persistDecisionNotes(result.serialized);
+        const digest = previewDecisionDigest(result.state.notes);
+        sendLog("info", "decision-notes", { action: "recorded", id: result.note.id });
+
+        const active = activeNotes(result.state.notes).length;
+        const inDigest = digest.includedNotes.includes(result.note.id);
+        return makeCompatibleResponse({
+          content: [createTextContent(
+            `# Decision recorded\n\n` +
+            `**${result.note.title}**${result.note.pin ? " (pinned)" : ""}\n\n` +
+            `Saved to \`${DECISION_NOTES_FILE}\` as \`${result.note.id}\`.\n\n` +
+            "This decision is in force now — it is in this conversation, and `recall_decisions` reads it " +
+            "straight from the file. It joins the standing context that starts a session when the digest is " +
+            "next rebuilt: at the next add-on restart, or immediately if the user runs `ha-context refresh`.\n\n" +
+            `${describeDigestCoverage(digest)}\n\n` +
+            (inDigest
+              ? ""
+              : "**This note would not fit the session digest**, so later sessions will not see it up front. " +
+                "Tell the user, and offer to pin it or to retire a note that no longer applies.\n\n") +
+            `Stored active notes: ${active}/${DECISION_LIMITS.maxActive}.\n\n` +
+            `The user can read, edit, or delete this file at any time, or run \`ha-context notes\` in the terminal.`,
+            { audience: ["user", "assistant"], priority: 0.8 }
+          )],
+        });
+      }
+
+      case "recall_decisions": {
+        if (!DECISION_NOTES_ENABLED) {
+          return makeCompatibleResponse({
+            content: [createTextContent(DECISION_NOTES_DISABLED_ERROR, { audience: ["user"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        const existing = readDecisionNotes();
+        if (!existing.exists) {
+          return makeCompatibleResponse({
+            content: [createTextContent(
+              "No decision notes have been recorded for this installation yet. " +
+              "When a lasting decision is made, offer to record it with `remember_decision`.",
+              { audience: ["assistant"], priority: 0.5 }
+            )],
+          });
+        }
+
+        // This tool returns the rationale too, so it screens the whole note
+        // before anything reaches the model — same rule as the session digest.
+        const screened = screenNotesForSecrets(existing.notes, readSecretValues());
+        const { matches, totalMatched, truncated } = searchNoteMatches(screened.safe, {
+          query: args?.query,
+          includeSuperseded: args?.include_superseded,
+          limit: args?.limit,
+        });
+
+        const totalActive = activeNotes(screened.safe).length;
+        // Deliberately no ids: an id is derived from the note's title, and a
+        // note titled after the thing it leaks would carry the secret into the
+        // very message explaining that it was withheld. The add-on log names
+        // them locally, which is where the user can safely see which.
+        const withheldNotice = screened.withheld.length
+          ? `\n\n> ${screened.withheld.length} note(s) are withheld because they contain credential-shaped text. ` +
+            `Their contents are not shown here and are not sent to the model. Tell the user to review ` +
+            `\`${DECISION_NOTES_FILE}\` — the add-on log names which notes.`
+          : "";
+        // Report what matched, not just what fitted the limit: a truncated count
+        // reads as "that is all there is".
+        const shownOf = truncated ? `${matches.length} of ${totalMatched}` : `${totalMatched}`;
+        const header = args?.query
+          ? `# Decision notes matching "${args.query}" (${shownOf})`
+          : `# Decision notes (${shownOf})`;
+        const truncationNotice = truncated
+          ? `\n\n> Showing the ${matches.length} best matches of ${totalMatched}. Raise \`limit\` to see the rest.`
+          : "";
+        const warning = existing.ok
+          ? ""
+          : `\n\n> Some entries in \`${DECISION_NOTES_FILE}\` could not be parsed and are not shown:\n` +
+            existing.errors.map((error) => `> - ${error}`).join("\n");
+
+        // An empty result is the one answer that must not be mistaken for "no
+        // such decision exists" — say which of the two it is.
+        // The absolute "nothing was ever recorded" sentence is only true for a
+        // file that holds no notes at all. Counted from the whole file, not the
+        // active-and-screened subset: notes that are all superseded, or all
+        // withheld, are still decisions the user made.
+        const totalStored = existing.notes.length;
+        const supersededCount = totalStored - activeNotes(existing.notes).length;
+        let emptyBody;
+        if (totalActive) {
+          emptyBody =
+            `_No note matched that query._\n\nThis installation has ${totalActive} active note` +
+            `${totalActive === 1 ? "" : "s"} that did not match — a decision may still exist under different wording. ` +
+            "Call this tool again without a `query` to read them all before assuming nothing was decided.";
+        } else if (totalStored) {
+          const parts = [];
+          if (supersededCount) parts.push(`${supersededCount} superseded`);
+          if (screened.withheld.length) parts.push(`${screened.withheld.length} withheld for credential-shaped text`);
+          emptyBody =
+            `_Nothing to show._\n\nThis installation has ${totalStored} recorded note` +
+            `${totalStored === 1 ? "" : "s"}${parts.length ? ` (${parts.join(", ")})` : ""}. ` +
+            "Pass `include_superseded: true` to read the retired ones — do not conclude that nothing was decided.";
+        } else {
+          emptyBody = "_No decision notes have been recorded for this installation yet._";
+        }
+        const body = matches.length ? matches.map(formatNoteForDisplay).join("\n\n") : emptyBody;
+
+        return makeCompatibleResponse({
+          content: [createTextContent(`${header}${warning}${withheldNotice}${truncationNotice}\n\n${body}`, { audience: ["assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "supersede_decision": {
+        if (!DECISION_NOTES_ENABLED) {
+          return makeCompatibleResponse({
+            content: [createTextContent(DECISION_NOTES_DISABLED_ERROR, { audience: ["user"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        if (args?.user_approved !== true) {
+          return makeCompatibleResponse({
+            content: [createTextContent(
+              "# Nothing retired\n\n" +
+              "`user_approved` was not set. Retiring a note changes how future sessions behave — confirm with the " +
+              "user first, naming the notes involved.",
+              { audience: ["assistant"], priority: 1.0 }
+            )],
+            isError: true,
+          });
+        }
+
+        const existing = readDecisionNotes();
+        if (!existing.ok) {
+          return makeCompatibleResponse({
+            content: [createTextContent(decisionNotesParseError(existing), { audience: ["user", "assistant"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        const result = supersedeNotes({ version: existing.version, notes: existing.notes }, args?.ids);
+        if (result.error) {
+          return makeCompatibleResponse({
+            content: [createTextContent(`# Nothing retired\n\n${result.error}`, { audience: ["user", "assistant"], priority: 1.0 })],
+            isError: true,
+          });
+        }
+
+        persistDecisionNotes(result.serialized);
+        const digest = previewDecisionDigest(result.state.notes);
+        sendLog("info", "decision-notes", { action: "superseded", ids: result.superseded });
+
+        return makeCompatibleResponse({
+          content: [createTextContent(
+            `# Decision notes retired\n\n` +
+            `Marked superseded: ${result.superseded.map((id) => `\`${id}\``).join(", ")}.\n\n` +
+            (result.alreadySuperseded?.length
+              ? `Already superseded, unchanged: ${result.alreadySuperseded.map((id) => `\`${id}\``).join(", ")}.\n\n`
+              : "") +
+            `They stay in \`${DECISION_NOTES_FILE}\` for the record but no longer reach future sessions. ` +
+            "The standing context still carries them until the digest is next rebuilt — at the next add-on " +
+            "restart, or immediately with `ha-context refresh`.\n\n" +
+            `${describeDigestCoverage(digest)}\n\n` +
+            `Stored active notes: ${activeNotes(result.state.notes).length}/${DECISION_LIMITS.maxActive}.`,
+            { audience: ["user", "assistant"], priority: 0.8 }
+          )],
+        });
+      }
+
+      // === UPDATE MANAGEMENT ===
+      case "get_available_updates": {
+        const component = args?.component || "all";
+        sendLog("info", "updates", { action: "check_updates", component });
+        
+        const updates = [];
+
+        // The component checks are independent â€” fetch them concurrently
+        const wants = (c) => component === "all" || component === c;
+        const [coreResult, osResult, supResult, addonsResult] = await Promise.allSettled([
+          wants("core") ? callSupervisor("/core/info") : Promise.resolve(null),
+          wants("os") ? callSupervisor("/os/info") : Promise.resolve(null),
+          wants("supervisor") ? callSupervisor("/supervisor/info") : Promise.resolve(null),
+          wants("addons") ? callSupervisor("/addons") : Promise.resolve(null),
+        ]);
+
+        if (coreResult.status === "fulfilled" && coreResult.value) {
+          const coreInfo = coreResult.value;
+          updates.push({
+            type: "core",
+            name: "Home Assistant Core",
+            installed: coreInfo.version,
+            latest: coreInfo.version_latest,
+            update_available: coreInfo.update_available,
+          });
+        } else if (coreResult.status === "rejected") {
+          sendLog("warning", "updates", { action: "core_check_failed", error: coreResult.reason?.message });
+        }
+
+        // OS info not available on supervised installs
+        if (osResult.status === "fulfilled" && osResult.value?.version) {
+          const osInfo = osResult.value;
+          updates.push({
+            type: "os",
+            name: "Home Assistant OS",
+            installed: osInfo.version,
+            latest: osInfo.version_latest,
+            update_available: osInfo.update_available,
+          });
+        } else if (osResult.status === "rejected") {
+          sendLog("debug", "updates", { action: "os_not_available" });
+        }
+
+        if (supResult.status === "fulfilled" && supResult.value) {
+          const supInfo = supResult.value;
+          updates.push({
+            type: "supervisor",
+            name: "Home Assistant Supervisor",
+            installed: supInfo.version,
+            latest: supInfo.version_latest,
+            update_available: supInfo.update_available,
+          });
+        } else if (supResult.status === "rejected") {
+          sendLog("warning", "updates", { action: "supervisor_check_failed", error: supResult.reason?.message });
+        }
+
+        if (addonsResult.status === "fulfilled" && addonsResult.value) {
+          for (const addon of addonsResult.value.addons.filter(a => a.installed)) {
+            updates.push({
+              type: "addon",
+              slug: addon.slug,
+              name: addon.name,
+              installed: addon.version,
+              latest: addon.version_latest,
+              update_available: addon.update_available,
+            });
+          }
+        } else if (addonsResult.status === "rejected") {
+          sendLog("warning", "updates", { action: "addons_check_failed", error: addonsResult.reason?.message });
+        }
+        
+        // Format output
+        const pendingUpdates = updates.filter(u => u.update_available);
+        let responseText = `# Available Updates\n\n`;
+        responseText += `**Checked:** ${new Date().toISOString()}\n`;
+        responseText += `**Updates Available:** ${pendingUpdates.length}\n\n`;
+        
+        if (pendingUpdates.length > 0) {
+          responseText += `## Pending Updates\n\n`;
+          for (const u of pendingUpdates) {
+            responseText += `- **${u.name}** ${u.type === 'addon' ? `(${u.slug})` : ''}: ${u.installed} â†’ ${u.latest}\n`;
+          }
+          responseText += `\n`;
+        }
+        
+        responseText += `## All Components\n\n`;
+        responseText += `| Component | Type | Installed | Latest | Update |\n`;
+        responseText += `|-----------|------|-----------|--------|--------|\n`;
+        for (const u of updates) {
+          responseText += `| ${u.name} | ${u.type} | ${u.installed} | ${u.latest} | ${u.update_available ? 'â¬†ï¸ Yes' : 'âœ“ Current'} |\n`;
+        }
+        
+        return makeCompatibleResponse({
+          content: [
+            createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 }),
+            createCompactJsonContent(
+              `Found ${pendingUpdates.length} available updates`,
+              updates,
+              {
+                checked_at: new Date().toISOString(),
+                component,
+                total_components: updates.length,
+                pending_updates: pendingUpdates.length,
+              },
+              { audience: ["assistant"], priority: 0.6, pretty: false }
+            ),
+          ],
+        });
+      }
+
+      case "get_addon_changelog": {
+        const { addon_slug } = args;
+        sendLog("info", "updates", { action: "get_changelog", addon: addon_slug });
+        
+        try {
+          const [addonInfo, changelog] = await Promise.all([
+            callSupervisor(`/addons/${addon_slug}/info`),
+            callSupervisor(`/addons/${addon_slug}/changelog`),
+          ]);
+          
+          const truncatedChangelog = truncateText(changelog, { maxChars: CHANGELOG_MAX_CHARS });
+          let responseText = `# Changelog: ${addonInfo.name}\n\n`;
+          responseText += `**Current Version:** ${addonInfo.version}\n`;
+          responseText += `**Latest Version:** ${addonInfo.version_latest}\n`;
+          responseText += `**Update Available:** ${addonInfo.update_available ? 'Yes' : 'No'}\n\n`;
+          responseText += `**Truncated:** ${truncatedChangelog.truncated ? `Yes (${truncatedChangelog.omitted_chars} chars omitted)` : 'No'}\n\n`;
+          responseText += `---\n\n`;
+          responseText += truncatedChangelog.text;
+          
+          return makeCompatibleResponse({
+            content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.8 })],
+          });
+        } catch (e) {
+          throw new Error(`Failed to get changelog for '${addon_slug}': ${e.message}`);
+        }
+      }
+
+      case "update_component": {
+        const { component, addon_slug, backup = true } = args;
+        sendLog("notice", "updates", { action: "initiate_update", component, addon_slug, backup });
+        
+        // Prevent self-update. Supervisor runs the update, so the pull itself
+        // survives — but it stops this container to do it, which kills the
+        // session that asked, before any progress or job id can come back.
+        if (component === "addon") {
+          const ownSlug = await getSelfAddonSlug();
+          const isSelf = ownSlug ? addon_slug === ownSlug : looksLikeThisAddon(addon_slug);
+          if (isSelf) {
+            throw new Error("Cannot update OpenCode from within itself. The container will be stopped during update. Please use the Home Assistant UI to update this app.");
+          }
+        }
+        
+        let endpoint;
+        let payload = { background: true };
+        let componentName;
+        
+        switch (component) {
+          case "core":
+            endpoint = "/core/update";
+            payload.backup = backup;
+            componentName = "Home Assistant Core";
+            break;
+          case "os":
+            endpoint = "/os/update";
+            componentName = "Home Assistant OS";
+            break;
+          case "supervisor":
+            endpoint = "/supervisor/update";
+            componentName = "Supervisor";
+            break;
+          case "addon":
+            if (!addon_slug) {
+              throw new Error("addon_slug is required when component is 'addon'");
+            }
+            endpoint = `/store/addons/${addon_slug}/update`;
+            payload.backup = backup;
+            componentName = addon_slug;
+            break;
+          default:
+            throw new Error(`Unknown component type: ${component}`);
+        }
+        
+        try {
+          const result = await callSupervisor(endpoint, "POST", payload, UPDATE_TIMEOUT_MS);
+
+          // Background mode returns job_id
+          const jobId = result?.job_id || result;
+          
+          let responseText = `# Update Initiated\n\n`;
+          responseText += `**Component:** ${componentName}\n`;
+          responseText += `**Job ID:** ${jobId}\n`;
+          responseText += `**Backup:** ${backup ? 'Yes' : 'No'}\n\n`;
+          responseText += `## Monitor Progress\n\n`;
+          responseText += `Use \`get_update_progress\` with job_id \`${jobId}\` to monitor the update.\n\n`;
+          responseText += `**Example:** \`get_update_progress({ job_id: "${jobId}" })\`\n`;
+          
+          return makeCompatibleResponse({
+            content: [
+              createTextContent(responseText, { audience: ["user", "assistant"], priority: 1.0 }),
+              createCompactJsonContent(
+                `Update initiated for ${componentName}`,
+                { component, component_name: componentName, addon_slug: addon_slug || null, job_id: jobId, backup },
+                { monitor_tool: "get_update_progress" },
+                { audience: ["assistant"], priority: 0.7 }
+              ),
+            ],
+          });
+        } catch (e) {
+          throw new Error(`Failed to initiate update for ${componentName}: ${e.message}`);
+        }
+      }
+
+      case "get_update_progress": {
+        const { job_id } = args;
+        sendLog("debug", "updates", { action: "check_progress", job_id });
+        
+        try {
+          const job = await callSupervisor(`/jobs/${job_id}`);
+          
+          let statusEmoji;
+          if (job.done) {
+            statusEmoji = job.errors ? "âŒ" : "âœ…";
+          } else {
+            statusEmoji = "â³";
+          }
+          
+          let responseText = `# Job Progress: ${job_id}\n\n`;
+          responseText += `**Status:** ${statusEmoji} ${job.done ? (job.errors ? 'Failed' : 'Completed') : 'In Progress'}\n`;
+          responseText += `**Name:** ${job.name}\n`;
+          responseText += `**Progress:** ${job.progress || 0}%\n`;
+          
+          if (job.stage) {
+            responseText += `**Stage:** ${job.stage}\n`;
+          }
+          
+          if (job.reference) {
+            responseText += `**Reference:** ${job.reference}\n`;
+          }
+          
+          responseText += `\n`;
+          
+          // Progress bar visualization
+          const progressBar = "â–ˆ".repeat(Math.floor((job.progress || 0) / 5)) + "â–‘".repeat(20 - Math.floor((job.progress || 0) / 5));
+          responseText += `**[${progressBar}] ${job.progress || 0}%**\n\n`;
+          
+          if (job.child_jobs && job.child_jobs.length > 0) {
+            responseText += `## Sub-tasks\n\n`;
+            for (const child of job.child_jobs) {
+              const childStatus = child.done ? (child.errors ? "âŒ" : "âœ…") : "â³";
+              responseText += `- ${childStatus} ${child.name}: ${child.progress || 0}%\n`;
+            }
+            responseText += `\n`;
+          }
+          
+          if (job.errors) {
+            responseText += `## Errors\n\n`;
+            responseText += `\`\`\`\n${JSON.stringify(job.errors, null, 2)}\n\`\`\`\n`;
+          }
+          
+          if (!job.done) {
+            responseText += `---\n\n*Poll again in a few seconds to see updated progress.*\n`;
+          }
+          
+          return makeCompatibleResponse({
+            content: [
+              createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 }),
+              createCompactJsonContent(
+                `Job ${job.done ? (job.errors ? "failed" : "completed") : "in progress"}`,
+                job,
+                { job_id, done: !!job.done, has_errors: !!job.errors },
+                { audience: ["assistant"], priority: 0.6, pretty: false }
+              ),
+            ],
+          });
+        } catch (e) {
+          throw new Error(`Failed to get job progress: ${e.message}`);
+        }
+      }
+
+      case "get_running_jobs": {
+        sendLog("debug", "updates", { action: "list_jobs" });
+        
+        try {
+          const jobsInfo = await callSupervisor("/jobs/info");
+          const jobs = jobsInfo.jobs || [];
+          
+          let responseText = `# Supervisor Jobs\n\n`;
+          responseText += `**Total Jobs:** ${jobs.length}\n\n`;
+          
+          if (jobs.length === 0) {
+            responseText += `*No running or recent jobs found.*\n`;
+          } else {
+            const runningJobs = jobs.filter(j => !j.done);
+            const completedJobs = jobs.filter(j => j.done);
+            
+            if (runningJobs.length > 0) {
+              responseText += `## Running Jobs\n\n`;
+              responseText += `| Job ID | Name | Progress | Stage |\n`;
+              responseText += `|--------|------|----------|-------|\n`;
+              for (const job of runningJobs) {
+                responseText += `| ${job.uuid.substring(0, 8)}... | ${job.name} | ${job.progress || 0}% | ${job.stage || '-'} |\n`;
+              }
+              responseText += `\n`;
+            }
+            
+            if (completedJobs.length > 0) {
+              responseText += `## Completed Jobs\n\n`;
+              responseText += `| Job ID | Name | Status |\n`;
+              responseText += `|--------|------|--------|\n`;
+              for (const job of completedJobs.slice(0, 10)) {
+                const status = job.errors ? "âŒ Failed" : "âœ… Success";
+                responseText += `| ${job.uuid.substring(0, 8)}... | ${job.name} | ${status} |\n`;
+              }
+            }
+          }
+          
+          return makeCompatibleResponse({
+            content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.7 })],
+          });
+        } catch (e) {
+          throw new Error(`Failed to list jobs: ${e.message}`);
+        }
+      }
+
+      // === ESPHOME INTEGRATION ===
+      case "esphome_list_devices": {
+        sendLog("info", "esphome", { action: "list_devices" });
+        
+        if (!HA_ACCESS_TOKEN) {
+          throw new Error(ESPHOME_TOKEN_ERROR);
+        }
+        
+        // Discover ESPHome add-on
+        const esphome = await getESPHomeConnection();
+        if (!esphome.ok) {
+          const d = esphome.diagnostics;
+          let msg = `ESPHome discovery failed: ${esphome.error}\n\n`;
+          msg += `## Discovery Steps\n`;
+          for (const s of d.steps) {
+            msg += `- **${s.name}**: ${s.status}${s.detail ? ` â€” ${typeof s.detail === "object" ? JSON.stringify(s.detail) : s.detail}` : ""}\n`;
+          }
+          if (d.esphomeSlugs) msg += `\nESPHome-matching slugs: ${JSON.stringify(d.esphomeSlugs)}`;
+          if (d.networkFallback) msg += `\nNetwork fallback data: ${JSON.stringify(d.networkFallback, null, 2)}`;
+          throw new Error(msg);
+        }
+        
+        if (esphome.state !== "started") {
+          throw new Error(`ESPHome add-on is not running (current state: ${esphome.state}). Please start the ESPHome add-on first.`);
+        }
+        
+        try {
+          const devices = await getESPHomeDevices(esphome.url, esphome.ingressSession);
+          
+          let responseText = `# ESPHome Devices\n\n`;
+          responseText += `**ESPHome Version:** ${esphome.version}\n`;
+          responseText += `**Add-on:** ${esphome.name} (${esphome.slug})\n`;
+          responseText += `**Ingress URL:** ${esphome.url}\n`;
+          responseText += `**URL Source:** ${esphome.diagnostics?.urlSource || "unknown"}\n\n`;
+          
+          const configured = devices.configured || [];
+          const importable = devices.importable || [];
+          
+          if (configured.length === 0 && importable.length === 0) {
+            responseText += `*No ESPHome devices configured yet.*\n\n`;
+            responseText += `Create a new device in the ESPHome dashboard to get started.\n`;
+          } else {
+            if (configured.length > 0) {
+              responseText += `## Configured Devices (${configured.length})\n\n`;
+              responseText += `| Device | Platform | Current | Deployed | Status |\n`;
+              responseText += `|--------|----------|---------|----------|--------|\n`;
+              
+              for (const device of configured) {
+                const needsUpdate = device.current_version !== device.deployed_version;
+                const status = needsUpdate ? "â¬†ï¸ Update available" : "âœ“ Current";
+                responseText += `| ${device.name} | ${device.target_platform} | ${device.current_version || '-'} | ${device.deployed_version || '-'} | ${status} |\n`;
+              }
+              responseText += `\n`;
+            }
+            
+            if (importable.length > 0) {
+              responseText += `## Discoverable Devices (${importable.length})\n\n`;
+              responseText += `These devices can be adopted into ESPHome:\n\n`;
+              for (const device of importable) {
+                responseText += `- **${device.name}** (${device.project_name} v${device.project_version}) - ${device.network}\n`;
+              }
+            }
+          }
+          
+          return makeCompatibleResponse({
+            content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.8 })],
+          });
+        } catch (e) {
+          const d = esphome.diagnostics;
+          let msg = `${e.message}\n\n## Discovery was OK\n`;
+          msg += `**URL:** ${esphome.url}\n`;
+          msg += `**URL Source:** ${d?.urlSource || "unknown"}\n`;
+          msg += `**HA Core URL:** ${d?.haCoreUrl || "unknown"}\n`;
+          msg += `**Ingress Entry:** ${d?.ingressEntry || "unknown"}\n`;
+          msg += `**Addon Slug:** ${d?.addonSlug || "unknown"}\n`;
+          if (d?.steps) {
+            msg += `\n## Discovery Steps\n`;
+            for (const s of d.steps) {
+              msg += `- **${s.name}**: ${s.status}${s.detail ? ` â€” ${typeof s.detail === "object" ? JSON.stringify(s.detail) : s.detail}` : ""}\n`;
+            }
+          }
+          if (d?.networkFallback) msg += `\nNetwork fallback: ${JSON.stringify(d.networkFallback, null, 2)}`;
+          throw new Error(msg);
+        }
+      }
+
+      case "esphome_compile": {
+        const { device } = args;
+        sendLog("info", "esphome", { action: "compile", device });
+        
+        if (!HA_ACCESS_TOKEN) {
+          throw new Error(ESPHOME_TOKEN_ERROR);
+        }
+        
+        // Discover ESPHome add-on
+        const esphome = await getESPHomeConnection();
+        if (!esphome.ok) {
+          const d = esphome.diagnostics;
+          let msg = `ESPHome discovery failed: ${esphome.error}\n\nSteps: `;
+          msg += d.steps.map(s => `${s.name}=${s.status}`).join(", ");
+          throw new Error(msg);
+        }
+        
+        if (esphome.state !== "started") {
+          throw new Error(`ESPHome add-on is not running (current state: ${esphome.state}). Please start the ESPHome add-on first.`);
+        }
+        
+        // Ensure device has .yaml extension
+        const configuration = device.endsWith(".yaml") ? device : `${device}.yaml`;
+        
+        try {
+          const result = await streamESPHomeLogs(
+            esphome.url,
+            "compile",
+            { configuration },
+            null,
+            600000,  // 10 minute timeout for compilation
+            esphome.ingressSession
+          );
+          
+          // Format the output
+          let responseText = `# ESPHome Compile: ${device}\n\n`;
+          responseText += `**Status:** ${result.success ? "âœ… Success" : "âŒ Failed"}\n`;
+          responseText += `**Duration:** ${result.duration}\n`;
+          responseText += `**Exit Code:** ${result.code}\n\n`;
+          
+          responseText += `## Build Log\n\n`;
+          responseText += "```\n";
+          
+          const logs = truncateLines(result.logs, { maxLines: 250, headLines: 50 });
+          responseText += logs.lines.join("\n");
+          
+          responseText += "\n```\n";
+          if (logs.truncated) {
+            responseText += `\n**Log truncated:** ${logs.omitted_lines} of ${logs.original_lines} lines omitted.\n`;
+          }
+          
+          if (!result.success) {
+            responseText += `\n## Troubleshooting\n\n`;
+            responseText += `The compilation failed. Check the build log above for errors.\n`;
+            responseText += `Common issues:\n`;
+            responseText += `- Syntax errors in YAML configuration\n`;
+            responseText += `- Missing or incompatible components\n`;
+            responseText += `- Platform-specific issues\n`;
+          }
+          
+          return makeCompatibleResponse({
+            content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 })],
+          });
+        } catch (e) {
+          throw new Error(`ESPHome compile failed: ${e.message}`);
+        }
+      }
+
+      case "esphome_upload": {
+        const { device, port } = args;
+        sendLog("info", "esphome", { action: "upload", device, port });
+        
+        if (!HA_ACCESS_TOKEN) {
+          throw new Error(ESPHOME_TOKEN_ERROR);
+        }
+        
+        // Discover ESPHome add-on
+        const esphome = await getESPHomeConnection();
+        if (!esphome.ok) {
+          const d = esphome.diagnostics;
+          let msg = `ESPHome discovery failed: ${esphome.error}\n\nSteps: `;
+          msg += d.steps.map(s => `${s.name}=${s.status}`).join(", ");
+          throw new Error(msg);
+        }
+        
+        if (esphome.state !== "started") {
+          throw new Error(`ESPHome add-on is not running (current state: ${esphome.state}). Please start the ESPHome add-on first.`);
+        }
+        
+        // Ensure device has .yaml extension
+        const configuration = device.endsWith(".yaml") ? device : `${device}.yaml`;
+        
+        try {
+          const result = await streamESPHomeLogs(
+            esphome.url,
+            "upload",
+            { configuration, port },
+            null,
+            300000,  // 5 minute timeout for upload
+            esphome.ingressSession
+          );
+          
+          // Format the output
+          let responseText = `# ESPHome Upload: ${device}\n\n`;
+          responseText += `**Status:** ${result.success ? "âœ… Success" : "âŒ Failed"}\n`;
+          responseText += `**Target:** ${port}\n`;
+          responseText += `**Duration:** ${result.duration}\n`;
+          responseText += `**Exit Code:** ${result.code}\n\n`;
+          
+          responseText += `## Upload Log\n\n`;
+          responseText += "```\n";
+          
+          const logs = truncateLines(result.logs, { maxLines: 130, headLines: 30 });
+          responseText += logs.lines.join("\n");
+          
+          responseText += "\n```\n";
+          if (logs.truncated) {
+            responseText += `\n**Log truncated:** ${logs.omitted_lines} of ${logs.original_lines} lines omitted.\n`;
+          }
+          
+          if (result.success) {
+            responseText += `\n## Next Steps\n\n`;
+            responseText += `The firmware has been uploaded successfully. The device should restart automatically.\n`;
+            responseText += `You can verify the device is online using \`esphome_list_devices\`.\n`;
+          } else {
+            responseText += `\n## Troubleshooting\n\n`;
+            responseText += `The upload failed. Common issues:\n`;
+            responseText += `- Device not reachable (check network connectivity)\n`;
+            responseText += `- Wrong port/IP address\n`;
+            responseText += `- Device in deep sleep mode\n`;
+            responseText += `- Firewall blocking OTA port (default: 3232)\n`;
+          }
+          
+          return makeCompatibleResponse({
+            content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 })],
+          });
+        } catch (e) {
+          throw new Error(`ESPHome upload failed: ${e.message}`);
+        }
+      }
+
+      // === FIRMWARE UPDATE MONITORING ===
+      case "watch_firmware_update": {
+        const { entity_id, start_update = false } = args;
+        sendLog("info", "firmware-update", { action: "watch", entity_id, start_update });
+        
+        // Validate entity_id format
+        if (!entity_id.startsWith("update.")) {
+          throw new Error(`Invalid entity_id: ${entity_id}. Must be an update entity (update.xxx)`);
+        }
+        
+        const formatTime = (date) => date.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        
+        // Get current state
+        let entityState = await callHA(`/states/${entity_id}`);
+        const attrs = entityState.attributes || {};
+        const installedVersion = attrs.installed_version || "unknown";
+        const latestVersion = attrs.latest_version || "unknown";
+        const deviceName = attrs.friendly_name || entity_id.replace("update.", "");
+        const inProgress = attrs.in_progress === true;
+        const progress = attrs.update_percentage;
+        const currentState = entityState.state;
+        
+        let responseText = `# Firmware Update: ${deviceName}\n\n`;
+        responseText += `**Entity:** \`${entity_id}\`\n`;
+        responseText += `**Time:** ${formatTime(new Date())}\n\n`;
+        
+        // Determine status and take action
+        let statusEmoji, statusText;
+        
+        if (inProgress) {
+          statusEmoji = "â³";
+          statusText = "Update In Progress";
+          responseText += `## ${statusEmoji} ${statusText}\n\n`;
+          responseText += `| Field | Value |\n`;
+          responseText += `|-------|-------|\n`;
+          responseText += `| Installed Version | ${installedVersion} |\n`;
+          responseText += `| Target Version | ${latestVersion} |\n`;
+          if (progress !== null && progress !== undefined) {
+            const filled = Math.floor(progress / 5);
+            const empty = 20 - filled;
+            responseText += `| Progress | ${"â–ˆ".repeat(filled)}${"â–‘".repeat(empty)} ${progress}% |\n`;
+          } else {
+            responseText += `| Progress | Compiling/Installing (no percentage reported) |\n`;
+          }
+          responseText += `\n**The update is running.** Call this tool again in a few seconds to check progress.\n`;
+          
+        } else if (currentState === "unavailable") {
+          statusEmoji = "ðŸ”„";
+          statusText = "Device Rebooting";
+          responseText += `## ${statusEmoji} ${statusText}\n\n`;
+          responseText += `The device is currently unavailable - likely rebooting after firmware update.\n\n`;
+          responseText += `**Wait a minute and call this tool again** to check if the device comes back online.\n`;
+          
+        } else if (currentState === "off") {
+          statusEmoji = "âœ…";
+          statusText = "Up to Date";
+          responseText += `## ${statusEmoji} ${statusText}\n\n`;
+          responseText += `| Field | Value |\n`;
+          responseText += `|-------|-------|\n`;
+          responseText += `| Installed Version | ${installedVersion} |\n`;
+          responseText += `| Latest Version | ${latestVersion} |\n`;
+          responseText += `\nNo update available. The device is running the latest version.\n`;
+          
+        } else if (currentState === "on") {
+          // Update is available
+          if (start_update) {
+            // Start the update
+            await callHA("/services/update/install", "POST", { entity_id }, UPDATE_TIMEOUT_MS);
+            
+            statusEmoji = "ðŸš€";
+            statusText = "Update Started";
+            responseText += `## ${statusEmoji} ${statusText}\n\n`;
+            responseText += `| Field | Value |\n`;
+            responseText += `|-------|-------|\n`;
+            responseText += `| Current Version | ${installedVersion} |\n`;
+            responseText += `| Target Version | ${latestVersion} |\n`;
+            responseText += `\n**Update has been initiated!**\n\n`;
+            responseText += `The device will now download and install the firmware. This typically takes 1-5 minutes.\n\n`;
+            responseText += `**Call this tool again** (without \`start_update\`) to monitor progress.\n`;
+          } else {
+            statusEmoji = "â¬†ï¸";
+            statusText = "Update Available";
+            responseText += `## ${statusEmoji} ${statusText}\n\n`;
+            responseText += `| Field | Value |\n`;
+            responseText += `|-------|-------|\n`;
+            responseText += `| Installed Version | ${installedVersion} |\n`;
+            responseText += `| Available Version | ${latestVersion} |\n`;
+            responseText += `\nAn update is available but not yet started.\n\n`;
+            responseText += `**To start the update**, call this tool with \`start_update: true\`.\n`;
+          }
+        } else {
+          statusEmoji = "â“";
+          statusText = `Unknown State: ${currentState}`;
+          responseText += `## ${statusEmoji} ${statusText}\n\n`;
+          responseText += `The device is in an unexpected state. Check the Home Assistant UI for more details.\n`;
+        }
+        
+        return makeCompatibleResponse({
+          content: [
+            createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 }),
+            createCompactJsonContent(
+              statusText,
+              {
+                entity_id,
+                device_name: deviceName,
+                state: currentState,
+                status: statusText,
+                installed_version: installedVersion,
+                latest_version: latestVersion,
+                in_progress: inProgress,
+                progress: progress ?? null,
+                update_started: start_update && currentState === "on",
+              },
+              { checked_at: new Date().toISOString() },
+              { audience: ["assistant"], priority: 0.6 }
+            ),
+          ],
+        });
+      }
+
+      // === HAB CLI INTEGRATION ===
+      case "hab_run": {
+        const { command } = args;
+        if (!command || typeof command !== "string") {
+          throw new Error("command parameter is required and must be a string");
+        }
+        
+        // Security: block dangerous commands
+        const lowerCmd = command.toLowerCase().trim();
+        if (lowerCmd.startsWith("auth ") || lowerCmd === "auth") {
+          throw new Error("Auth commands are not needed - hab is pre-authenticated via Supervisor token.");
+        }
+        if (lowerCmd.startsWith("update") && !lowerCmd.startsWith("update ")) {
+          throw new Error("Self-update of hab is not supported inside the container. hab is updated with the add-on.");
+        }
+        
+        sendLog("info", "hab", { action: "run_command", command });
+        
+        // Parse command string into args array for execFile (safe, no shell injection)
+        const cmdArgs = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')/g) || [];
+        // Strip quotes from args
+        const cleanArgs = cmdArgs.map(arg => arg.replace(/^["']|["']$/g, ""));
+        
+        // For esphome subcommands, pre-discover the ESPHome ingress URL so
+        // hab can skip its own (broken direct-connection) discovery and route
+        // through the Supervisor ingress proxy instead.
+        let esphomeEnv = {};
+        if (lowerCmd.startsWith("esphome ") || lowerCmd === "esphome") {
+          if (!HA_ACCESS_TOKEN) {
+            throw new Error(ESPHOME_TOKEN_ERROR);
+          }
+          try {
+            const esphome = await getESPHomeConnection();
+            if (esphome.ok && esphome.url && esphome.ingressSession) {
+              esphomeEnv.HAB_ESPHOME_URL = esphome.url;
+              esphomeEnv.HAB_ESPHOME_SESSION = esphome.ingressSession;
+            } else if (!esphome.ok) {
+              sendLog("warning", "hab", {
+                action: "esphome_prediscovery_failed",
+                error: esphome.error,
+                steps: esphome.diagnostics?.steps,
+              });
+            }
+          } catch (e) {
+            sendLog("warning", "hab", { action: "esphome_prediscovery_failed", error: e.message });
+          }
+        }
+        
+        const result = await new Promise((resolvePromise, rejectPromise) => {
+          const proc = execFile("/usr/local/bin/hab", cleanArgs, {
+            timeout: 30000,
+            maxBuffer: 1024 * 1024,
+            env: {
+              ...process.env,
+              SUPERVISOR_TOKEN: SUPERVISOR_TOKEN,
+              HAB_URL: "http://supervisor/core",
+              HAB_TOKEN: SUPERVISOR_TOKEN,
+              ...(HA_ACCESS_TOKEN ? { HA_ACCESS_TOKEN } : {}),
+              ...esphomeEnv,
+            },
+          }, (error, stdout, stderr) => {
+            if (error) {
+              // hab may return non-zero exit code with useful output
+              const output = stdout || stderr || error.message;
+              rejectPromise(new Error(`hab command failed: ${output}`));
+            } else {
+              resolvePromise(stdout);
+            }
+          });
+        });
+        
+        return makeCompatibleResponse({
+          content: [createCommandOutputContent("hab", command, result, { audience: ["user", "assistant"], priority: 0.7 })],
+        });
+      }
+
+      // === ZIGPORTER CLI INTEGRATION ===
+      case "zigporter_run": {
+        const { command } = args;
+        if (!command || typeof command !== "string") {
+          throw new Error("command parameter is required and must be a string");
+        }
+
+        // Security: block interactive/dangerous commands
+        const zigLowerCmd = command.toLowerCase().trim();
+        if (zigLowerCmd.startsWith("migrate") || zigLowerCmd === "migrate") {
+          throw new Error(
+            "The migrate command requires physical device interaction and cannot be " +
+            "run by an AI agent. Use it from the terminal instead."
+          );
+        }
+        if (zigLowerCmd.startsWith("setup") || zigLowerCmd === "setup") {
+          throw new Error(
+            "Setup is not needed - zigporter is pre-configured via Supervisor credentials."
+          );
+        }
+
+        sendLog("info", "zigporter", { action: "run_command", command });
+
+        // Parse command string into args array for execFile (safe, no shell injection)
+        const zigCmdArgs =
+          command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')/g) || [];
+        const zigCleanArgs = zigCmdArgs.map((arg) =>
+          arg.replace(/^["']|["']$/g, "")
+        );
+
+        const zigResult = await new Promise((resolvePromise, rejectPromise) => {
+          execFile(
+            "/usr/local/bin/zigporter",
+            zigCleanArgs,
+            {
+              timeout: 60000,
+              maxBuffer: 2 * 1024 * 1024,
+              env: {
+                ...process.env,
+                // zigporter uses HA_URL + HA_TOKEN. HA_TOKEN is derived from
+                // the live Supervisor token and is intentionally not persisted.
+                HA_URL: process.env.HA_URL || "http://supervisor/core",
+                HA_TOKEN: process.env.HA_TOKEN || process.env.SUPERVISOR_TOKEN,
+                HA_VERIFY_SSL: "false",
+                // Z2M config (optional, may be empty)
+                ...(process.env.Z2M_URL
+                  ? { Z2M_URL: process.env.Z2M_URL }
+                  : {}),
+                ...(process.env.Z2M_MQTT_TOPIC
+                  ? { Z2M_MQTT_TOPIC: process.env.Z2M_MQTT_TOPIC }
+                  : {}),
+              },
+            },
+            (error, stdout, stderr) => {
+              if (error) {
+                const output = stdout || stderr || error.message;
+                rejectPromise(
+                  new Error(`zigporter command failed: ${output}`)
+                );
+              } else {
+                resolvePromise(stdout);
+              }
+            }
+          );
+        });
+
+        return makeCompatibleResponse({
+          content: [
+            createCommandOutputContent("zigporter", command, zigResult, {
+              audience: ["user", "assistant"],
+              priority: 0.7,
+            }),
+          ],
+        });
+      }
+
+      // === VISUAL VERIFICATION ===
+      case "screenshot_url": {
+        if (!SCREENSHOT_ENABLED) {
+          throw new Error(SCREENSHOT_DISABLED_ERROR);
+        }
+        if (!HA_ACCESS_TOKEN) {
+          throw new Error(SCREENSHOT_TOKEN_ERROR);
+        }
+
+        const urlPath = args.url_path;
+        const width = args.width || 1280;
+        const height = args.height || 720;
+        const waitSeconds = args.wait_seconds !== undefined ? args.wait_seconds : 3;
+        const fullPage = args.full_page || false;
+
+        sendLog("info", "screenshot", {
+          action: "requested",
+          path: urlPath,
+          width,
+          height,
+          waitSeconds,
+          fullPage,
+        });
+
+        // Discover HA Core frontend URL
+        const haCoreUrl = await discoverHACoreUrl();
+
+        // Take the screenshot
+        const base64Screenshot = await takeScreenshot(haCoreUrl, urlPath, {
+          width,
+          height,
+          waitSeconds,
+          fullPage,
+        });
+
+        const normalizedPath = urlPath.startsWith("/") ? urlPath : `/${urlPath}`;
+
+        return makeCompatibleResponse({
+          content: [
+            createTextContent(
+              `Rendered ${normalizedPath} at ${width}x${height} in a headless browser and attached it to this same tool result as an image part. ` +
+                `Nothing was written to disk - there is no saved file and nothing to open in the Home Assistant UI. ` +
+                `If the image part was replaced by a notice that this model cannot read images, tell the user that directly and suggest a model that accepts image input; do not describe the page and do not claim anything was saved.`,
+              { audience: ["user", "assistant"], priority: 0.5 }
+            ),
+            createImageContent(base64Screenshot, "image/png", {
+              audience: ["assistant"],
+              priority: 1.0,
+            }),
+          ],
+        });
+      }
+
+      default:
+        throw new Error(`Unknown tool: ${name}`);
+    }
+  } catch (error) {
+    sendLog("error", "mcp-server", { action: "tool_error", tool: name, error: error.message });
+    return makeCompatibleResponse({
+      content: [createTextContent(`Error: ${error.message}`, { audience: ["user"], priority: 1.0 })],
+      isError: true,
+    });
+  }
+});
+
+// --- List Resources ---
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  sendLog("debug", "mcp-server", { action: "list_resources" });
+  return { resources: RESOURCES };
+});
+
+// --- List Resource Templates ---
+server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+  return { resourceTemplates: RESOURCE_TEMPLATES };
+});
+
+// --- Read Resource ---
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const { uri } = request.params;
+  sendLog("debug", "mcp-server", { action: "read_resource", uri });
+  
+  try {
+    // Static resources
+    if (uri === "ha://states/summary") {
+      const states = await getCachedStates();
+      const summary = generateStateSummary(states);
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "text/markdown", 
+          text: summary,
+          annotations: { audience: ["user", "assistant"], priority: 0.9 },
+        }],
+      };
+    }
+    
+    if (uri === "ha://automations") {
+      const states = await getCachedStates();
+      const automations = states
+        .filter(s => s.entity_id.startsWith("automation."))
+        .map(s => ({
+          entity_id: s.entity_id,
+          friendly_name: s.attributes?.friendly_name,
+          state: s.state,
+          last_triggered: s.attributes?.last_triggered,
+        }));
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(automations, null, 2),
+          annotations: { audience: ["assistant"], priority: 0.7 },
+        }],
+      };
+    }
+    
+    if (uri === "ha://scripts") {
+      const states = await getCachedStates();
+      const scripts = states
+        .filter(s => s.entity_id.startsWith("script."))
+        .map(s => ({
+          entity_id: s.entity_id,
+          friendly_name: s.attributes?.friendly_name,
+          state: s.state,
+        }));
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(scripts, null, 2),
+          annotations: { audience: ["assistant"], priority: 0.6 },
+        }],
+      };
+    }
+    
+    if (uri === "ha://scenes") {
+      const states = await getCachedStates();
+      const scenes = states
+        .filter(s => s.entity_id.startsWith("scene."))
+        .map(s => ({
+          entity_id: s.entity_id,
+          friendly_name: s.attributes?.friendly_name,
+        }));
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(scenes, null, 2),
+          annotations: { audience: ["assistant"], priority: 0.6 },
+        }],
+      };
+    }
+    
+    if (uri === "ha://areas") {
+      const areas = await getRegistry("config/area_registry/list");
+      return {
+        contents: [{
+          uri,
+          mimeType: "application/json",
+          text: JSON.stringify(areas.map((a) => ({ id: a.area_id, name: a.name }))),
+          annotations: { audience: ["assistant"], priority: 0.7 },
+        }],
+      };
+    }
+    
+    if (uri === "ha://config") {
+      const config = await callHA("/config");
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(config, null, 2),
+          annotations: { audience: ["assistant"], priority: 0.5 },
+        }],
+      };
+    }
+
+    if (uri === "ha://agent/capabilities") {
+      const capabilities = await getAgentCapabilities();
+      return {
+        contents: [{
+          uri,
+          mimeType: "application/json",
+          text: JSON.stringify(capabilities, null, 2),
+          annotations: { audience: ["assistant"], priority: 0.8 },
+        }],
+      };
+    }
+    
+    if (uri === "ha://integrations") {
+      const config = await callHA("/config");
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(config.components || [], null, 2),
+          annotations: { audience: ["assistant"], priority: 0.4 },
+        }],
+      };
+    }
+    
+    if (uri === "ha://anomalies") {
+      const states = await getCachedStates();
+      const anomalies = states.map(detectAnomaly).filter(Boolean);
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(anomalies, null, 2),
+          annotations: { audience: ["user", "assistant"], priority: 0.8 },
+        }],
+      };
+    }
+    
+    if (uri === "ha://suggestions") {
+      const states = await getCachedStates();
+      const suggestions = generateSuggestions(states);
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(suggestions, null, 2),
+          annotations: { audience: ["user", "assistant"], priority: 0.7 },
+        }],
+      };
+    }
+    
+    // Template-based resources
+    const statesMatch = uri.match(/^ha:\/\/states\/(\w+)$/);
+    if (statesMatch) {
+      const domain = statesMatch[1];
+      const states = await getCachedStates();
+      const filtered = states
+        .filter(s => s.entity_id.startsWith(`${domain}.`))
+        .map(s => ({
+          entity_id: s.entity_id,
+          state: s.state,
+          friendly_name: s.attributes?.friendly_name,
+          device_class: s.attributes?.device_class,
+        }));
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(filtered, null, 2),
+          annotations: { audience: ["assistant"], priority: 0.7 },
+        }],
+      };
+    }
+    
+    const entityMatch = uri.match(/^ha:\/\/entity\/(.+)$/);
+    if (entityMatch) {
+      const entityId = entityMatch[1];
+      const relationships = await getEntityRelationships(entityId);
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(relationships, null, 2),
+          annotations: { audience: ["assistant"], priority: 0.8 },
+        }],
+      };
+    }
+    
+    const areaMatch = uri.match(/^ha:\/\/area\/(.+)$/);
+    if (areaMatch) {
+      const areaId = areaMatch[1];
+      const [states, areas] = await Promise.all([
+        getCachedStates(),
+        getRegistry("config/area_registry/list"),
+      ]);
+      const areaEntities = states.filter(s => s.attributes?.area_id === areaId);
+      const areaNameResult = areas.find(a => a.area_id === areaId)?.name || areaId;
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify({
+            area_id: areaId,
+            area_name: areaNameResult,
+            entities: areaEntities.map(s => ({
+              entity_id: s.entity_id,
+              state: s.state,
+              friendly_name: s.attributes?.friendly_name,
+            })),
+          }, null, 2),
+          annotations: { audience: ["assistant"], priority: 0.7 },
+        }],
+      };
+    }
+    
+    const historyMatch = uri.match(/^ha:\/\/history\/(.+)$/);
+    if (historyMatch) {
+      const entityId = historyMatch[1];
+      const startTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const params = new URLSearchParams({
+        filter_entity_id: entityId,
+        minimal_response: "true",
+      });
+      const history = await callHA(`/history/period/${encodeURIComponent(startTime)}?${params}`);
+      return {
+        contents: [{ 
+          uri, 
+          mimeType: "application/json", 
+          text: JSON.stringify(history, null, 2),
+          annotations: { audience: ["assistant"], priority: 0.6 },
+        }],
+      };
+    }
+    
+    throw new Error(`Unknown resource: ${uri}`);
+  } catch (error) {
+    sendLog("error", "mcp-server", { action: "read_resource_error", uri, error: error.message });
+    throw new Error(`Failed to read resource ${uri}: ${error.message}`);
+  }
+});
+
+// --- List Prompts ---
+server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  sendLog("debug", "mcp-server", { action: "list_prompts" });
+  return { prompts: PROMPTS };
+});
+
+// --- Get Prompt ---
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  sendLog("info", "mcp-server", { action: "get_prompt", prompt: name });
+  
+  try {
+    switch (name) {
+      case "troubleshoot_entity": {
+        const entityId = args?.entity_id;
+        if (!entityId) throw new Error("entity_id is required");
+        const problemDesc = args?.problem_description || "not working as expected";
+        
+        return {
+          description: `Troubleshooting guide for ${entityId}`,
+          messages: [{
+            role: "user",
+            content: {
+              type: "text",
+              text: `I need help troubleshooting an entity in Home Assistant.
+
+**Entity:** ${entityId}
+**Problem:** ${problemDesc}
+
+Please help me diagnose and fix this issue. Start by:
+1. Using the \`diagnose_entity\` tool to get current state and history
+2. Check if the entity is available and responding
+3. Look at related entities that might be affected
+4. Review the error log for any related messages
+5. Suggest specific fixes based on what you find
+
+Focus on practical solutions I can implement.`,
+              annotations: { audience: ["assistant"], priority: 1.0 },
+            },
+          }],
+        };
+      }
+      
+      case "create_automation": {
+        const goal = args?.goal;
+        if (!goal) throw new Error("goal is required");
+        
+        return {
+          description: "Automation creation guide",
+          messages: [{
+            role: "user",
+            content: {
+              type: "text",
+              text: `I want to create a new Home Assistant automation.
+
+**Goal:** ${goal}
+
+Please help me create this automation by following these steps in order:
+1. **Read the existing automations file** using \`read_file\` on \`automations.yaml\` (or wherever automations are stored). You MUST include ALL existing automations in the final write â€” never overwrite them.
+2. Use \`search_entities\` to find relevant entities for this automation
+3. Check if similar automations already exist using \`get_states\` with domain "automation"
+4. Identify the best trigger(s) for this use case
+5. Suggest any conditions that might be needed
+6. Define the action(s) to take
+7. Provide the complete YAML that contains ALL existing automations PLUS the new one
+
+**CRITICAL:** When writing to ANY config file, the content must include everything that was already there. Writing only new content will permanently delete existing configuration. \`write_config_safe\` will block writes that would lose list entries, drop top-level keys, or significantly shrink the file â€” but always verify yourself first by reading the file before writing.
+
+Consider edge cases and make the automation robust.`,
+              annotations: { audience: ["assistant"], priority: 1.0 },
+            },
+          }],
+        };
+      }
+      
+      case "energy_audit": {
+        return {
+          description: "Energy usage analysis and optimization",
+          messages: [{
+            role: "user",
+            content: {
+              type: "text",
+              text: `Please perform an energy audit of my Home Assistant setup.
+
+Steps:
+1. Use \`search_entities\` to find all energy/power related sensors
+2. Check the current state of all lights using \`get_states\` with domain "light"
+3. Review climate/thermostat entities
+4. Look for smart plugs and their power consumption
+5. Get suggestions using the \`get_suggestions\` tool
+
+Provide a summary including:
+- Current energy consumers that are active
+- Potential energy savings opportunities
+- Automation suggestions to reduce energy usage
+- Any anomalies in power consumption`,
+              annotations: { audience: ["assistant"], priority: 1.0 },
+            },
+          }],
+        };
+      }
+      
+      case "scene_builder": {
+        const area = args?.area || "the specified area";
+        const mood = args?.mood || "comfortable";
+        
+        return {
+          description: "Interactive scene creation",
+          messages: [{
+            role: "user",
+            content: {
+              type: "text",
+              text: `Help me create a new scene for ${area} with a "${mood}" mood.
+
+Steps:
+1. Use \`get_areas\` to understand the available areas
+2. Use \`search_entities\` to find controllable entities in the area (lights, switches, etc.)
+3. For lights, suggest appropriate brightness and color temperature settings
+4. For climate devices, suggest appropriate temperatures
+5. Consider any media players or other relevant devices
+
+Provide:
+- A descriptive name for the scene
+- Complete scene YAML configuration
+- Any automations that might trigger this scene
+- Tips for adjusting the scene`,
+              annotations: { audience: ["assistant"], priority: 1.0 },
+            },
+          }],
+        };
+      }
+      
+      case "security_review": {
+        return {
+          description: "Security review of Home Assistant setup",
+          messages: [{
+            role: "user",
+            content: {
+              type: "text",
+              text: `Please perform a security review of my Home Assistant setup.
+
+Steps:
+1. Use \`search_entities\` to find all security-related entities:
+   - Door/window sensors (binary_sensor with device_class door/window)
+   - Motion sensors
+   - Lock entities
+   - Alarm panels
+   - Camera entities
+
+2. Check current states using \`get_states\`
+3. Use \`detect_anomalies\` to find any issues
+4. Review automation coverage for security scenarios
+
+Provide:
+- Current security status (all doors locked? sensors active?)
+- Any vulnerabilities or gaps in coverage
+- Suggested automations for better security
+- Best practices recommendations`,
+              annotations: { audience: ["assistant"], priority: 1.0 },
+            },
+          }],
+        };
+      }
+      
+      case "morning_routine": {
+        const wakeTime = args?.wake_time || "7:00 AM";
+        
+        return {
+          description: "Morning routine automation design",
+          messages: [{
+            role: "user",
+            content: {
+              type: "text",
+              text: `Help me design a morning routine automation for ${wakeTime}.
+
+Steps:
+1. Use \`search_entities\` to find relevant devices:
+   - Bedroom lights
+   - Coffee maker or kitchen appliances
+   - Thermostat/climate
+   - Window blinds/covers
+   - Speakers for announcements
+
+2. Check existing automations with \`get_states\` domain "automation"
+3. Consider calendar integration using \`get_calendars\`
+
+Design a routine that:
+- Gradually increases lighting
+- Adjusts temperature for waking
+- Optionally starts coffee/breakfast prep
+- Provides weather or calendar briefing
+
+Provide complete automation YAML and any required helper entities.`,
+              annotations: { audience: ["assistant"], priority: 1.0 },
+            },
+          }],
+        };
+      }
+      
+      default:
+        throw new Error(`Unknown prompt: ${name}`);
+    }
+  } catch (error) {
+    sendLog("error", "mcp-server", { action: "get_prompt_error", prompt: name, error: error.message });
+    throw new Error(`Failed to get prompt ${name}: ${error.message}`);
+  }
+});
+
+// ============================================================================
+// START SERVER
+// ============================================================================
+
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  
+  sendLog("info", "mcp-server", { 
+    action: "started",
+    version: "2.8.0",
+    tools: TOOLS.length,
+    resources: RESOURCES.length,
+    prompts: PROMPTS.length,
+  });
+  
+  console.error("Home Assistant MCP server v2.8.0 started (Agent Capability Edition)");
+  console.error(`Capabilities: Tools (${TOOLS.length}), Resources (${RESOURCES.length}), Prompts (${PROMPTS.length}), Logging`);
+  console.error(`Features: Structured Output, Tool Annotations, Resource Links, Content Annotations, Live Docs, Safe Config Writing, Screenshots${SCREENSHOT_ENABLED ? " (enabled)" : " (disabled)"}`);
+}
+
+main().catch((error) => {
+  console.error("Fatal error:", error);
+  process.exit(1);
+});
