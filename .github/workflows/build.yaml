@@ -51,6 +51,32 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Building version: ${VERSION}"
 
+      - name: Get stable build args
+        id: stable_build_args
+        shell: bash
+        run: |
+          # Mirrors the beta workflow. Both channels build from identical
+          # Dockerfiles, so anything that may differ between them has to arrive
+          # as a build arg — which is what makes this file's pin real rather
+          # than documentation.
+          OPENCHAMBER_VERSION=$(sed -n 's/^[[:space:]]*OPENCHAMBER_VERSION:[[:space:]]*"\([^"]*\)".*/\1/p' ha_opencode/build.yaml)
+          if [ -z "${OPENCHAMBER_VERSION}" ]; then
+            echo "::error::OPENCHAMBER_VERSION not found in ha_opencode/build.yaml"
+            exit 1
+          fi
+          echo "openchamber_version=${OPENCHAMBER_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Using OpenChamber ${OPENCHAMBER_VERSION} for stable build"
+
+      - name: Assert this folder really is the stable add-on
+        shell: bash
+        run: |
+          grep -qx 'slug: "ha_opencode"' ha_opencode/config.yaml || {
+            echo "::error::ha_opencode/config.yaml does not declare slug ha_opencode."
+            grep -n "^slug:" ha_opencode/config.yaml
+            exit 1
+          }
+          echo "OK: building the stable add-on from ha_opencode/ with ADDON_CHANNEL=stable."
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -75,6 +101,8 @@ jobs:
             BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
             BUILD_VERSION=${{ steps.version.outputs.version }}
             BUILD_ARCH=${{ matrix.ha_arch }}
+            ADDON_CHANNEL=stable
+            OPENCHAMBER_VERSION=${{ steps.stable_build_args.outputs.openchamber_version }}
           cache-from: type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
           cache-to: type=gha,mode=max,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
           labels: |

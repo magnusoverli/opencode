@@ -1,0 +1,49 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# OpenCode - Optional PPQ Private Mode Proxy Service
+# ==============================================================================
+
+export HOME="/data"
+export XDG_DATA_HOME="/data/.local/share"
+export XDG_CONFIG_HOME="/data/.config"
+export NODE_OPTIONS="--max-old-space-size=256"
+export PORT="8787"
+
+if [ -f /data/.env_vars ]; then
+    source /data/.env_vars
+fi
+
+if [ -f /data/.env_vars_discovered ]; then
+    source /data/.env_vars_discovered
+fi
+
+PPQ_PRIVATE_ENABLED=$(bashio::config 'ppq_private_enabled' 2>/dev/null || echo "false")
+
+if ! bashio::var.true "${PPQ_PRIVATE_ENABLED}"; then
+    exec sleep infinity
+fi
+
+if [ -z "${PPQ_API_KEY:-}" ]; then
+    bashio::log.error "PPQ private mode is enabled, but no PPQ API key is configured."
+    bashio::log.error "Set the PPQ API Key option in the add-on Configuration tab, then restart the add-on."
+    exec sleep infinity
+fi
+
+bashio::log.info "Starting PPQ private-mode proxy on 127.0.0.1:${PORT}"
+bashio::log.info "The PPQ proxy is internal-only and is not exposed through Home Assistant networking."
+
+# ppq-private-mode is installed into the image's global modules
+# (/usr/local/lib/node_modules). This script sources /data/.env_vars, which
+# exports NPM_CONFIG_PREFIX=/data/.npm-global for OpenCode's own runtime updates
+# — so a plain `npm root -g` would resolve there instead and miss the proxy
+# (ERR_MODULE_NOT_FOUND). Isolate the lookup from that override. Thanks to
+# @iBobik for diagnosing this in issue #34.
+PPQ_PROXY_ENTRYPOINT="$(unset NPM_CONFIG_PREFIX npm_config_prefix; npm root -g)/ppq-private-mode/bin/server.ts"
+
+if [ ! -f "${PPQ_PROXY_ENTRYPOINT}" ]; then
+    bashio::log.error "PPQ proxy entrypoint not found at ${PPQ_PROXY_ENTRYPOINT}"
+    bashio::log.error "The ppq-private-mode package appears to be missing from the image; please report this at https://github.com/magnusoverli/opencode/issues"
+    exec sleep infinity
+fi
+
+exec tsx "${PPQ_PROXY_ENTRYPOINT}"

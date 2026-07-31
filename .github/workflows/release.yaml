@@ -39,18 +39,20 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          # Stable ships from main. A v* tag cut from dev would build beta code
-          # and publish it as stable, so refuse rather than guess.
+          # Both channels ship from main. What separates them is the folder the
+          # add-on lives in — this release publishes ha_opencode/, and beta
+          # work lives in ha_opencode_beta/ where a stable build cannot reach
+          # it. Home Assistant only reads the default branch, so a tag off main
+          # could not be served anyway.
           if ! git merge-base --is-ancestor "${TAG}^{commit}" HEAD; then
             echo "::error::Stable tag ${TAG} is not reachable from main."
-            echo "::error::Stable releases must be cut from main; dev carries beta."
-            echo "::error::Delete the tag, merge the work into main, and tag again."
+            echo "::error::Both channels release from main; merge the work and tag again."
             exit 1
           fi
 
-          # main is allowed to have moved on for beta-only reasons (the beta
-          # metadata sync commits do exactly that). It is NOT allowed to have
-          # moved the stable add-on itself, because this job publishes main's
+          # main is allowed to have moved on for beta-only reasons (a beta
+          # version bump does exactly that). It is NOT allowed to have moved
+          # the stable add-on itself, because this job publishes main's
           # ha_opencode/ as the storefront for an image built from the tag.
           if ! git diff --quiet "${TAG}" HEAD -- ha_opencode/; then
             echo "::error::main has moved past ${TAG} inside ha_opencode/."

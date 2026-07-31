@@ -1,0 +1,124 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# OpenCode - OpenChamber Service (browser UI via Home Assistant ingress)
+# ==============================================================================
+
+export HOME="/data"
+export XDG_DATA_HOME="/data/.local/share"
+export XDG_CONFIG_HOME="/data/.config"
+export NPM_CONFIG_PREFIX="/data/.npm-global"
+export NODE_OPTIONS="--max-old-space-size=768"
+
+if [ -f /data/.env_vars ]; then
+    source /data/.env_vars
+fi
+
+if [ -f /data/.env_vars_discovered ]; then
+    source /data/.env_vars_discovered
+fi
+
+# Keep the default Ingress proxy strict even when users define custom env vars.
+# The LAN-only bypass is enabled exclusively by the ha-openchamber-lan service.
+export OPENCHAMBER_ALLOW_ANY_REMOTE="false"
+
+# Keep the Supervisor token process-only. Tools that expect HA_TOKEN receive it
+# from the live environment instead of a persisted /data/.env_vars entry.
+if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    export HA_TOKEN="${SUPERVISOR_TOKEN}"
+fi
+
+OPENCODE_UPDATE_POLICY=$(cat /data/.opencode_update_policy 2>/dev/null || echo "latest")
+if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
+    export PATH="${NPM_CONFIG_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+else
+    export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+    export OPENCODE_DISABLE_AUTOUPDATE=true
+fi
+
+INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+if [ "${INTERFACE_MODE}" != "openchamber" ]; then
+    bashio::log.info "Interface mode is '${INTERFACE_MODE}'; OpenChamber ingress service is inactive."
+    exec sleep infinity
+fi
+
+OPENCHAMBER_INTERNAL_PORT=3010
+OPENCHAMBER_INGRESS_PORT=8099
+
+export OPENCHAMBER_DATA_DIR="/data/.config/openchamber"
+export OPENCHAMBER_HOST="127.0.0.1"
+export OPENCHAMBER_INGRESS_HOST="0.0.0.0"
+export OPENCHAMBER_INGRESS_PORT
+export OPENCHAMBER_UPSTREAM_HOST="127.0.0.1"
+export OPENCHAMBER_UPSTREAM_PORT="${OPENCHAMBER_INTERNAL_PORT}"
+export OPENCHAMBER_SKIP_API_COMPRESSION=true
+export OPENCHAMBER_COMPRESS_API=false
+export OPENCHAMBER_OPENCODE_HOSTNAME="127.0.0.1"
+# Neutralize OpenChamber's built-in self-update. OpenChamber is pinned and
+# Ingress-patched at image build time, so an in-app update cannot persist or
+# stay patched and only hangs the UI on "Waiting for server...". Point the
+# update-check API at a local canned "no update" endpoint served by the ingress
+# proxy below, so both the update notification and the update-install action
+# report no update available. OpenChamber is updated by updating the add-on.
+export OPENCHAMBER_UPDATE_API_URL="http://127.0.0.1:${OPENCHAMBER_INGRESS_PORT}/__ha_openchamber_update_check"
+
+mkdir -p "${OPENCHAMBER_DATA_DIR}"
+
+bashio::log.info "=============================================="
+bashio::log.info "  OpenChamber UI (Home Assistant ingress beta)"
+bashio::log.info "=============================================="
+bashio::log.info "Starting OpenChamber on 127.0.0.1:${OPENCHAMBER_INTERNAL_PORT}"
+bashio::log.info "Starting ingress proxy on 0.0.0.0:${OPENCHAMBER_INGRESS_PORT}"
+
+# Always launch the bundled OpenChamber package patched during image build.
+# Keep PATH unchanged so OpenChamber can still find the persistent latest
+# OpenCode binary when OPENCODE_UPDATE_POLICY=latest.
+OPENCHAMBER_BIN="/usr/local/bin/openchamber"
+
+cd /homeassistant
+
+"${OPENCHAMBER_BIN}" serve \
+    --foreground \
+    --port "${OPENCHAMBER_INTERNAL_PORT}" \
+    --host 127.0.0.1 &
+OPENCHAMBER_PID=$!
+
+cleanup() {
+    if kill -0 "${OPENCHAMBER_PID}" 2>/dev/null; then
+        kill "${OPENCHAMBER_PID}" 2>/dev/null || true
+    fi
+    if [ -n "${PROXY_PID:-}" ] && kill -0 "${PROXY_PID}" 2>/dev/null; then
+        kill "${PROXY_PID}" 2>/dev/null || true
+    fi
+}
+
+trap cleanup TERM INT HUP QUIT
+
+OPENCHAMBER_READY=false
+for _ in $(seq 1 120); do
+    if ! kill -0 "${OPENCHAMBER_PID}" 2>/dev/null; then
+        bashio::log.error "OpenChamber exited before becoming ready"
+        wait "${OPENCHAMBER_PID}" || true
+        exit 1
+    fi
+    if curl -fsS --max-time 2 "http://127.0.0.1:${OPENCHAMBER_INTERNAL_PORT}/health" >/dev/null 2>&1; then
+        OPENCHAMBER_READY=true
+        break
+    fi
+    sleep 0.5
+done
+
+if [ "${OPENCHAMBER_READY}" != "true" ]; then
+    bashio::log.error "Timed out waiting for OpenChamber to become ready"
+    cleanup
+    exit 1
+fi
+
+node /usr/local/bin/openchamber-ingress-proxy.js &
+PROXY_PID=$!
+
+wait -n "${OPENCHAMBER_PID}" "${PROXY_PID}"
+EXIT_CODE=$?
+cleanup
+wait "${OPENCHAMBER_PID}" 2>/dev/null || true
+wait "${PROXY_PID}" 2>/dev/null || true
+exit "${EXIT_CODE}"

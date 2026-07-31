@@ -1,0 +1,963 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# OpenCode - Initialization Service (oneshot)
+# Runs once at container startup to prepare the environment
+# ==============================================================================
+
+# Which release channel this image is, and which paths in the shared
+# configuration directory belong to it.
+# shellcheck source=/usr/local/lib/opencode/channel.sh
+source /usr/local/lib/opencode/channel.sh
+
+bashio::log.info "Initializing ${ADDON_CHANNEL_LABEL} (${ADDON_CHANNEL} channel)..."
+
+# Save addon version for the terminal banner
+ADDON_VERSION=$(bashio::addon.version)
+printf '%s\n' "${ADDON_VERSION}" > /data/.addon_version
+printf '%s\n' "${ADDON_CHANNEL}" > /data/.addon_channel
+
+# ==============================================================================
+# Read configuration options
+# ==============================================================================
+
+CPU_MODE_CONFIG=$(bashio::config 'cpu_mode' || echo "auto")
+OPENCODE_UPDATE_POLICY=$(bashio::config 'opencode_update_policy' || echo "latest")
+INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+MCP_ENABLED=$(bashio::config 'mcp_enabled')
+NATIVE_HA_MCP_ENABLED=$(bashio::config 'native_ha_mcp_enabled' 2>/dev/null || echo "false")
+NATIVE_HA_MCP_API_ID=$(bashio::config 'native_ha_mcp_api_id' 2>/dev/null || echo "assist")
+LSP_ENABLED=$(bashio::config 'lsp_enabled' || echo "true")
+SCREENSHOT_ENABLED=$(bashio::config 'screenshot_enabled' || echo "false")
+ADDON_ACCESS_ENABLED=$(bashio::config 'addon_access_enabled' || echo "false")
+PPQ_PRIVATE_ENABLED=$(bashio::config 'ppq_private_enabled' || echo "false")
+RESTRICT_SENSITIVE_FILES=$(bashio::config 'restrict_sensitive_files' 2>/dev/null || echo "true")
+FOCUS_MODE=$(bashio::config 'focus_mode' 2>/dev/null || echo "false")
+HOME_BRIEFING_ENABLED=$(bashio::config 'home_briefing_enabled' 2>/dev/null || echo "true")
+DECISION_NOTES_ENABLED=$(bashio::config 'decision_notes_enabled' 2>/dev/null || echo "true")
+
+ACCESS_TOKEN=$(bashio::config 'access_token' || echo "")
+PPQ_API_KEY=$(bashio::config 'ppq_api_key' || echo "")
+
+if [ "${NATIVE_HA_MCP_API_ID}" = "null" ]; then
+    NATIVE_HA_MCP_API_ID=""
+fi
+
+case "${OPENCODE_UPDATE_POLICY}" in
+    latest|bundled)
+        ;;
+    *)
+        bashio::log.warning "Unknown opencode_update_policy '${OPENCODE_UPDATE_POLICY}' - defaulting to latest"
+        OPENCODE_UPDATE_POLICY="latest"
+        ;;
+esac
+
+if [ "${FOCUS_MODE}" != "true" ]; then
+    FOCUS_MODE="false"
+fi
+
+# Home context features are on by default, so anything other than an explicit
+# "false" (including an option absent from an older options.json) means on.
+if [ "${HOME_BRIEFING_ENABLED}" != "false" ]; then
+    HOME_BRIEFING_ENABLED="true"
+fi
+if [ "${DECISION_NOTES_ENABLED}" != "false" ]; then
+    DECISION_NOTES_ENABLED="true"
+fi
+
+bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED}"
+
+# Set up persistent HOME and npm global prefix for OpenCode runtime updates.
+export HOME="/data"
+export XDG_DATA_HOME="/data/.local/share"
+export XDG_CONFIG_HOME="/data/.config"
+export NPM_CONFIG_PREFIX="/data/.npm-global"
+OPENCODE_TMPDIR="/data/.cache/opencode-tmp"
+
+if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
+    export PATH="${NPM_CONFIG_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+else
+    export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+    export OPENCODE_DISABLE_AUTOUPDATE=true
+fi
+
+rm -rf "${OPENCODE_TMPDIR}"
+mkdir -p /data/.local/share/opencode /data/.config/opencode "${NPM_CONFIG_PREFIX}" "${OPENCODE_TMPDIR}"
+chmod 700 "${OPENCODE_TMPDIR}"
+printf '%s\n' "${OPENCODE_UPDATE_POLICY}" > /data/.opencode_update_policy
+printf '%s\n' "${INTERFACE_MODE}" > /data/.interface_mode
+
+# ==============================================================================
+# Process user-defined environment variables
+# Reads env_vars from add-on config and writes a sourceable file at /data/.env_vars
+# ==============================================================================
+
+ENV_VARS_FILE="/data/.env_vars"
+
+# Always start fresh to avoid stale variables from previous config
+rm -f "${ENV_VARS_FILE}"
+
+OPTIONS_FILE="/data/options.json"
+ENV_VARS_COUNT=$(jq -r '.env_vars // [] | length' "${OPTIONS_FILE}")
+
+# Reserved names that would break the add-on if overridden
+ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_UPDATE_POLICY","SHELL","USER","PWD"'
+
+if [ "${ENV_VARS_COUNT}" -gt 0 ]; then
+    bashio::log.info "Processing ${ENV_VARS_COUNT} user-defined environment variable(s)..."
+
+    # Single jq pass emits all valid export lines (handles quoting via @sh,
+    # multi-line values stay intact inside the quotes)
+    jq -r "
+        (.env_vars // [])[] |
+        select(.name | test(\"^[A-Za-z_][A-Za-z0-9_]*\$\")) |
+        select(.name | IN(${ENV_VARS_RESERVED}) | not) |
+        \"export \(.name)=\(.value | tostring | @sh)\"
+    " "${OPTIONS_FILE}" >> "${ENV_VARS_FILE}"
+
+    # Second pass classifies names for logging only
+    while IFS=$'\t' read -r STATUS VAR_NAME; do
+        case "${STATUS}" in
+            ok)
+                bashio::log.info "  Set environment variable: ${VAR_NAME}"
+                ;;
+            invalid)
+                bashio::log.warning "Skipping invalid environment variable name: '${VAR_NAME}'"
+                bashio::log.warning "Names must start with a letter or underscore and contain only letters, digits, and underscores."
+                ;;
+            reserved)
+                bashio::log.warning "Skipping reserved environment variable: '${VAR_NAME}'"
+                bashio::log.warning "System variables cannot be overridden to prevent breaking the add-on."
+                ;;
+        esac
+    done < <(jq -r "
+        (.env_vars // [])[] | .name as \$n |
+        if (\$n | test(\"^[A-Za-z_][A-Za-z0-9_]*\$\") | not) then
+            \"invalid\t\(\$n | gsub(\"[\\n\\t]\"; \" \"))\"
+        elif (\$n | IN(${ENV_VARS_RESERVED})) then
+            \"reserved\t\(\$n)\"
+        else
+            \"ok\t\(\$n)\"
+        end
+    " "${OPTIONS_FILE}")
+
+    chmod 600 "${ENV_VARS_FILE}"
+    bashio::log.info "Environment variables written to ${ENV_VARS_FILE}"
+else
+    bashio::log.info "No user-defined environment variables configured"
+fi
+
+# Export system-managed runtime paths for all services and shell sessions.
+printf 'export NPM_CONFIG_PREFIX=%q\n' "${NPM_CONFIG_PREFIX}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_UPDATE_POLICY=%q\n' "${OPENCODE_UPDATE_POLICY}" >> "${ENV_VARS_FILE}"
+printf 'export TMPDIR=%q\n' "${OPENCODE_TMPDIR}" >> "${ENV_VARS_FILE}"
+if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
+    printf 'export PATH="%s/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"\n' "${NPM_CONFIG_PREFIX}" >> "${ENV_VARS_FILE}"
+else
+    printf 'export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"\n' >> "${ENV_VARS_FILE}"
+    printf 'export OPENCODE_DISABLE_AUTOUPDATE=true\n' >> "${ENV_VARS_FILE}"
+fi
+chmod 600 "${ENV_VARS_FILE}"
+
+# ==============================================================================
+# Expose configured serial devices to OpenCode and shell sessions
+# Supervisor maps these devices into the container based on the device() schema.
+# ==============================================================================
+
+SERIAL_DEVICES_COUNT=$(bashio::config 'serial_devices | length' || echo "0")
+
+if [ "${SERIAL_DEVICES_COUNT}" -gt 0 ]; then
+    SERIAL_DEVICES=""
+    for i in $(seq 0 $((SERIAL_DEVICES_COUNT - 1))); do
+        SERIAL_DEVICE=$(bashio::config "serial_devices[${i}]")
+        if [ -z "${SERIAL_DEVICES}" ]; then
+            SERIAL_DEVICES="${SERIAL_DEVICE}"
+        else
+            SERIAL_DEVICES="${SERIAL_DEVICES}:${SERIAL_DEVICE}"
+        fi
+        bashio::log.info "Serial device configured: ${SERIAL_DEVICE}"
+    done
+    printf 'export OPENCODE_SERIAL_DEVICES=%q\n' "${SERIAL_DEVICES}" >> "${ENV_VARS_FILE}"
+    chmod 600 "${ENV_VARS_FILE}"
+else
+    bashio::log.info "No serial devices configured"
+fi
+
+# ==============================================================================
+# Export HA Core long-lived access token (for ESPHome ingress)
+# Appended AFTER user env vars so it survives the rm -f above.
+# ==============================================================================
+
+if [ -n "${ACCESS_TOKEN}" ]; then
+    printf 'export HA_ACCESS_TOKEN=%q\n' "${ACCESS_TOKEN}" >> "${ENV_VARS_FILE}"
+    chmod 600 "${ENV_VARS_FILE}"
+    bashio::log.info "HA Core access token configured (for ESPHome ingress)"
+else
+    bashio::log.info "No HA Core access token configured (ESPHome tools may not work)"
+fi
+
+# ==============================================================================
+# Export PPQ API key for the internal private-mode proxy
+# ==============================================================================
+
+PPQ_API_KEY_CONFIGURED=false
+
+if bashio::var.true "${PPQ_PRIVATE_ENABLED}"; then
+    if [ -n "${PPQ_API_KEY}" ]; then
+        printf 'export PPQ_API_KEY=%q\n' "${PPQ_API_KEY}" >> "${ENV_VARS_FILE}"
+        chmod 600 "${ENV_VARS_FILE}"
+        bashio::log.info "PPQ private mode enabled; API key configured"
+        PPQ_API_KEY_CONFIGURED=true
+    elif [ -f "${ENV_VARS_FILE}" ] && grep -qE '^export PPQ_API_KEY=' "${ENV_VARS_FILE}"; then
+        bashio::log.info "PPQ private mode enabled; API key configured via env_vars"
+        PPQ_API_KEY_CONFIGURED=true
+    else
+        bashio::log.warning "PPQ private mode is enabled, but no PPQ API key is configured"
+        bashio::log.warning "The PPQ proxy and OpenCode provider will stay inactive until a key is added"
+    fi
+else
+    bashio::log.info "PPQ private mode disabled"
+fi
+
+# ==============================================================================
+# Add-on development access acknowledgement
+# ==============================================================================
+
+printf '%s\n' "${ADDON_ACCESS_ENABLED}" > /data/.addon_access_enabled
+
+if bashio::var.true "${ADDON_ACCESS_ENABLED}"; then
+    printf 'export OPENCODE_ADDON_ACCESS_ENABLED=true\n' >> "${ENV_VARS_FILE}"
+    chmod 600 "${ENV_VARS_FILE}"
+    bashio::log.warning "Add-on folder access is enabled. OpenCode can work with /addons and /addon_configs."
+    bashio::log.warning "These folders may contain sensitive add-on configuration and should be edited carefully."
+else
+    printf 'export OPENCODE_ADDON_ACCESS_ENABLED=false\n' >> "${ENV_VARS_FILE}"
+    chmod 600 "${ENV_VARS_FILE}"
+    bashio::log.info "Add-on folder access guidance disabled. Mounted add-on folders are not advertised in the terminal."
+fi
+
+# ==============================================================================
+# Auto-configure zigporter CLI credentials
+# zigporter needs HA_URL + HA_TOKEN to talk to Home Assistant.
+# Inside the Supervisor environment, http://supervisor/core proxies to HA Core
+# and SUPERVISOR_TOKEN is a valid Bearer token — same mechanism as hab.
+# HA_TOKEN is exported at runtime by the services that need it, not persisted
+# into /data/.env_vars.
+# ==============================================================================
+
+printf 'export HA_URL=http://supervisor/core\n' >> "${ENV_VARS_FILE}"
+printf 'export HA_VERIFY_SSL=false\n' >> "${ENV_VARS_FILE}"
+
+# Z2M configuration — auto-discover or use manual override
+# If the user has set z2m_url in the config, use that (manual override).
+# Otherwise, try to auto-discover Z2M via the Supervisor API (same pattern as ESPHome).
+Z2M_URL_CONFIG=$(bashio::config 'z2m_url' || echo "")
+Z2M_TOPIC_CONFIG=$(bashio::config 'z2m_mqtt_topic' || echo "")
+
+DISCOVER_Z2M_FLAG="true"
+if [ -n "${Z2M_URL_CONFIG}" ]; then
+    case "${Z2M_URL_CONFIG}" in
+        http://*|https://*)
+            Z2M_URL="${Z2M_URL_CONFIG}"
+            ;;
+        *)
+            Z2M_URL="http://${Z2M_URL_CONFIG}"
+            bashio::log.info "zigporter Z2M URL missing scheme; defaulting to ${Z2M_URL}"
+            ;;
+    esac
+    printf 'export Z2M_URL=%q\n' "${Z2M_URL}" >> "${ENV_VARS_FILE}"
+    bashio::log.info "zigporter Z2M URL configured (manual): ${Z2M_URL}"
+    if [ -n "${Z2M_TOPIC_CONFIG}" ]; then
+        printf 'export Z2M_MQTT_TOPIC=%q\n' "${Z2M_TOPIC_CONFIG}" >> "${ENV_VARS_FILE}"
+    fi
+    DISCOVER_Z2M_FLAG="false"
+fi
+
+chmod 600 "${ENV_VARS_FILE}"
+bashio::log.info "zigporter credentials configured (HA via Supervisor proxy)"
+
+# ==============================================================================
+# Export screenshot_enabled flag for the MCP server
+# ==============================================================================
+
+if [ "${SCREENSHOT_ENABLED}" = "true" ]; then
+    printf 'export SCREENSHOT_ENABLED=true\n' >> "${ENV_VARS_FILE}"
+    chmod 600 "${ENV_VARS_FILE}"
+    bashio::log.info "Screenshot tool enabled (Chromium headless for visual verification)"
+else
+    bashio::log.info "Screenshot tool disabled (enable in Configuration tab to use visual verification)"
+fi
+
+# ==============================================================================
+# Export home context flags
+# The MCP server reads OPENCODE_DECISION_NOTES to decide whether to offer the
+# decision-note tools; the context generator reads all of these to describe
+# which add-on capabilities are actually active.
+# ==============================================================================
+
+printf 'export OPENCODE_HOME_BRIEFING=%s\n' "${HOME_BRIEFING_ENABLED}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_DECISION_NOTES=%s\n' "${DECISION_NOTES_ENABLED}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_MCP_ENABLED=%s\n' "${MCP_ENABLED}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_LSP_ENABLED=%s\n' "${LSP_ENABLED}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_RESTRICT_SENSITIVE_FILES=%s\n' "${RESTRICT_SENSITIVE_FILES}" >> "${ENV_VARS_FILE}"
+chmod 600 "${ENV_VARS_FILE}"
+
+# ==============================================================================
+# Background service discovery (Zigbee2MQTT + ESPHome)
+# Discovers Z2M_URL/Z2M_MQTT_TOPIC and HAB_ESPHOME_URL/HAB_ESPHOME_SESSION for
+# shell users. The MCP server does its own runtime discovery, so this runs
+# fully detached — boot never waits on network discovery. Results land in
+# /data/.env_vars_discovered, sourced alongside /data/.env_vars when present.
+# ==============================================================================
+
+rm -f /data/.env_vars_discovered
+
+if [ -n "${ACCESS_TOKEN}" ] || [ "${DISCOVER_Z2M_FLAG}" = "true" ]; then
+    bashio::log.info "Starting background discovery (Zigbee2MQTT/ESPHome)..."
+    # setsid detaches the process into its own session so it survives the
+    # oneshot's exit; output goes to a log file for debugging
+    HA_ACCESS_TOKEN="${ACCESS_TOKEN}" DISCOVER_Z2M="${DISCOVER_Z2M_FLAG}" \
+        setsid node /usr/local/bin/discover-services.js \
+        >/tmp/discover-services.log 2>&1 </dev/null &
+fi
+
+if [ -z "${ACCESS_TOKEN}" ]; then
+    bashio::log.warning "No access token configured — ESPHome tools will not work"
+    bashio::log.warning "Set a Long-Lived Access Token in the add-on Configuration tab"
+fi
+
+# ==============================================================================
+# CPU Capability Detection - record diagnostics for OpenCode's runtime selector
+#
+# OpenCode ships Bun-compiled binaries, so Bun's CPU floor is OpenCode's. The
+# regular x64 build targets Haswell (AVX2); the x64 "baseline" build targets
+# Nehalem, which still requires SSE4.2 (the x86-64-v2 level). Below SSE4.2 no
+# published build starts at all, and the only useful thing this add-on can do
+# is name the cause instead of leaving the user with a bare "Illegal
+# instruction (core dumped)".
+# ==============================================================================
+
+# Recorded when the CPU is below Bun's floor, so the runtime setup below can
+# explain a failed binary rather than reporting a generic execution failure.
+CPU_UNSUPPORTED_MARKER=/data/.cpu_unsupported
+
+warn_baseline_mode() {
+    bashio::log.warning "OpenCode x64 baseline mode may be used because AVX2 is not visible to the container."
+    bashio::log.warning "If this add-on runs in a VM on an AVX2-capable host, enable host CPU passthrough; generic QEMU/KVM CPU models can hide AVX2."
+    bashio::log.warning "Upstream currently publishes the regular AVX2 binary inside the x64 baseline package, so baseline mode may still fail with an illegal instruction: https://github.com/anomalyco/opencode/issues/33595"
+    bashio::log.warning "Known upstream baseline OOM issue: https://github.com/anomalyco/opencode/issues/20988"
+}
+
+report_unsupported_cpu() {
+    local model_name
+    model_name=$(awk -F': ' '/^model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null)
+    bashio::log.error "This CPU cannot run OpenCode: ${model_name:-unknown CPU} does not support SSE4.2."
+    bashio::log.error "OpenCode is built with Bun, whose oldest supported target (the x64 'baseline' build) requires SSE4.2 - the x86-64-v2 level, meaning Intel Nehalem (2008) or newer, or AMD Bulldozer (2011) / Jaguar (2013) or newer."
+    bashio::log.error "No published OpenCode binary, regular or baseline, will start on this hardware; it exits immediately with 'Illegal instruction (core dumped)'."
+    bashio::log.error "The rest of the add-on still works, but OpenCode itself cannot run on this machine. Setting CPU mode to 'baseline' does not change this."
+}
+
+detect_cpu_capabilities() {
+    local cpu_mode_config="${CPU_MODE_CONFIG:-auto}"
+    local machine
+    local cpu_flags=""
+    local has_avx2=false
+    local has_avx=false
+    local has_sse42=false
+
+    machine=$(uname -m)
+
+    # Cleared every boot so moving the disk to a newer machine, or giving the VM
+    # a better CPU model, drops the marker instead of leaving it stale.
+    rm -f "${CPU_UNSUPPORTED_MARKER}"
+
+    if [ -f /proc/cpuinfo ]; then
+        cpu_flags=$(awk -F': ' '/^flags/ {print $2; exit}' /proc/cpuinfo)
+    fi
+
+    if echo "${cpu_flags}" | grep -q '\bavx2\b'; then
+        has_avx2=true
+    fi
+
+    if echo "${cpu_flags}" | grep -q '\bavx\b'; then
+        has_avx=true
+    fi
+
+    if echo "${cpu_flags}" | grep -q '\bsse4_2\b'; then
+        has_sse42=true
+    fi
+
+    if [ "${machine}" = "aarch64" ] || [ "${machine}" = "arm64" ]; then
+        echo "regular" > /data/.cpu_mode
+        if [ "${cpu_mode_config}" = "baseline" ]; then
+            bashio::log.warning "CPU mode baseline was requested, but ARM64 has no OpenCode baseline package; using regular binary"
+        else
+            bashio::log.info "ARM64 architecture detected - using regular OpenCode binary"
+        fi
+        return
+    fi
+
+    # Below SSE4.2 the binary choice is moot - neither build runs - so say so
+    # once, plainly, and still record a mode so the rest of start-up proceeds
+    # normally and the message stays visible in the add-on log.
+    if [ "${has_sse42}" != "true" ]; then
+        printf '1\n' > "${CPU_UNSUPPORTED_MARKER}"
+        report_unsupported_cpu
+        echo "baseline" > /data/.cpu_mode
+        return
+    fi
+
+    if [ "${cpu_mode_config}" = "baseline" ]; then
+        echo "baseline" > /data/.cpu_mode
+        bashio::log.warning "CPU mode forced to baseline by configuration"
+        warn_baseline_mode
+        return
+    elif [ "${cpu_mode_config}" = "regular" ]; then
+        echo "regular" > /data/.cpu_mode
+        if [ "${machine}" = "x86_64" ] && [ "${has_avx2}" != "true" ]; then
+            bashio::log.warning "CPU mode forced to regular, but AVX2 is not visible; OpenCode may fail with an illegal instruction"
+        else
+            bashio::log.info "CPU mode forced to regular by configuration"
+        fi
+        return
+    fi
+
+    if [ "${has_avx2}" = "true" ]; then
+        echo "regular" > /data/.cpu_mode
+        bashio::log.info "CPU supports AVX2 - OpenCode regular binary will be selected"
+    elif [ "${has_avx}" = "true" ]; then
+        echo "baseline" > /data/.cpu_mode
+        bashio::log.warning "CPU has AVX but not AVX2 - OpenCode baseline binary will be selected"
+        warn_baseline_mode
+    else
+        echo "baseline" > /data/.cpu_mode
+        bashio::log.warning "CPU lacks AVX support - OpenCode baseline binary will be selected"
+        warn_baseline_mode
+    fi
+}
+
+detect_cpu_capabilities
+
+# ==============================================================================
+# Install/verify OpenCode through the upstream opencode-ai package
+#
+# The heavy `npm install -g opencode-ai@latest` no longer runs on the boot
+# critical path. This oneshot only guarantees a *working* opencode binary — the
+# bundled one, or a healthy persistent install — so the ingress health check can
+# come up immediately. When the user opts into rolling updates, the refresh is
+# handed to a detached background updater and skipped entirely on low-RAM hosts,
+# so a slow/failing npm install can never OOM the container or trip the
+# watchdog into a crash loop. Shared helpers live in one place (runtime.sh) so
+# the init and updater paths cannot drift.
+# ==============================================================================
+
+opencode_log() { bashio::log.info "$*"; }
+# shellcheck source=/usr/local/lib/opencode/runtime.sh
+source /usr/local/lib/opencode/runtime.sh
+
+# Free memory (kB) below which the background "latest" update is skipped, so the
+# npm spike cannot tip a low-RAM device (e.g. a 4 GB HA Green already running
+# several add-ons) into swap-thrash and a watchdog crash loop.
+OPENCODE_UPDATE_MIN_AVAIL_KB=1572864  # 1.5 GiB
+
+available_memory_kb() {
+    awk '/^MemAvailable:/ { print $2; found = 1 }
+         END { if (!found) print 0 }' /proc/meminfo 2>/dev/null || echo 0
+}
+
+setup_opencode_runtime() {
+    local cpu_mode bundled_package runtime_package persistent_bin bundled_bin
+    local bundled_version runtime_version effective_bin effective_version
+    local use_persistent=false
+    bundled_package="/usr/local/lib/node_modules/opencode-ai"
+    runtime_package="${NPM_CONFIG_PREFIX}/lib/node_modules/opencode-ai"
+    persistent_bin="${NPM_CONFIG_PREFIX}/bin/opencode"
+    bundled_bin="/usr/local/bin/opencode"
+
+    cpu_mode=$(cat /data/.cpu_mode 2>/dev/null || echo "regular")
+    bundled_version=$(opencode_package_version "${bundled_package}")
+    bashio::log.info "Bundled OpenCode version: ${bundled_version}"
+
+    # --- Synchronous: pick a binary that actually runs, without touching the
+    #     network, so ingress is never gated behind an install. ---
+    if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ] && [ -d "${runtime_package}" ]; then
+        runtime_version=$(opencode_package_version "${runtime_package}")
+        opencode_select_package_binary "${runtime_package}" "${cpu_mode}" || true
+        if opencode_bin_runs "${persistent_bin}"; then
+            use_persistent=true
+            bashio::log.info "Using persistent OpenCode runtime: ${runtime_version}"
+        else
+            # A boot-time install killed mid-way leaves the launcher on PATH
+            # with its native binary missing ("cannot execute: required file
+            # not found"). Drop it so PATH falls through to the bundled binary;
+            # the background updater will reinstall it cleanly.
+            bashio::log.warning "Persistent OpenCode runtime is broken; removing it and using the bundled binary"
+            rm -rf "${runtime_package}" "${persistent_bin}"
+        fi
+    fi
+
+    if [ "${use_persistent}" != "true" ]; then
+        opencode_select_package_binary "${bundled_package}" "${cpu_mode}" || true
+        if ! opencode_bin_runs "${bundled_bin}"; then
+            if [ -f "${CPU_UNSUPPORTED_MARKER}" ]; then
+                bashio::log.error "Bundled OpenCode binary failed to execute because this CPU lacks SSE4.2 (see the CPU message above); the terminal will start but OpenCode will not run"
+            else
+                bashio::log.error "Bundled OpenCode binary failed to execute; the terminal may not start correctly"
+            fi
+        fi
+    fi
+
+    effective_bin=$(command -v opencode 2>/dev/null || echo "not-found")
+    effective_version=$(opencode --version 2>/dev/null || echo "unknown")
+    printf '%s\n' "${effective_bin}" > /data/.opencode_bin
+    printf '%s\n' "${effective_version}" > /data/.opencode_version
+    bashio::log.info "Effective OpenCode binary: ${effective_bin}"
+    bashio::log.info "Effective OpenCode version: ${effective_version}"
+
+    # --- Background: refresh to the newest OpenCode off the critical path, and
+    #     only when there is headroom to absorb the npm spike. ---
+    if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
+        local avail_kb
+        avail_kb=$(available_memory_kb)
+        if [ "${avail_kb}" -ge "${OPENCODE_UPDATE_MIN_AVAIL_KB}" ]; then
+            bashio::log.info "Scheduling background OpenCode update (MemAvailable ${avail_kb} kB); applies to the next session"
+            setsid /usr/local/bin/opencode-update.sh >/tmp/opencode-update.log 2>&1 </dev/null &
+        else
+            bashio::log.warning "Skipping OpenCode update: MemAvailable ${avail_kb} kB is below the ${OPENCODE_UPDATE_MIN_AVAIL_KB} kB needed; keeping the bundled runtime to protect low-memory systems"
+        fi
+    fi
+}
+
+setup_opencode_runtime
+
+# ==============================================================================
+# Verify hab and zigporter CLIs are available
+# CLI versions only change with an addon update, so they're cached in the
+# help stamp alongside the addon version — a matching stamp skips the version
+# spawns AND the AGENTS.md help re-injection below.
+# ==============================================================================
+
+HELP_STAMP_FILE="/data/.help_stamp"
+STAMP_ADDON=""
+STAMP_HAB=""
+STAMP_ZIGPORTER=""
+if [ -f "${HELP_STAMP_FILE}" ]; then
+    IFS=':' read -r STAMP_ADDON STAMP_HAB STAMP_ZIGPORTER < "${HELP_STAMP_FILE}" || true
+fi
+HELP_STAMP_FRESH=false
+if [ "${STAMP_ADDON}" = "${ADDON_VERSION}" ] && [ -n "${STAMP_HAB}" ]; then
+    HELP_STAMP_FRESH=true
+fi
+
+if command -v hab &>/dev/null; then
+    if [ "${HELP_STAMP_FRESH}" = "true" ]; then
+        HAB_VERSION="${STAMP_HAB}"
+    else
+        HAB_VERSION=$(hab version 2>/dev/null | grep -oP '[\d.]+' | head -1 || echo "unknown")
+    fi
+    bashio::log.info "hab CLI available (v${HAB_VERSION}) - pre-authenticated via Supervisor"
+else
+    bashio::log.warning "hab CLI not found - some admin features will be unavailable"
+fi
+
+if command -v zigporter &>/dev/null; then
+    if [ "${HELP_STAMP_FRESH}" = "true" ]; then
+        ZIGPORTER_VERSION="${STAMP_ZIGPORTER}"
+    else
+        ZIGPORTER_VERSION=$(zigporter --version 2>/dev/null | grep -oP '[\d.]+' | head -1 || echo "unknown")
+    fi
+    bashio::log.info "zigporter CLI available (v${ZIGPORTER_VERSION}) - Zigbee rename, inspect, mesh tools"
+else
+    bashio::log.warning "zigporter CLI not found - Zigbee management features will be unavailable"
+fi
+
+# ==============================================================================
+# Carry decision notes over to this channel's own directory (one time)
+#
+# Notes live in the configuration directory so they survive a reinstall and are
+# included in Home Assistant backups. That directory is mounted by both add-ons,
+# so each channel now keeps its own set: a note recorded while trying something
+# out in beta must not be injected into every stable session for good.
+#
+# Beta previously shared stable's directory. Copy the notes across once so an
+# existing beta user does not open the add-on to an empty history. Copy rather
+# than move — stable may be installed too, and those notes are equally its own.
+# The directory itself is created lazily by the MCP server when the first note
+# is recorded, so nothing is created here unless there is something to carry.
+# ==============================================================================
+
+LEGACY_NOTES="/homeassistant/opencode/decisions.yaml"
+if [ "${ADDON_STATE_DIR}" != "/homeassistant/opencode" ] \
+    && [ ! -f "${ADDON_STATE_DIR}/decisions.yaml" ] \
+    && [ -f "${LEGACY_NOTES}" ]; then
+    if mkdir -p "${ADDON_STATE_DIR}" && cp "${LEGACY_NOTES}" "${ADDON_STATE_DIR}/decisions.yaml"; then
+        bashio::log.info "Copied your existing decision notes into ${ADDON_STATE_DIR}"
+        bashio::log.info "Each channel keeps its own notes now; the stable add-on still has ${LEGACY_NOTES}"
+    else
+        bashio::log.warning "Could not copy existing decision notes into ${ADDON_STATE_DIR} - starting empty"
+    fi
+fi
+
+# ==============================================================================
+# Deploy this channel's AGENTS.md
+# On first install: copy the full file
+# On update: refresh only when the deployed copy is byte-for-byte what this
+# add-on last wrote, so user edits are never overwritten.
+#
+# The previous check looked for the "# Home Assistant OpenCode Rules" heading,
+# which every customized file still contained — so following the documented
+# advice to add rules to AGENTS.md lost them at the next add-on update. The
+# supported place for user instructions is now /homeassistant/AGENTS.local.md,
+# which the add-on never writes.
+#
+# A fresh help stamp means the deployed copy already has current help injected,
+# so both the refresh-copy and the injection passes are skipped.
+#
+# WHERE it is deployed depends on the channel — see channel.sh. Stable owns
+# /homeassistant/AGENTS.md; beta keeps its copy in /data and has OpenCode load
+# it through `instructions` instead, because only one file in the configuration
+# directory can carry the name OpenCode looks for.
+# ==============================================================================
+
+AGENTS_TARGET="${ADDON_AGENTS_FILE}"
+AGENTS_HASH_FILE="${ADDON_AGENTS_MARKER}"
+AGENTS_LEGACY_HASH_FILE="/data/.agents_md_hash"
+AGENTS_REFRESHED=false
+
+agents_md_hash() {
+    sha256sum "$1" 2>/dev/null | cut -d' ' -f1
+}
+
+mkdir -p "$(dirname "${AGENTS_TARGET}")"
+
+if [ "${ADDON_AGENTS_IN_CONFIG_DIR}" = "true" ]; then
+    # The marker used to live in /data, which is wiped on reinstall while the
+    # configuration directory is not — so a reinstall looked like a hand edit
+    # and left a spurious .bak. Carry the old value over once.
+    if [ ! -f "${AGENTS_HASH_FILE}" ] && [ -f "${AGENTS_LEGACY_HASH_FILE}" ]; then
+        if cp "${AGENTS_LEGACY_HASH_FILE}" "${AGENTS_HASH_FILE}" 2>/dev/null; then
+            bashio::log.info "Migrated the AGENTS.md ownership marker into the configuration directory"
+        fi
+    fi
+else
+    # This channel no longer deploys to the configuration directory, but older
+    # versions of it did. Remove that leftover only when it is byte-for-byte
+    # what THIS add-on last wrote: any other content is either the user's own
+    # edit or the stable add-on's file, and neither is ours to delete.
+    LEGACY_CONFIG_AGENTS="/homeassistant/AGENTS.md"
+    if [ -f "${LEGACY_CONFIG_AGENTS}" ] && [ -f "${AGENTS_LEGACY_HASH_FILE}" ]; then
+        if [ "$(agents_md_hash "${LEGACY_CONFIG_AGENTS}")" = "$(cat "${AGENTS_LEGACY_HASH_FILE}" 2>/dev/null || echo "")" ]; then
+            rm -f "${LEGACY_CONFIG_AGENTS}"
+            bashio::log.info "Removed this add-on's old AGENTS.md from the configuration directory"
+            bashio::log.info "Its instructions now load from inside the add-on, so the stable add-on owns that file"
+        fi
+    fi
+fi
+
+if [ ! -f "${AGENTS_TARGET}" ]; then
+    cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
+    AGENTS_REFRESHED=true
+    bashio::log.info "Deployed default AGENTS.md to ${AGENTS_TARGET}"
+    bashio::log.info "Add your own instructions in /homeassistant/AGENTS.local.md - it is loaded too and never overwritten"
+elif [ "${HELP_STAMP_FRESH}" = "true" ]; then
+    bashio::log.info "AGENTS.md is current (addon version unchanged) - skipping refresh"
+elif [ ! -f "${AGENTS_HASH_FILE}" ]; then
+    # First start after the add-on began tracking edits: an edited file and an
+    # untouched one are indistinguishable, so keep a copy before refreshing.
+    #
+    # Never overwrite an existing .bak - it may be the user's only copy of rules
+    # they wrote, and losing it is exactly the failure this backup exists to
+    # prevent. Fall back to a dated name instead.
+    AGENTS_BACKUP="${AGENTS_TARGET}.bak"
+    if [ -f "${AGENTS_BACKUP}" ]; then
+        AGENTS_BACKUP="${AGENTS_TARGET}.$(date +%Y%m%d%H%M%S).bak"
+    fi
+    cp "${AGENTS_TARGET}" "${AGENTS_BACKUP}"
+    cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
+    AGENTS_REFRESHED=true
+    bashio::log.info "Updated AGENTS.md with latest AI instructions"
+    bashio::log.info "Your previous AGENTS.md was saved to ${AGENTS_BACKUP}"
+    bashio::log.info "Move any customizations into /homeassistant/AGENTS.local.md - future updates never touch that file"
+else
+    AGENTS_CURRENT_HASH=$(agents_md_hash "${AGENTS_TARGET}")
+    AGENTS_EXPECTED_HASH=$(cat "${AGENTS_HASH_FILE}" 2>/dev/null || echo "")
+    if [ -n "${AGENTS_CURRENT_HASH}" ] && [ "${AGENTS_CURRENT_HASH}" = "${AGENTS_EXPECTED_HASH}" ]; then
+        cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
+        AGENTS_REFRESHED=true
+        bashio::log.info "Updated AGENTS.md with latest AI instructions"
+    else
+        bashio::log.info "AGENTS.md has your own edits - keeping it and skipping the update"
+        bashio::log.info "Instructions in /homeassistant/AGENTS.local.md are loaded as well and are never overwritten"
+    fi
+fi
+
+# ==============================================================================
+# Inject live hab help output into AGENTS.md
+# Replaces the content between HAB_LIVE_HELP markers with current `hab --help`
+# output so the AI always sees the exact commands available in the installed
+# hab version — regardless of what was documented when the addon was built.
+# Only runs when AGENTS.md was (re)deployed this boot.
+# ==============================================================================
+
+if [ "${AGENTS_REFRESHED}" = "true" ] && command -v hab &>/dev/null && [ -f "${AGENTS_TARGET}" ]; then
+    if grep -q "<!-- HAB_LIVE_HELP_START -->" "${AGENTS_TARGET}" 2>/dev/null; then
+        HAB_HELP_OUTPUT=$(hab --help 2>/dev/null || echo "")
+        if [ -n "${HAB_HELP_OUTPUT}" ]; then
+            printf '%s\n' "${HAB_HELP_OUTPUT}" > /tmp/hab_help.txt
+            awk '
+                /<!-- HAB_LIVE_HELP_START -->/ {
+                    print
+                    print "```"
+                    while ((getline line < "/tmp/hab_help.txt") > 0) print line
+                    print "```"
+                    skip=1
+                    next
+                }
+                /<!-- HAB_LIVE_HELP_END -->/ {
+                    skip=0
+                    print
+                    next
+                }
+                !skip { print }
+            ' "${AGENTS_TARGET}" > /tmp/agents_tmp \
+                && mv /tmp/agents_tmp "${AGENTS_TARGET}"
+            rm -f /tmp/hab_help.txt
+            bashio::log.info "Injected live hab help (v${HAB_VERSION}) into AGENTS.md"
+        fi
+    fi
+fi
+
+# ==============================================================================
+# Inject live zigporter help output into AGENTS.md
+# Same pattern as hab — replaces content between ZIGPORTER_LIVE_HELP markers
+# so the AI always sees the exact commands available in the installed version.
+# ==============================================================================
+
+if [ "${AGENTS_REFRESHED}" = "true" ] && command -v zigporter &>/dev/null && [ -f "${AGENTS_TARGET}" ]; then
+    if grep -q "<!-- ZIGPORTER_LIVE_HELP_START -->" "${AGENTS_TARGET}" 2>/dev/null; then
+        ZIGPORTER_HELP_OUTPUT=$(zigporter --help 2>/dev/null || echo "")
+        if [ -n "${ZIGPORTER_HELP_OUTPUT}" ]; then
+            printf '%s\n' "${ZIGPORTER_HELP_OUTPUT}" > /tmp/zigporter_help.txt
+            awk '
+                /<!-- ZIGPORTER_LIVE_HELP_START -->/ {
+                    print
+                    print "```"
+                    while ((getline line < "/tmp/zigporter_help.txt") > 0) print line
+                    print "```"
+                    skip=1
+                    next
+                }
+                /<!-- ZIGPORTER_LIVE_HELP_END -->/ {
+                    skip=0
+                    print
+                    next
+                }
+                !skip { print }
+            ' "${AGENTS_TARGET}" > /tmp/agents_tmp \
+                && mv /tmp/agents_tmp "${AGENTS_TARGET}"
+            rm -f /tmp/zigporter_help.txt
+            bashio::log.info "Injected live zigporter help (v${ZIGPORTER_VERSION}) into AGENTS.md"
+        fi
+    fi
+fi
+
+# Remember exactly what we wrote, including any injected help, so the next
+# update can tell an untouched file from one the user has edited.
+if [ "${AGENTS_REFRESHED}" = "true" ] && [ -f "${AGENTS_TARGET}" ]; then
+    agents_md_hash "${AGENTS_TARGET}" > "${AGENTS_HASH_FILE}"
+fi
+
+# Record the stamp so unchanged boots skip the version spawns and re-injection
+if [ "${HELP_STAMP_FRESH}" != "true" ]; then
+    printf '%s:%s:%s\n' "${ADDON_VERSION}" "${HAB_VERSION:-unknown}" "${ZIGPORTER_VERSION:-unknown}" > "${HELP_STAMP_FILE}"
+fi
+
+# ==============================================================================
+# Deploy the AGENTS.local.md example (first install only)
+# Shipped as .example so it is inert: an example file cannot be loaded as
+# instructions by accident, and cannot be silently overwritten later. The user
+# renames it to AGENTS.local.md when they want their own rules loaded.
+# ==============================================================================
+
+if [ ! -f "/homeassistant/AGENTS.local.md" ] && [ ! -f "/homeassistant/AGENTS.local.md.example" ]; then
+    cp /opt/ha-mcp-server/AGENTS.local.md.example /homeassistant/AGENTS.local.md.example
+    bashio::log.info "Deployed AGENTS.local.md.example - rename it to AGENTS.local.md to add your own instructions"
+fi
+
+# ==============================================================================
+# Deploy Prettier config for HA YAML formatting (first install only)
+# Prettier auto-formats YAML files written by OpenCode to follow HA conventions
+# Users can customize .prettierrc.yaml to adjust formatting preferences
+# ==============================================================================
+
+if [ ! -f "/homeassistant/.prettierrc.yaml" ]; then
+    cp /opt/ha-mcp-server/.prettierrc.yaml /homeassistant/.prettierrc.yaml
+    bashio::log.info "Deployed default .prettierrc.yaml for HA YAML formatting"
+fi
+
+# ==============================================================================
+# Generate OpenCode configuration file
+# ==============================================================================
+
+MCP_BOOL=$([ "${MCP_ENABLED}" = "true" ] && echo "true" || echo "false")
+NATIVE_HA_MCP_BOOL=$([ "${NATIVE_HA_MCP_ENABLED}" = "true" ] && echo "true" || echo "false")
+LSP_DISABLED=$([ "${LSP_ENABLED}" = "true" ] && echo "false" || echo "true")
+PPQ_PROVIDER_ENABLED=$([ "${PPQ_PRIVATE_ENABLED}" = "true" ] && [ "${PPQ_API_KEY_CONFIGURED}" = "true" ] && echo "true" || echo "false")
+RESTRICT_BOOL=$([ "${RESTRICT_SENSITIVE_FILES}" = "true" ] && echo "true" || echo "false")
+FOCUS_BOOL=$([ "${FOCUS_MODE}" = "true" ] && echo "true" || echo "false")
+BRIEFING_BOOL=$([ "${HOME_BRIEFING_ENABLED}" = "true" ] && echo "true" || echo "false")
+NOTES_BOOL=$([ "${DECISION_NOTES_ENABLED}" = "true" ] && echo "true" || echo "false")
+
+# Stable's AGENTS.md sits in the working directory, where OpenCode finds it by
+# convention and listing it again would load it twice. Beta's lives in /data
+# precisely so it is not in the configuration directory, so it has to be named
+# explicitly or it is never read.
+CHANNEL_AGENTS_INSTRUCTION=""
+if [ "${ADDON_AGENTS_IN_CONFIG_DIR}" != "true" ]; then
+    CHANNEL_AGENTS_INSTRUCTION="${ADDON_AGENTS_FILE}"
+fi
+
+jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --arg channel_agents "${CHANNEL_AGENTS_INSTRUCTION}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" --argjson restrict "${RESTRICT_BOOL}" --argjson focus "${FOCUS_BOOL}" --argjson briefing "${BRIEFING_BOOL}" --argjson notes "${NOTES_BOOL}" '
+    .mcp.homeassistant.enabled = $mcp |
+    .mcp.homeassistant.environment.HA_NATIVE_MCP_API_ID = $native_ha_mcp_api_id |
+    .mcp.homeassistant_native.enabled = ($mcp and $native_ha_mcp) |
+    .mcp.homeassistant_native.command = ["node", "/opt/ha-mcp-server/ha-native-mcp-proxy.js", $native_ha_mcp_api_id] |
+    .mcp.homeassistant_native.environment.HA_NATIVE_MCP_API_ID = $native_ha_mcp_api_id |
+    if $lsp_disabled then .lsp["ha-yaml"].disabled = true else del(.lsp["ha-yaml"].disabled) end |
+    if $restrict then
+        .permission.read = {
+            "*": "allow",
+            "*secrets.yaml": "deny",
+            "*.storage/*": "deny",
+            "*.cloud/*": "deny",
+            "*ssl/*": "deny",
+            "*.key": "deny",
+            "*.pem": "deny"
+        }
+    else del(.permission.read) end |
+    if $focus then
+        .instructions = ((.instructions // []) + ["/opt/ha-mcp-server/FOCUS_MODE.md"])
+    else . end |
+    if $briefing then
+        .instructions = ((.instructions // []) + ["/data/context/home-briefing.md"])
+    else . end |
+    if $notes then
+        .instructions = ((.instructions // []) + ["/data/context/decision-notes.md"])
+    else . end |
+    if ($channel_agents | length) > 0 then
+        .instructions = ((.instructions // []) + [$channel_agents])
+    else . end |
+    .instructions = ((.instructions // []) + ["/homeassistant/AGENTS.local.md"]) |
+    if $ppq then
+        .provider = (.provider // {}) |
+        .provider["ppq-private"] = {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "PPQ Private (TEE)",
+            "options": {
+                "apiKey": "unused",
+                "baseURL": "http://127.0.0.1:8787/v1",
+                "timeout": 600000,
+                "chunkTimeout": 60000
+            },
+            "models": {
+                "private/kimi-k2-5": {
+                    "id": "private/kimi-k2-5",
+                    "name": "Kimi K2.5 (Private)",
+                    "modalities": { "input": ["text"], "output": ["text"] },
+                    "limit": { "context": 262144, "output": 8192 }
+                },
+                "private/deepseek-r1-0528": {
+                    "id": "private/deepseek-r1-0528",
+                    "name": "DeepSeek R1 (Private)",
+                    "reasoning": true,
+                    "modalities": { "input": ["text"], "output": ["text"] },
+                    "limit": { "context": 131072, "output": 8192 }
+                },
+                "private/gpt-oss-120b": {
+                    "id": "private/gpt-oss-120b",
+                    "name": "GPT-OSS 120B (Private)",
+                    "modalities": { "input": ["text"], "output": ["text"] },
+                    "limit": { "context": 131072, "output": 8192 }
+                },
+                "private/llama3-3-70b": {
+                    "id": "private/llama3-3-70b",
+                    "name": "Llama 3.3 70B (Private)",
+                    "modalities": { "input": ["text"], "output": ["text"] },
+                    "limit": { "context": 131072, "output": 8192 }
+                },
+                "private/qwen3-vl-30b": {
+                    "id": "private/qwen3-vl-30b",
+                    "name": "Qwen3-VL 30B (Private)",
+                    "attachment": true,
+                    "modalities": { "input": ["text", "image"], "output": ["text"] },
+                    "limit": { "context": 262144, "output": 8192 }
+                }
+            }
+        }
+    else . end
+' /opt/ha-mcp-server/opencode-ha.json > /data/.config/opencode/opencode.json
+
+bashio::log.info "OpenCode configuration generated successfully"
+
+# ==============================================================================
+# Generate the home context files
+# Writes /data/context/home-briefing.md (what this installation is) and
+# /data/context/decision-notes.md (digest of the user's approved decisions).
+#
+# Fully detached, like service discovery above: the configuration-directory
+# scan lands immediately, and the parts that need Home Assistant are retried in
+# the background because Core is often still starting when the add-on does.
+# Both files are regenerated from scratch every start, so they cannot grow.
+# ==============================================================================
+
+mkdir -p /data/context
+
+if [ "${HOME_BRIEFING_ENABLED}" = "true" ] || [ "${DECISION_NOTES_ENABLED}" = "true" ]; then
+    bashio::log.info "Generating home context in the background (briefing=${HOME_BRIEFING_ENABLED} decision notes=${DECISION_NOTES_ENABLED})..."
+    OPENCODE_HOME_BRIEFING="${HOME_BRIEFING_ENABLED}" \
+    OPENCODE_DECISION_NOTES="${DECISION_NOTES_ENABLED}" \
+    OPENCODE_MCP_ENABLED="${MCP_ENABLED}" \
+    OPENCODE_LSP_ENABLED="${LSP_ENABLED}" \
+    OPENCODE_RESTRICT_SENSITIVE_FILES="${RESTRICT_SENSITIVE_FILES}" \
+    OPENCODE_ADDON_ACCESS_ENABLED="${ADDON_ACCESS_ENABLED}" \
+    SCREENSHOT_ENABLED="${SCREENSHOT_ENABLED}" \
+    Z2M_URL="${Z2M_URL:-}" \
+        setsid node /usr/local/bin/generate-home-context.mjs \
+        >/tmp/home-context.log 2>&1 </dev/null &
+else
+    # Both turned off: clear anything a previous configuration left behind so no
+    # stale context keeps reaching the model.
+    rm -f /data/context/home-briefing.md /data/context/decision-notes.md
+    bashio::log.info "Home context disabled - generated context files removed"
+fi
+
+# ==============================================================================
+# Inject custom OpenCode config.json (optional, for advanced users)
+# This allows power users to provide custom OpenCode configuration as a JSON
+# string via the add-on config UI. It is written to config.json which OpenCode
+# merges with opencode.json (our MCP/LSP config) at startup.
+# See https://opencode.ai/docs/config for the full schema.
+# ==============================================================================
+
+OPTIONS_FILE="/data/options.json"
+CONFIG_TARGET="/data/.config/opencode/config.json"
+
+if [ -f "${OPTIONS_FILE}" ]; then
+    OPENCODE_CONFIG_JSON=$(jq -r '.opencode_config // empty' "${OPTIONS_FILE}")
+    if [ -n "${OPENCODE_CONFIG_JSON}" ]; then
+        # Validate that the provided string is valid JSON
+        if ! printf '%s' "${OPENCODE_CONFIG_JSON}" | jq -e . >/dev/null 2>&1; then
+            bashio::log.error "Invalid JSON in opencode_config option. Skipping custom config."
+            bashio::log.error "Please check your JSON syntax in the Configuration tab."
+            # Remove stale config.json so a previously valid config doesn't persist
+            rm -f "${CONFIG_TARGET}"
+        else
+            printf '%s' "${OPENCODE_CONFIG_JSON}" > "${CONFIG_TARGET}"
+            bashio::log.info "Custom OpenCode config.json written from add-on configuration"
+        fi
+    else
+        # No custom config provided - remove any stale config.json from a previous run
+        rm -f "${CONFIG_TARGET}"
+    fi
+fi
+
+bashio::log.info "OpenCode initialization complete"

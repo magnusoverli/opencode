@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# =============================================================================
+# ha-logs - Helper script to view Home Assistant logs
+# =============================================================================
+
+set -e
+
+usage() {
+    echo "Usage: ha-logs <type> [lines]"
+    echo ""
+    echo "View Home Assistant and system logs."
+    echo ""
+    echo "Types:"
+    echo "  core       - Home Assistant Core container logs"
+    echo "  error      - Home Assistant error log (falls back to Core journal logs)"
+    echo "  supervisor - Supervisor container logs"
+    echo "  host       - Host system logs"
+    echo ""
+    echo "Options:"
+    echo "  lines      - Number of lines to show (default: 100)"
+    echo ""
+    echo "Examples:"
+    echo "  ha-logs core"
+    echo "  ha-logs error"
+    echo "  ha-logs supervisor 200"
+    echo "  ha-logs host 50"
+}
+
+if [ -z "$SUPERVISOR_TOKEN" ]; then
+    echo "Error: SUPERVISOR_TOKEN not set. This script must run inside the app."
+    exit 1
+fi
+
+LINES="${2:-100}"
+API_BASE="http://supervisor"
+
+case "$1" in
+    core)
+        curl -sS -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            "${API_BASE}/core/logs?lines=${LINES}"
+        ;;
+    error)
+        ERROR_LOG_FILE="$(mktemp)"
+        trap 'rm -f "$ERROR_LOG_FILE"' EXIT
+        if ! ERROR_LOG_STATUS="$(curl -sS -o "$ERROR_LOG_FILE" -w "%{http_code}" \
+            -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            "${API_BASE}/core/api/error_log")"; then
+            cat "$ERROR_LOG_FILE"
+            exit 1
+        fi
+
+        case "$ERROR_LOG_STATUS" in
+            2??)
+                cat "$ERROR_LOG_FILE"
+                ;;
+            404)
+                echo "Home Assistant error log is unavailable; showing Core journal logs instead." >&2
+                curl -fsS -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+                    "${API_BASE}/core/logs?lines=${LINES}"
+                ;;
+            *)
+                cat "$ERROR_LOG_FILE"
+                echo "Error: Home Assistant error log request failed with HTTP ${ERROR_LOG_STATUS}" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    supervisor)
+        curl -sS -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            "${API_BASE}/supervisor/logs?lines=${LINES}"
+        ;;
+    host)
+        curl -sS -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            "${API_BASE}/host/logs?lines=${LINES}"
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        if [ -z "$1" ]; then
+            usage
+        else
+            echo "Error: Unknown log type '$1'"
+            echo ""
+            usage
+            exit 1
+        fi
+        ;;
+esac

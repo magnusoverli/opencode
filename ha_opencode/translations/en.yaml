@@ -51,8 +51,8 @@ configuration:
     description: "Long-lived access token for talking to Home Assistant Core directly. Required by the screenshot tool above and by the ESPHome commands — leave empty if you use neither. Create one in Home Assistant under Profile → Long-lived access tokens."
 
   native_ha_mcp_enabled:
-    name: "Native Home Assistant MCP bridge"
-    description: "Adds a second MCP server that proxies to Home Assistant Core's own native LLM MCP endpoint. Requires the MCP Server integration to be set up in Home Assistant first. The keyed /api/mcp/<API ID> endpoints and the native LLM tool platforms first ship in Home Assistant 2026.8; on earlier versions the bridge falls back to the configured /api/mcp endpoint. This complements the MCP integration above rather than replacing it; leave it off unless you want Home Assistant's native LLM tools alongside OpenCode's own."
+    name: "Native Home Assistant MCP bridge (beta)"
+    description: "Adds a second MCP server that proxies to Home Assistant Core's own native LLM MCP endpoint (/api/mcp/<API ID>), on Home Assistant versions that provide it. This complements the MCP integration above rather than replacing it; leave it off unless you are testing Home Assistant's native LLM platform."
 
   native_ha_mcp_api_id:
     name: "Native MCP API ID"
@@ -80,7 +80,7 @@ configuration:
 
   cpu_mode:
     name: "CPU mode"
-    description: "Which OpenCode binary to run. 'auto' detects your CPU (recommended), 'baseline' selects the build meant for older CPUs without AVX2, and 'regular' forces the standard build. OpenCode requires a CPU with SSE4.2 (Intel Nehalem 2008+, AMD Bulldozer 2011+) in every mode. Note that upstream currently ships the same binary in both packages, so 'baseline' does not presently help a CPU without AVX2."
+    description: "Which OpenCode binary to run. 'auto' detects your CPU (recommended), 'baseline' forces the build for older CPUs without AVX2, and 'regular' forces the standard build."
 
   enable_server:
     name: "OpenCode LAN server"

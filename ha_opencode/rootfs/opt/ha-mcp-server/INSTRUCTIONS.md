@@ -17,7 +17,7 @@ You have access to the Home Assistant MCP server which provides deep integration
 1. **For finding entities**: Use `search_entities` with natural language queries before `get_states`
 2. **For focused home understanding**: Use `get_home_context` for compact area/domain/entity context before broad state dumps
 3. **For entity details**: Use `get_entity_details` to understand relationships and device info
-4. **For controlling devices**: Use `call_service` with appropriate domain/service — it also covers services that answer with data (`recorder.get_statistics`, `weather.get_forecasts`, `calendar.get_events`), returning their response without any extra argument
+4. **For controlling devices**: Use `call_service` with appropriate domain/service
 5. **For troubleshooting**: Use `diagnose_entity` for comprehensive analysis
 6. **For overview**: Use `get_states` with `summarize: true` for human-readable summaries
 7. **For agent capability status**: Use `get_agent_capabilities` to see this add-on's MCP surface and whether Home Assistant reports the native `llm` component or native `/api/mcp/<API ID>` endpoints
@@ -215,10 +215,6 @@ hab_run(command="entity logbook sensor.power --start 2h --json")
 
 # Call actions
 hab_run(command='action call light.turn_on --entity light.living_room --data \'{"brightness": 200}\'')
-
-# Call actions that answer with data — needs --return-response, or hab reports
-# "Service call requires responses but caller did not ask for responses"
-hab_run(command='action call weather.get_forecasts --entity weather.home --data \'{"type": "daily"}\' --return-response')
 
 # Manage automations
 hab_run(command="automation list --json")

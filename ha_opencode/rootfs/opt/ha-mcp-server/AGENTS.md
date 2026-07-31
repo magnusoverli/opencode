@@ -117,7 +117,6 @@ Home Assistant is developing a native `llm` integration where Core integrations 
 A CLI tool designed for AI agents to manage Home Assistant. Run `hab` commands via the terminal:
 - **Entity management**: `hab entity list`, `hab entity get light.living_room`, `hab entity logbook sensor.power --start 2h`
 - **Service calls**: `hab action call light.turn_on --entity light.living_room --data '{"brightness": 200}'`
-- **Service calls that answer with data**: add `--return-response`, e.g. `hab action call weather.get_forecasts --entity weather.home --data '{"type":"daily"}' --return-response`. Without the flag Home Assistant refuses the call outright
 - **Automation CRUD**: `hab automation list`, `hab automation create`, `hab automation delete`
 - **Dashboard management**: `hab dashboard list`, `hab dashboard view create`
 - **Area/floor/zone/label**: `hab area list`, `hab area create "Kitchen"`
@@ -595,7 +594,7 @@ Read and modify YAML files to understand and change Home Assistant's defined beh
 ### MCP Tools (When Available)
 Query and interact with the running Home Assistant instance:
 - `get_states`, `search_entities`, `get_home_context` - Current entity states and compact area/domain/entity context
-- `call_service` - Control devices (with confirmation), and read from services that answer with data (`recorder.get_statistics`, `weather.get_forecasts`, `calendar.get_events`, `todo.get_items`) — the response comes back automatically
+- `call_service` - Control devices (with confirmation)
 - `get_history`, `get_logbook` - Historical data
 - `get_devices`, `get_areas` - Device and area registry info
 - `write_config_safe` - **Safe config writing with automatic validation, content protection, and backup**
@@ -616,7 +615,6 @@ Query and interact with the running Home Assistant instance:
 | Understand automation logic | Read YAML | Check state with `get_states` | `hab automation get` | N/A |
 | Check current device state | Reference only | Primary (`get_home_context` for focused context) | `hab entity get` | N/A |
 | Control devices | N/A | `call_service` | `hab action call` | N/A |
-| Read from a service that answers with data | N/A | `call_service` (automatic) | `hab action call --return-response` | N/A |
 | Add new integrations | Primary | N/A | N/A | N/A |
 | Troubleshoot issues | Review configs | `diagnose_entity`, `get_error_log` | `hab system health` | N/A |
 | Check agent/LLM readiness | N/A | `get_agent_capabilities` | N/A | N/A |

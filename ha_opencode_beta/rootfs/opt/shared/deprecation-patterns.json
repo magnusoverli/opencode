@@ -1,0 +1,184 @@
+[
+  {
+    "id": "template-sensor-legacy",
+    "pattern": "^sensor:\\s*\\n\\s*-?\\s*platform:\\s*template",
+    "flags": "m",
+    "message": "Legacy template sensor syntax detected. Use top-level 'template:' key instead.",
+    "suggestion": "template:\n  - sensor:\n      - name: \"My Sensor\"\n        state: \"{{ states('...') }}\"",
+    "integration": "template",
+    "deprecated_in": "2024.1",
+    "severity": "warning"
+  },
+  {
+    "id": "template-binary-sensor-legacy",
+    "pattern": "^binary_sensor:\\s*\\n\\s*-?\\s*platform:\\s*template",
+    "flags": "m",
+    "message": "Legacy template binary_sensor syntax detected. Use top-level 'template:' key instead.",
+    "suggestion": "template:\n  - binary_sensor:\n      - name: \"My Sensor\"\n        state: \"{{ is_state('...', 'on') }}\"",
+    "integration": "template",
+    "deprecated_in": "2024.1",
+    "severity": "warning"
+  },
+  {
+    "id": "entity-namespace-deprecated",
+    "pattern": "entity_namespace:",
+    "flags": "m",
+    "message": "'entity_namespace' is deprecated. Use 'unique_id' for entity identification instead.",
+    "suggestion": "Remove entity_namespace and add unique_id to each entity.",
+    "deprecated_in": "2023.8",
+    "severity": "warning"
+  },
+  {
+    "id": "time-date-platform-deprecated",
+    "pattern": "^\\s*-\\s*platform:\\s*time_date",
+    "flags": "m",
+    "message": "The time_date sensor platform is deprecated.",
+    "suggestion": "Use template sensors with now() or built-in date/time entities.",
+    "integration": "time_date",
+    "deprecated_in": "2024.6",
+    "severity": "warning"
+  },
+  {
+    "id": "automation-missing-id",
+    "pattern": "automation:\\s*\\n\\s*-?\\s*alias:",
+    "flags": "m",
+    "message": "Consider using automation ID for better organization.",
+    "suggestion": "Add 'id: unique_automation_id' to enable UI editing and better tracking.",
+    "severity": "info"
+  },
+  {
+    "id": "legacy-device-tracker",
+    "pattern": "device_tracker:\\s*\\n\\s*-?\\s*platform:\\s*(?:nmap|netgear|ping)",
+    "flags": "m",
+    "message": "Legacy device tracker platforms may have limited functionality.",
+    "suggestion": "Consider using the device_tracker integration with the UI for better device tracking.",
+    "severity": "info"
+  },
+  {
+    "id": "template-cover-legacy",
+    "pattern": "cover:\\s*\\n\\s*-?\\s*platform:\\s*template",
+    "flags": "m",
+    "message": "Legacy template cover syntax detected. Use top-level 'template:' key instead.",
+    "suggestion": "template:\n  - cover:\n      - name: \"My Cover\"\n        state: \"{{ ... }}\"",
+    "integration": "template",
+    "deprecated_in": "2024.1",
+    "severity": "warning"
+  },
+  {
+    "id": "template-switch-legacy",
+    "pattern": "switch:\\s*\\n\\s*-?\\s*platform:\\s*template",
+    "flags": "m",
+    "message": "Legacy template switch syntax detected. Consider using top-level 'template:' key.",
+    "suggestion": "template:\n  - switch:\n      - name: \"My Switch\"\n        state: \"{{ ... }}\"",
+    "integration": "template",
+    "deprecated_in": "2024.4",
+    "severity": "warning"
+  },
+  {
+    "id": "customize-yaml-info",
+    "pattern": "homeassistant:\\s*\\n\\s*customize:",
+    "flags": "m",
+    "message": "Entity customizations in configuration.yaml work but UI customizations are preferred.",
+    "suggestion": "Consider using the UI (Settings -> Devices & Services -> Entities) for customizations.",
+    "severity": "info"
+  },
+  {
+    "id": "white-value-deprecated",
+    "pattern": "^\\s*white_value:",
+    "flags": "m",
+    "message": "'white_value' is deprecated in light services.",
+    "suggestion": "Use 'white' instead of 'white_value' in light service calls.",
+    "deprecated_in": "2023.3",
+    "severity": "warning"
+  },
+  {
+    "id": "direct-state-object-access",
+    "pattern": "states\\.[a-z_]+\\.[a-z0-9_]+\\.state",
+    "flags": "m",
+    "message": "Direct state object access (states.domain.name.state) is fragile and discouraged.",
+    "suggestion": "Use states('sensor.name') helper function instead of states.sensor.name.state",
+    "severity": "warning"
+  },
+  {
+    "id": "direct-attribute-object-access",
+    "pattern": "states\\.[a-z_]+\\.[a-z0-9_]+\\.attributes",
+    "flags": "m",
+    "message": "Direct attribute object access (states.domain.name.attributes) is fragile and discouraged.",
+    "suggestion": "Use state_attr('sensor.name', 'attribute') helper function instead.",
+    "severity": "warning"
+  },
+  {
+    "id": "value-template-legacy-key",
+    "pattern": "^\\s*value_template:\\s",
+    "flags": "m",
+    "message": "The 'value_template' key is used in legacy integrations. Modern template sensors use 'state:' instead.",
+    "suggestion": "If using the modern template integration, replace 'value_template:' with 'state:' under the template sensor.",
+    "integration": "template",
+    "severity": "info"
+  },
+  {
+    "id": "mqtt-sensor-legacy-platform",
+    "pattern": "^sensor:\\s*\\n\\s*-?\\s*platform:\\s*mqtt",
+    "flags": "m",
+    "message": "Legacy MQTT sensor platform syntax detected. Configure MQTT sensors through the mqtt: integration key.",
+    "suggestion": "mqtt:\n  sensor:\n    - name: \"My Sensor\"\n      state_topic: \"topic/state\"",
+    "integration": "mqtt",
+    "deprecated_in": "2022.12",
+    "severity": "warning"
+  },
+  {
+    "id": "mqtt-binary-sensor-legacy",
+    "pattern": "^binary_sensor:\\s*\\n\\s*-?\\s*platform:\\s*mqtt",
+    "flags": "m",
+    "message": "Legacy MQTT binary_sensor platform syntax detected. Configure under mqtt: key.",
+    "suggestion": "mqtt:\n  binary_sensor:\n    - name: \"My Sensor\"\n      state_topic: \"topic/state\"",
+    "integration": "mqtt",
+    "deprecated_in": "2022.12",
+    "severity": "warning"
+  },
+  {
+    "id": "mqtt-switch-legacy",
+    "pattern": "^switch:\\s*\\n\\s*-?\\s*platform:\\s*mqtt",
+    "flags": "m",
+    "message": "Legacy MQTT switch platform syntax detected. Configure under mqtt: key.",
+    "suggestion": "mqtt:\n  switch:\n    - name: \"My Switch\"\n      command_topic: \"topic/set\"",
+    "integration": "mqtt",
+    "deprecated_in": "2022.12",
+    "severity": "warning"
+  },
+  {
+    "id": "mqtt-light-legacy",
+    "pattern": "^light:\\s*\\n\\s*-?\\s*platform:\\s*mqtt",
+    "flags": "m",
+    "message": "Legacy MQTT light platform syntax detected. Configure under mqtt: key.",
+    "suggestion": "mqtt:\n  light:\n    - name: \"My Light\"\n      command_topic: \"topic/set\"",
+    "integration": "mqtt",
+    "deprecated_in": "2022.12",
+    "severity": "warning"
+  },
+  {
+    "id": "for-string-format",
+    "pattern": "for:\\s*['\"]\\d+:\\d+:\\d+['\"]",
+    "flags": "m",
+    "message": "String format for 'for:' duration is discouraged. Use dict format instead.",
+    "suggestion": "for:\n  hours: 0\n  minutes: 5\n  seconds: 0",
+    "severity": "info"
+  },
+  {
+    "id": "entity-id-in-data",
+    "pattern": "data:\\s*\\n\\s*entity_id:",
+    "flags": "m",
+    "message": "Placing entity_id inside 'data:' is deprecated for service calls. Use 'target:' instead.",
+    "suggestion": "Move entity_id from data: to target:\n  target:\n    entity_id: light.example",
+    "deprecated_in": "2021.11",
+    "severity": "warning"
+  },
+  {
+    "id": "hassio-service-renamed",
+    "pattern": "(?:service|action):\\s*hassio\\.",
+    "flags": "m",
+    "message": "The 'hassio' service domain has been renamed to 'homeassistant' for most services.",
+    "suggestion": "Replace 'hassio.' with the appropriate service domain (e.g., homeassistant.restart).",
+    "severity": "warning"
+  }
+]

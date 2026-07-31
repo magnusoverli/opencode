@@ -21,8 +21,8 @@ ports:
   4096/tcp: null
   4097/tcp: null
 ports_description:
-  4096/tcp: "OpenCode LAN server — only serves traffic when the 'OpenCode LAN server' option is enabled"
-  4097/tcp: "OpenChamber LAN web UI (requires interface_mode: openchamber)"
+  4096/tcp: "OpenCode LAN server — only serves traffic when the 'OpenCode LAN server' option is enabled. These are container ports; if the stable OpenCode add-on is installed too, give each one a different host port here."
+  4097/tcp: "OpenChamber LAN web UI (requires interface_mode: openchamber). Container port — pick a host port that the stable add-on is not already using."
 
 # File access - Home Assistant config directory
 map:

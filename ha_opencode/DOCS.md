@@ -83,7 +83,7 @@ OpenChamber's own built-in update check is disabled in this add-on. OpenChamber 
 | **LSP integration** | `true` | Give OpenCode live diagnostics, entity and service auto-completion, and validation while it edits Home Assistant YAML. |
 | **Screenshot tool** | `false` | Requires the access token below. Lets OpenCode photograph Home Assistant pages in a headless browser to check dashboard changes. |
 | **Home Assistant access token** | `""` | Long-lived access token for Home Assistant Core. Required by the screenshot tool and ESPHome commands. |
-| **Native Home Assistant MCP bridge** | `false` | Adds an optional second MCP server for Home Assistant's native LLM MCP endpoint. Needs the MCP Server integration set up in Home Assistant; the keyed endpoints and native LLM tool platforms ship in Home Assistant 2026.8. |
+| **Native Home Assistant MCP bridge (beta)** | `false` | Adds an optional second MCP server for Home Assistant's native LLM MCP endpoint when the running Home Assistant version provides it. |
 | **Native MCP API ID** | `assist` | Applies only when the native bridge is on. The default `assist` targets `/api/mcp/assist`; leave empty to use the configured `/api/mcp` endpoint. |
 | **Install briefing** | `true` | Give OpenCode a generated summary of your installation — version, areas, entity counts, configuration layout — so it does not rediscover them each session. See [Home Context](#home-context). |
 | **Decision notes** | `true` | Let OpenCode carry lasting decisions between sessions, recorded only when you approve each one. See [Decision notes](#decision-notes). |
@@ -119,7 +119,7 @@ Everything else stays fully readable, and this doesn't change how the agent edit
 | Option | Default | Description |
 |--------|---------|-------------|
 | **OpenCode update policy** | `bundled` | Controls how OpenCode itself is updated. `bundled` (default) uses the OpenCode version shipped in the add-on image — the lowest-memory option. `latest` follows upstream OpenCode releases, refreshed in the background so it never delays start-up and skipped automatically on low-memory systems. See [OpenCode Updates](#opencode-updates). |
-| **CPU mode** | `auto` | Controls which OpenCode binary is used. `auto` detects your CPU capabilities automatically (recommended). `baseline` selects the build intended for older CPUs without AVX2; `regular` forces the standard build. See [CPU requirements](#cpu-requirements) — OpenCode needs SSE4.2 in every mode, and upstream currently ships the same binary in both packages, so `baseline` does not presently rescue a CPU without AVX2. |
+| **CPU mode** | `auto` | Controls which OpenCode binary is used. `auto` detects your CPU capabilities automatically (recommended). `baseline` forces the baseline binary for older CPUs without AVX2 support. `regular` forces the standard binary. |
 
 ### Network Exposure
 
@@ -159,32 +159,30 @@ On low-memory hosts — for example a 4 GB Home Assistant Green running several 
 
 ### Local Models (Ollama and similar)
 
-Local models work, but the add-on sends a substantial prompt on every request and that cost lands on your own hardware rather than a provider's. Budget for it before choosing a model.
+Local models work, but the add-on sends a large system prompt on every request, and that cost lands entirely on your own hardware. Budget for it before choosing a model.
 
-Every request carries, before you have typed anything:
+Every request carries roughly:
 
-| Sent on every request | Size |
-|---|---|
-| `AGENTS.md`, the add-on's Home Assistant instructions | ~35 KB |
-| `INSTRUCTIONS.md`, MCP usage guidance | ~20 KB |
-| Definitions for the 41 Home Assistant MCP tools | ~26 KB |
-| Install briefing, if enabled | capped at ~500 tokens |
+| Included on every request | Approximate size |
+|---------------------------|------------------|
+| OpenCode's agent prompt and built-in tools | varies by version |
+| Home Assistant MCP tool definitions (41 tools) | ~25 KB |
+| `AGENTS.md` from your configuration folder | ~35 KB |
+| `INSTRUCTIONS.md` (MCP usage guidance) | ~20 KB |
+| Install briefing | capped at ~500 tokens |
 | `AGENTS.local.md`, if you use one | your own content |
-| OpenCode's own agent prompt and built-in tools | varies by version |
 
-That is on the order of **25,000 tokens before your first word**. A hosted provider prices most of it away through prompt caching. A local model has to evaluate it, on CPU, before generating a single token — which is why a one-word prompt can take minutes on a Raspberry Pi while the same model answers `curl` in seconds. Comparing against a bare `curl` will not reproduce it: that request is a few hundred bytes.
+In practice that is on the order of **25,000 tokens before you type anything**. A hosted provider absorbs this in a second or two. A local model on a Raspberry Pi or similar has to evaluate all of it on CPU first, so a one-word prompt can take minutes. This is prompt evaluation, not add-on overhead — comparing against a bare `curl` to your model will not reproduce it, because that request is a few hundred bytes.
 
-Tool results add to this as the session runs, and they stay in the conversation, so each one is re-sent on every later request. That is why an unfiltered `get_states` is capped (see [MCP Tools](#mcp-tools-41-available)) and why tool JSON is sent without indentation.
+To make local models usable:
 
-**To make a local model workable:**
+- **Set the context window to fit.** Ollama defaults `num_ctx` to 4096. A 25,000-token prompt is silently truncated at that size, so the model loses most of its tools and instructions before it sees your message. Raise it (`OLLAMA_CONTEXT_LENGTH`, or `num_ctx` in the model's parameters) and expect higher memory use.
+- **Turn off MCP integration** to remove the 41 tool definitions. This is the single largest saving, but OpenCode then loses the ability to query entities and call services — it becomes a file editor for your YAML rather than a Home Assistant agent.
+- **Turn off Install briefing** for a smaller saving.
+- **Use a model that supports tool calling**, and a large one. Small models (roughly under 7B) generally cannot drive a 41-tool agent loop reliably regardless of how fast they run — a common symptom is the model replying with a raw JSON envelope instead of normal text.
+- **Do not run the model on the Home Assistant host** if you can avoid it. Inference competing with Home Assistant for CPU and RAM makes both worse.
 
-- **Raise the context window.** Ollama defaults `num_ctx` to 4096. A 25,000-token prompt is silently truncated at that size, so the model loses most of its tools and instructions before it ever sees your message — you get poor answers *and* slow ones. Raise it with `OLLAMA_CONTEXT_LENGTH` or the model's `num_ctx` parameter, and expect higher memory use.
-- **Turn off MCP integration** to remove ~26 KB of tool definitions. This is the largest single saving, and the largest loss: OpenCode can no longer query entities or call services, so it becomes a YAML editor rather than a Home Assistant agent.
-- **Turn off the install briefing** for a smaller saving.
-- **Use a model that supports tool calling, and a large one.** Models below roughly 7B generally cannot drive a 41-tool agent loop no matter how fast they run. A common symptom is the model replying with a raw JSON envelope instead of ordinary text.
-- **Do not run inference on the Home Assistant host** if you can avoid it. A model competing with Core for CPU and RAM makes both worse.
-
-If you want to go further, you can trim `/homeassistant/AGENTS.md` — the add-on keeps a file you have edited rather than overwriting it. The trade-off is that you stop receiving improvements to those instructions; see [Resetting AGENTS.md to default](#resetting-agentsmd-to-default).
+If you want to shrink the prompt further, you can edit `/homeassistant/AGENTS.md` directly — the add-on keeps a file you have modified rather than overwriting it. The trade-off is that you stop receiving updates to those instructions. See [Resetting AGENTS.md to default](#resetting-agentsmd-to-default).
 
 ### OpenCode Updates
 
@@ -192,16 +190,7 @@ By default, **OpenCode update policy** is set to `bundled`: the add-on uses the 
 
 Set **OpenCode update policy** to `latest` to follow upstream OpenCode releases independently of add-on releases. The add-on starts immediately on the bundled (or an existing healthy persistent) binary, then refreshes `opencode-ai@latest` into `/data/.npm-global` **in the background**; the newer version becomes active for the next OpenCode session. The background update never blocks start-up, and it is skipped automatically when available memory is below ~1.5 GB so the install cannot push a low-memory host into swap-thrash. If an update is interrupted or produces a binary that will not run, the add-on discards it and keeps using the known-good bundled copy.
 
-#### CPU requirements
-
-OpenCode is distributed as a Bun-compiled binary, so Bun's CPU floor is OpenCode's: an x64 processor must support **SSE4.2** — the x86-64-v2 level, meaning Intel Nehalem (2008) or newer, or AMD Bulldozer (2011) / Jaguar (2013) or newer. On a CPU below that line every published OpenCode binary exits immediately with `Illegal instruction (core dumped)`, and no add-on setting changes it. The add-on checks for SSE4.2 at start-up and states the reason in its log rather than leaving you with a bare crash. ARM64 (aarch64) is unaffected.
-
-Above that floor there are two x64 builds. The regular build additionally requires **AVX2** (Intel Haswell, 2013, or newer); when AVX2 is not visible the add-on automatically selects OpenCode's *baseline* build. Two things to know about that fallback:
-
-- **Upstream currently publishes the regular AVX2 binary inside the baseline package** ([anomalyco/opencode#33595](https://github.com/anomalyco/opencode/issues/33595)). For the OpenCode versions shipped at the time of writing, `opencode-linux-x64-baseline` and `opencode-linux-x64` are byte-identical, so baseline mode does not currently help a CPU that lacks AVX2. This is an upstream packaging problem the add-on cannot work around; the **CPU mode** option is kept because it starts working again the moment upstream publishes a genuine baseline build.
-- If the add-on runs in a VM on an AVX2-capable host, enable host CPU passthrough — generic QEMU/KVM CPU models hide AVX2 and force baseline mode unnecessarily.
-
-There is also a known upstream baseline OOM issue tracked at [anomalyco/opencode#20988](https://github.com/anomalyco/opencode/issues/20988).
+For x64 systems without visible AVX2 support, OpenCode selects its baseline binary. If this add-on runs in a VM on an AVX2-capable host, enable host CPU passthrough; generic QEMU/KVM CPU models can hide AVX2 and force the baseline binary unnecessarily. There is a known upstream baseline OOM issue tracked at `anomalyco/opencode#20988`.
 
 #### Environment Variables Example
 
@@ -505,11 +494,6 @@ hab entity get sensor.living_room_temperature
 # Call an action
 hab action call light.turn_on --entity light.living_room --data '{"brightness": 200}'
 
-# Call an action that answers with data (weather forecasts, recorder statistics,
-# calendar events, todo items) — without --return-response these fail with
-# "Service call requires responses but caller did not ask for responses"
-hab action call weather.get_forecasts --entity weather.home --data '{"type": "daily"}' --return-response
-
 # Create an automation from a YAML file
 hab automation create my-automation -f automation.yaml
 
@@ -538,57 +522,35 @@ Run `hab --help` or `hab <command> --help` for complete documentation.
 
 The app includes an enhanced MCP (Model Context Protocol) server that provides deep integration between OpenCode and Home Assistant. This is a comprehensive implementation featuring **Tools**, **Resources**, **Prompts**, and an **Intelligence Layer**.
 
-OpenCode's MCP server remains the complete working agent surface for this add-on. Home Assistant also has a native `llm` integration and an `<integration>/llm.py` platform, so Core and custom integrations can contribute curated LLM tools to Assist. OpenCode is designed to complement that work, not compete with it: it consumes HA-native LLM capabilities where they help and keeps its own tools for everything Home Assistant does not intend to expose through Assist.
+OpenCode's MCP server remains the complete working agent surface for this add-on today. Home Assistant is also developing a native `llm` integration and `<integration>/llm.py` platform so Core integrations and custom integrations can contribute curated LLM tools to Assist. OpenCode is designed to complement that work, not compete with it: as HA-native LLM capabilities become stable and accessible, this add-on will follow them closely and use them where they help users.
 
 ### Home Assistant Native LLM Readiness
 
-Home Assistant's native LLM platform ships in **Home Assistant 2026.8**: the `llm` integration, the per-domain `llm.py` tool platforms, and the keyed `/api/mcp/<API ID>` endpoints all first appear there. On 2026.7.x and earlier, Home Assistant serves only the configured `/api/mcp` endpoint and the legacy `/mcp_server/sse` transport. In every case the **MCP Server** integration must be added in Home Assistant first — the endpoints are not served otherwise.
+The current Home Assistant native LLM work is primarily an internal platform for Home Assistant integrations and custom integrations. It lets integrations expose an `<integration>/llm.py` file with an `async_get_tools(hass, llm_context, api_id) -> llm.LLMTools | None` hook. At the time of this add-on release, that platform is not a public external API that an add-on container can register with directly.
 
-The platform is primarily an internal one for integrations: it lets an integration expose an `<integration>/llm.py` file with an `async_get_tools(hass, llm_context, api_id) -> llm.LLMTools | None` hook. It is not an API an add-on container registers with directly; add-ons reach the resulting tools over MCP.
-
-OpenCode supports this by:
+OpenCode supports the transition now by:
 
 - Detecting whether the running Home Assistant instance reports the native `llm` component.
-- Probing the native MCP endpoints and reporting which one this instance actually serves.
-- Providing an opt-in native MCP bridge to Home Assistant's own endpoint.
-- Exposing this status through the `get_agent_capabilities` MCP tool and the `ha://agent/capabilities` resource, including any known upstream limitations that apply to the running version.
+- Probing native MCP endpoints such as `/api/mcp/<API ID>` when available.
+- Providing an opt-in native MCP bridge that remains explicitly marked beta while Home Assistant's API matures.
+- Exposing this status through the `get_agent_capabilities` MCP tool and the `ha://agent/capabilities` resource.
 - Providing `get_home_context` for compact area/domain/entity understanding without dumping every state.
 - Providing `get_ha_llm_development_guide` for custom integration authors building native `<integration>/llm.py` providers.
-- Keeping all existing MCP, LSP, `hab`, screenshot, ESPHome, update, and Zigbee functionality active alongside it.
+- Keeping all existing MCP, LSP, `hab`, screenshot, ESPHome, update, and Zigbee functionality active while HA's native platform matures.
+- Providing a strong environment for custom integration authors to edit and test future `<custom_component>/llm.py` providers.
 
 Long-term plan:
 
-- Use HA-native LLM tools for core Assist/entity-control capabilities where they cover a workflow better than OpenCode's own tools do.
+- Use HA-native LLM tools for core Assist/entity-control capabilities when Home Assistant makes them stable and accessible.
 - Keep OpenCode MCP focused on add-on-specific and power-user workflows: safe config writing, validation, filesystem-aware edits, admin/dev tasks, screenshots, firmware/update flows, and troubleshooting.
-- Retire the compatibility workarounds below once no supported Home Assistant release needs them.
-- Keep the add-on aligned with Home Assistant's architecture decisions so users who want to test agent-focused HA features have a first-class workbench.
+- Evaluate a companion custom integration or public API bridge if Home Assistant's native LLM platform remains integration-only and does not expose a direct add-on API.
+- Keep the add-on aligned with Home Assistant's architecture decisions so users who want to test agent-focused HA features have a first-class workbench and so OpenCode can become a premium consumer of HA-native LLM capabilities as they become available.
 
-### Native Home Assistant MCP Bridge
+### Native Home Assistant MCP Bridge (Beta)
 
-When **Native Home Assistant MCP bridge** is enabled, the add-on adds a second OpenCode MCP server named `homeassistant_native` that forwards requests to Home Assistant Core's native MCP endpoint through the Supervisor proxy. **Native MCP API ID** defaults to `assist`, which targets `/api/mcp/assist`; leave it empty to use the configured `/api/mcp` endpoint instead.
+When **Native Home Assistant MCP bridge (beta)** is enabled, the add-on adds a second OpenCode MCP server named `homeassistant_native` that forwards requests to Home Assistant Core's native MCP endpoint. **Native MCP API ID** defaults to `assist`, which targets `/api/mcp/assist`; leave it empty to use the configured `/api/mcp` endpoint instead.
 
-#### What you have to do
-
-The bridge is **off by default**, and Home Assistant does not serve its MCP endpoints until you set the integration up. Two one-time steps, in this order:
-
-1. **Add the Model Context Protocol Server integration in Home Assistant.** Go to **Settings → Devices & Services → Add Integration** and add **Model Context Protocol Server**. Until this exists, Home Assistant registers no `/api/mcp` routes at all and the bridge has nothing to talk to on any version.
-2. **Turn on the bridge in the add-on and restart it.** Set **Native Home Assistant MCP bridge** to on in the add-on's Configuration tab, then restart the add-on. The setting is read once at start-up, so it does not take effect until the restart.
-
-To confirm it worked, ask OpenCode to run `get_agent_capabilities`: it reports the detected Home Assistant version, which endpoint the bridge resolved to, and any upstream limitations that still apply. In OpenCode you should also see a second MCP server named `homeassistant_native` alongside the built-in `homeassistant` one.
-
-Nothing else is required. In particular, you do **not** need to change the API ID (the `assist` default is the one keyed API that needs no admin access), set any environment variable, or supply an access token — the bridge authenticates with the Supervisor token. If you skip step 1, the bridge starts and every request fails with a 404, which `get_agent_capabilities` will report.
-
-Once it is on, the bridge handles Home Assistant versions by itself and needs no further attention when you upgrade — including across the 2026.8 boundary, which it picks up without a restart.
-
-Access model from Home Assistant Core: `/api/mcp` serves the API selected in the MCP Server integration and does not require admin access. `/api/mcp/<API ID>` selects a specific registered LLM API by ID and requires admin access except for the built-in Assist API.
-
-The bridge adapts itself to what your Home Assistant actually serves:
-
-- **Endpoint fallback.** If the keyed `/api/mcp/<API ID>` endpoint is not served — which is the case before 2026.8 — the bridge falls back to the configured `/api/mcp` endpoint and logs the reason once. It retries the keyed endpoint periodically, so upgrading Home Assistant to 2026.8 under a running add-on is picked up without a restart. If Home Assistant instead reports that the API ID itself is unknown, the bridge reports that error rather than silently serving a different API. Set `HA_NATIVE_MCP_ENDPOINT_MODE` to `keyed` or `configured` in **Environment variables** to pin one endpoint.
-- **Tool schema repair.** Before 2026.8, tools whose parameters use validators such as `cv.string` produced a schema that strict MCP clients cannot compile; calls then failed with `extra keys not allowed @ data['__unparsedToolInput']`, which affected `GetLiveContext` in particular ([home-assistant/core#176762](https://github.com/home-assistant/core/issues/176762), fixed by [#176814](https://github.com/home-assistant/core/pull/176814)). The bridge repairs these schemas as they pass through, and does nothing on versions that already serve them correctly. Set `HA_NATIVE_MCP_SANITIZE_SCHEMAS` to `0` to see the raw upstream schemas.
-- **Malformed-message guard.** Every message is validated as JSON-RPC 2.0 before it is forwarded, because malformed POSTs to `/api/mcp` have been reported to crash Home Assistant Core ([home-assistant/core#176734](https://github.com/home-assistant/core/issues/176734)). This one is **not fixed in 2026.8** — the upstream fix is still open — so the guard applies on every version.
-
-Run `get_agent_capabilities` to see what the running instance supports; it reports the detected version, the endpoint status, and any known upstream limitations that still apply to it. The regular `homeassistant` MCP server remains available and is the supported tool surface either way.
+Use this only with a Home Assistant version that provides the endpoint. The regular `homeassistant` MCP server remains available and is the supported tool surface when native MCP is unavailable.
 
 ### MCP Capabilities Overview
 
@@ -631,7 +593,7 @@ Then restart OpenCode (exit and run `opencode` again).
 
 | Tool | Description |
 |------|-------------|
-| `get_states` | Get entity states (one entity, a domain, or the whole installation). A call with no domain returns at most 150 entities and a domain-filtered one at most 500, in Home Assistant's own order; `summarize` gives a complete per-domain census instead. |
+| `get_states` | Get entity states (all, by domain, or specific). Supports semantic summaries. |
 | `search_entities` | Semantic search - find entities by natural language ("bedroom lights", "motion sensors") |
 | `get_entity_details` | Deep dive into an entity including device/area relationships |
 | `get_home_context` | Compact area/domain/entity-filtered context with registry-derived area and device metadata |
@@ -640,8 +602,8 @@ Then restart OpenCode (exit and run `opencode` again).
 
 | Tool | Description |
 |------|-------------|
-| `call_service` | Call any HA service (turn on lights, run scripts, set temperatures, etc.). Services that answer with data — `recorder.get_statistics`, `weather.get_forecasts`, `calendar.get_events`, `todo.get_items` — return their response automatically |
-| `get_services` | List available services, optionally by domain; marks which ones answer with data |
+| `call_service` | Call any HA service (turn on lights, run scripts, set temperatures, etc.) |
+| `get_services` | List available services, optionally by domain |
 
 ### History & Logging
 
@@ -849,20 +811,6 @@ Analyzes your setup and suggests:
 ## Safe Config Writing
 
 The `write_config_safe` MCP tool provides a complete validation pipeline when writing Home Assistant YAML configuration files. Instead of blind file writes, every change goes through multiple safety checks — including content protection against accidental data loss — with automatic rollback on failure.
-
-### Write Confirmation
-
-Because this add-on edits a live Home Assistant installation, direct file edits ask for your approval first. You see the proposed change and confirm it before anything is written. In-place shell edits (`yq -i`, `sed -i`, `tee`) and file removal or renaming ask as well; read-only commands do not, so investigating a problem stays uninterrupted.
-
-Writes made through `write_config_safe` do not prompt — they go through the validation, backup, and rollback pipeline described below instead.
-
-If you would rather not be asked, add the following to **Custom OpenCode config** in the add-on configuration:
-
-```json
-{ "permission": { "edit": "allow", "bash": "allow" } }
-```
-
-The same setting can make the add-on more cautious. `{"default_agent": "plan"}` starts every session in the plan agent, which asks before *every* command including read-only ones; press `Tab` to switch agents mid-session.
 
 ### Validation Pipeline
 
@@ -1364,7 +1312,7 @@ You own that file: read it in File Editor, edit it, or delete it. It is included
 
 **On context cost.** Each *active* note reaches the model as a single line — its date, title, decision, and any entities, files or integrations you attached to it. The rationale and any retired notes stay in the file and are fetched on demand. (If you see an entity name in `ha-context show` that you did not expect, this is where it comes from: the install briefing contains no entity names at all.) The injected digest is capped at roughly 500 tokens, and up to 40 active notes are stored. When a decision is replaced, the old note is marked superseded rather than deleted: it disappears from the session digest but stays in the file. That is how the cost stays flat instead of creeping up as notes accumulate.
 
-**When there are more notes than fit.** The two limits above are different limits, and the digest one arrives first. How many fit depends almost entirely on how long you write them: around a dozen notes of a sentence or so, roughly seventeen terse ones, as few as three if each runs to a paragraph. Nothing is lost when the rest do not fit — they stay in the file and in force, and OpenCode reads them with `recall_decisions`. The digest always states how many notes it is showing out of the total, so OpenCode is never left to assume the list is complete.
+**When there are more notes than fit.** The two limits above are different limits, and the digest one arrives first: depending on how long your notes are, somewhere between about four and eleven of them fit in 500 tokens. Nothing is lost when that happens — the rest stay in the file and in force, and OpenCode reads them with `recall_decisions`. The digest always states how many notes it is showing out of the total, so OpenCode is never left to assume the list is complete.
 
 To keep a specific note in the digest regardless, pin it — add `pin: true` to it in the file, or ask OpenCode to pin it when it proposes the note:
 
@@ -1378,10 +1326,6 @@ To keep a specific note in the digest regardless, pin it — add `pin: true` to 
 ```
 
 Pinned notes lead the digest and are the last to be dropped. Up to 10 can be pinned. Use it for the decisions where being forgotten would cause real damage — without a pin, the oldest notes are the first to fall out, and those are often the ones everyone has stopped thinking about.
-
-**When a new note takes effect.** Immediately, but in two stages. A note you approve is in force straight away — OpenCode has it in the current conversation, and `recall_decisions` reads it from the file at any time. It joins the *standing context* that every session starts with when the digest is next rebuilt: at the next add-on restart, or right away if you run `ha-context refresh`.
-
-That split is deliberate. The digest is part of the instructions OpenCode re-reads on every single request, so rewriting it mid-conversation would change the prompt underneath a running session and throw away the cached prefix — a lost cache discount on a hosted model, and a full re-read of the whole conversation on a local one. Recording a note therefore writes the notes file and nothing else. One consequence to know about: between recording a note and the next rebuild, `ha-context notes` shows it and `ha-context show` does not, because they are reading different files.
 
 **On safety.** Notes that contain a password, token, or any value found in your `secrets.yaml` are rejected outright. A note is sent to the model in every future session, so credentials have no business being in one.
 
@@ -1539,7 +1483,7 @@ OpenCode can use significant memory on larger Home Assistant installations. This
 
 ### Responses are very slow with a local model
 
-Almost always prompt evaluation, not a fault. The add-on sends roughly 25,000 tokens of instructions and tool definitions on every request, and your hardware processes all of it before producing the first token. See [Local Models](#local-models-ollama-and-similar) for how to reduce it. Check your model server's context-window setting first: if the prompt is being truncated, answer quality suffers as well as speed.
+Almost always prompt evaluation, not a fault. The add-on sends roughly 25,000 tokens of tools and instructions on every request, and your hardware has to process all of it before generating the first token. See [Local Models](#local-models-ollama-and-similar) for how to reduce it. Check your model server's context-window setting first — if the prompt is being truncated, quality suffers as well as speed.
 
 ### Changes not taking effect
 

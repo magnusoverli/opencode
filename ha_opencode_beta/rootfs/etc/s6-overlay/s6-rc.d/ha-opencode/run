@@ -1,0 +1,158 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# OpenCode - Terminal Service (ttyd + tmux via ingress)
+# ==============================================================================
+
+# Set home to persistent data directory
+export HOME="/data"
+export XDG_DATA_HOME="/data/.local/share"
+export XDG_CONFIG_HOME="/data/.config"
+export NPM_CONFIG_PREFIX="/data/.npm-global"
+
+# Load user-defined environment variables (written by init-opencode)
+if [ -f /data/.env_vars ]; then
+    source /data/.env_vars
+fi
+
+# Load discovered service variables (written by background discovery)
+if [ -f /data/.env_vars_discovered ]; then
+    source /data/.env_vars_discovered
+fi
+
+# Keep the Supervisor token process-only. Tools that expect HA_TOKEN receive it
+# from the live environment instead of a persisted /data/.env_vars entry.
+if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    export HA_TOKEN="${SUPERVISOR_TOKEN}"
+fi
+
+OPENCODE_UPDATE_POLICY=$(cat /data/.opencode_update_policy 2>/dev/null || echo "latest")
+if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
+    export PATH="${NPM_CONFIG_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+else
+    export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+    export OPENCODE_DISABLE_AUTOUPDATE=true
+fi
+
+bashio::log.info "=============================================="
+bashio::log.info "  OpenCode Terminal (ttyd + ingress)"
+bashio::log.info "=============================================="
+
+INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+if [ "${INTERFACE_MODE}" != "terminal" ]; then
+    bashio::log.info "Interface mode is '${INTERFACE_MODE}'; terminal ingress service is inactive."
+    exec sleep infinity
+fi
+
+# ==============================================================================
+# Set Node.js memory limit (hardcoded for stability)
+# ==============================================================================
+
+export NODE_OPTIONS="--max-old-space-size=512"
+
+# ==============================================================================
+# Read terminal appearance configuration
+# ==============================================================================
+
+TERMINAL_THEME=$(bashio::config 'terminal_theme')
+FONT_SIZE=$(bashio::config 'font_size')
+CURSOR_STYLE=$(bashio::config 'cursor_style')
+CURSOR_BLINK=$(bashio::config 'cursor_blink')
+
+bashio::log.info "Terminal theme: ${TERMINAL_THEME}"
+
+# ==============================================================================
+# Theme definitions
+# ==============================================================================
+
+get_theme() {
+    local theme_name="$1"
+    
+    case "${theme_name}" in
+        "breeze")
+            # KDE Konsole Breeze theme
+            echo '{"background":"#232627","foreground":"#fcfcfc","cursor":"#fcfcfc","cursorAccent":"#232627","selectionBackground":"#3daee9","selectionForeground":"#fcfcfc","black":"#232627","red":"#ed1515","green":"#11d116","yellow":"#f67400","blue":"#1d99f3","magenta":"#9b59b6","cyan":"#1abc9c","white":"#fcfcfc","brightBlack":"#7f8c8d","brightRed":"#c0392b","brightGreen":"#1cdc9a","brightYellow":"#fdbc4b","brightBlue":"#3daee9","brightMagenta":"#8e44ad","brightCyan":"#16a085","brightWhite":"#ffffff"}'
+            ;;
+        "catppuccin_mocha")
+            # Catppuccin Mocha theme
+            echo '{"background":"#1e1e2e","foreground":"#cdd6f4","cursor":"#f5e0dc","cursorAccent":"#1e1e2e","selectionBackground":"#585b70","selectionForeground":"#cdd6f4","black":"#45475a","red":"#f38ba8","green":"#a6e3a1","yellow":"#f9e2af","blue":"#89b4fa","magenta":"#f5c2e7","cyan":"#94e2d5","white":"#bac2de","brightBlack":"#585b70","brightRed":"#f38ba8","brightGreen":"#a6e3a1","brightYellow":"#f9e2af","brightBlue":"#89b4fa","brightMagenta":"#f5c2e7","brightCyan":"#94e2d5","brightWhite":"#a6adc8"}'
+            ;;
+        "catppuccin_latte")
+            # Catppuccin Latte theme (light)
+            echo '{"background":"#eff1f5","foreground":"#4c4f69","cursor":"#dc8a78","cursorAccent":"#eff1f5","selectionBackground":"#acb0be","selectionForeground":"#4c4f69","black":"#5c5f77","red":"#d20f39","green":"#40a02b","yellow":"#df8e1d","blue":"#1e66f5","magenta":"#ea76cb","cyan":"#179299","white":"#acb0be","brightBlack":"#6c6f85","brightRed":"#d20f39","brightGreen":"#40a02b","brightYellow":"#df8e1d","brightBlue":"#1e66f5","brightMagenta":"#ea76cb","brightCyan":"#179299","brightWhite":"#bcc0cc"}'
+            ;;
+        "dracula")
+            # Dracula theme
+            echo '{"background":"#282a36","foreground":"#f8f8f2","cursor":"#f8f8f2","cursorAccent":"#282a36","selectionBackground":"#44475a","selectionForeground":"#f8f8f2","black":"#21222c","red":"#ff5555","green":"#50fa7b","yellow":"#f1fa8c","blue":"#bd93f9","magenta":"#ff79c6","cyan":"#8be9fd","white":"#f8f8f2","brightBlack":"#6272a4","brightRed":"#ff6e6e","brightGreen":"#69ff94","brightYellow":"#ffffa5","brightBlue":"#d6acff","brightMagenta":"#ff92df","brightCyan":"#a4ffff","brightWhite":"#ffffff"}'
+            ;;
+        "nord")
+            # Nord theme
+            echo '{"background":"#2e3440","foreground":"#d8dee9","cursor":"#d8dee9","cursorAccent":"#2e3440","selectionBackground":"#434c5e","selectionForeground":"#d8dee9","black":"#3b4252","red":"#bf616a","green":"#a3be8c","yellow":"#ebcb8b","blue":"#81a1c1","magenta":"#b48ead","cyan":"#88c0d0","white":"#e5e9f0","brightBlack":"#4c566a","brightRed":"#bf616a","brightGreen":"#a3be8c","brightYellow":"#ebcb8b","brightBlue":"#81a1c1","brightMagenta":"#b48ead","brightCyan":"#8fbcbb","brightWhite":"#eceff4"}'
+            ;;
+        "tokyo_night")
+            # Tokyo Night theme
+            echo '{"background":"#1a1b26","foreground":"#c0caf5","cursor":"#c0caf5","cursorAccent":"#1a1b26","selectionBackground":"#33467c","selectionForeground":"#c0caf5","black":"#15161e","red":"#f7768e","green":"#9ece6a","yellow":"#e0af68","blue":"#7aa2f7","magenta":"#bb9af7","cyan":"#7dcfff","white":"#a9b1d6","brightBlack":"#414868","brightRed":"#f7768e","brightGreen":"#9ece6a","brightYellow":"#e0af68","brightBlue":"#7aa2f7","brightMagenta":"#bb9af7","brightCyan":"#7dcfff","brightWhite":"#c0caf5"}'
+            ;;
+        "one_dark")
+            # One Dark theme
+            echo '{"background":"#282c34","foreground":"#abb2bf","cursor":"#528bff","cursorAccent":"#282c34","selectionBackground":"#3e4451","selectionForeground":"#abb2bf","black":"#282c34","red":"#e06c75","green":"#98c379","yellow":"#e5c07b","blue":"#61afef","magenta":"#c678dd","cyan":"#56b6c2","white":"#abb2bf","brightBlack":"#5c6370","brightRed":"#e06c75","brightGreen":"#98c379","brightYellow":"#e5c07b","brightBlue":"#61afef","brightMagenta":"#c678dd","brightCyan":"#56b6c2","brightWhite":"#ffffff"}'
+            ;;
+        "solarized_dark")
+            # Solarized Dark theme
+            echo '{"background":"#002b36","foreground":"#839496","cursor":"#839496","cursorAccent":"#002b36","selectionBackground":"#073642","selectionForeground":"#93a1a1","black":"#073642","red":"#dc322f","green":"#859900","yellow":"#b58900","blue":"#268bd2","magenta":"#d33682","cyan":"#2aa198","white":"#eee8d5","brightBlack":"#002b36","brightRed":"#cb4b16","brightGreen":"#586e75","brightYellow":"#657b83","brightBlue":"#839496","brightMagenta":"#6c71c4","brightCyan":"#93a1a1","brightWhite":"#fdf6e3"}'
+            ;;
+        "solarized_light")
+            # Solarized Light theme
+            echo '{"background":"#fdf6e3","foreground":"#657b83","cursor":"#657b83","cursorAccent":"#fdf6e3","selectionBackground":"#eee8d5","selectionForeground":"#586e75","black":"#073642","red":"#dc322f","green":"#859900","yellow":"#b58900","blue":"#268bd2","magenta":"#d33682","cyan":"#2aa198","white":"#eee8d5","brightBlack":"#002b36","brightRed":"#cb4b16","brightGreen":"#586e75","brightYellow":"#657b83","brightBlue":"#839496","brightMagenta":"#6c71c4","brightCyan":"#93a1a1","brightWhite":"#fdf6e3"}'
+            ;;
+        "gruvbox_dark")
+            # Gruvbox Dark theme
+            echo '{"background":"#282828","foreground":"#ebdbb2","cursor":"#ebdbb2","cursorAccent":"#282828","selectionBackground":"#504945","selectionForeground":"#ebdbb2","black":"#282828","red":"#cc241d","green":"#98971a","yellow":"#d79921","blue":"#458588","magenta":"#b16286","cyan":"#689d6a","white":"#a89984","brightBlack":"#928374","brightRed":"#fb4934","brightGreen":"#b8bb26","brightYellow":"#fabd2f","brightBlue":"#83a598","brightMagenta":"#d3869b","brightCyan":"#8ec07c","brightWhite":"#ebdbb2"}'
+            ;;
+        *)
+            # Default to Breeze
+            echo '{"background":"#232627","foreground":"#fcfcfc","cursor":"#fcfcfc","cursorAccent":"#232627","selectionBackground":"#3daee9","selectionForeground":"#fcfcfc","black":"#232627","red":"#ed1515","green":"#11d116","yellow":"#f67400","blue":"#1d99f3","magenta":"#9b59b6","cyan":"#1abc9c","white":"#fcfcfc","brightBlack":"#7f8c8d","brightRed":"#c0392b","brightGreen":"#1cdc9a","brightYellow":"#fdbc4b","brightBlue":"#3daee9","brightMagenta":"#8e44ad","brightCyan":"#16a085","brightWhite":"#ffffff"}'
+            ;;
+    esac
+}
+
+THEME_JSON=$(get_theme "${TERMINAL_THEME}")
+
+bashio::log.info "Starting ttyd on port 8099 (Home Assistant ingress)..."
+
+# ==============================================================================
+# Start ttyd with configured options
+# Uses tmux to maintain a single persistent session. When a user disconnects
+# and reconnects, they reattach to the existing session instead of spawning
+# a new OpenCode instance. The -A flag means "attach if session exists,
+# otherwise create a new one".
+# ==============================================================================
+
+# -I serves the custom index page built in the Dockerfile, which adds
+# clipboard support (OSC 52 from OpenCode/tmux -> browser clipboard, Ctrl+V
+# paste) and touch scrolling for mobile browsers.
+# macOptionClickForcesSelection lets macOS users select text with Option+drag
+# while OpenCode has mouse reporting enabled (the Shift+drag override is
+# Windows/Linux-only in xterm.js).
+# -d 3 sets the libwebsockets log level to ERR|WARN only. ttyd's default is 7
+# (ERR|WARN|NOTICE), which logs every accepted HTTP connection at NOTICE — so
+# the container health check (curl http://127.0.0.1:8099/ every 30s) produced a
+# repeating three-line burst (__lws_lc_tag / HTTP / / __lws_lc_untag) that
+# spammed the add-on log ~4300 lines a day. Errors and warnings still surface.
+exec ttyd \
+    -W \
+    -d 3 \
+    -p 8099 \
+    -I /opt/ttyd/index.html \
+    -t fontSize="${FONT_SIZE}" \
+    -t fontWeight=normal \
+    -t fontWeightBold=bold \
+    -t letterSpacing=0 \
+    -t lineHeight=1.0 \
+    -t cursorBlink="${CURSOR_BLINK}" \
+    -t cursorStyle="${CURSOR_STYLE}" \
+    -t drawBoldTextInBrightColors=true \
+    -t minimumContrastRatio=4.5 \
+    -t macOptionClickForcesSelection=true \
+    -t scrollback=10000 \
+    -t "theme=${THEME_JSON}" \
+    tmux new-session -A -s opencode /usr/local/bin/opencode-session.sh

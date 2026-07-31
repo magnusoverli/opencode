@@ -3,29 +3,6 @@ const DEFAULT_SUPERVISOR_API = "http://supervisor/core/api";
 export const NATIVE_MCP_ASSIST_API_ID = "assist";
 export const NATIVE_MCP_PROTOCOL_VERSION = "2025-11-25";
 
-/**
- * Endpoint selection for the native MCP bridge.
- *
- * - `auto`: prefer the keyed `/api/mcp/<API ID>` endpoint and fall back to the
- *   configured `/api/mcp` endpoint if the keyed endpoint does not exist. Keyed
- *   endpoints only exist from Home Assistant 2026.8 (home-assistant/core#175570),
- *   so on every earlier release the fallback is what makes the bridge usable at
- *   all. A 404 that names an unknown API ID is reported rather than fallen back
- *   from: the endpoint is there and the ID is wrong, and silently serving a
- *   different LLM API would hide that.
- * - `keyed`: only ever use `/api/mcp/<API ID>`.
- * - `configured`: only ever use `/api/mcp`.
- */
-export const NATIVE_MCP_ENDPOINT_MODES = ["auto", "keyed", "configured"];
-export const DEFAULT_NATIVE_MCP_ENDPOINT_MODE = "auto";
-
-export function normalizeNativeMcpEndpointMode(mode = DEFAULT_NATIVE_MCP_ENDPOINT_MODE) {
-  const normalized = String(mode ?? "").trim().toLowerCase();
-  return NATIVE_MCP_ENDPOINT_MODES.includes(normalized)
-    ? normalized
-    : DEFAULT_NATIVE_MCP_ENDPOINT_MODE;
-}
-
 export function normalizeNativeMcpApiId(apiId = NATIVE_MCP_ASSIST_API_ID, { allowBaseEndpoint = false } = {}) {
   const normalized = String(apiId ?? "").trim();
   if (!normalized && allowBaseEndpoint) return null;
@@ -218,24 +195,6 @@ export async function probeNativeMcpEndpoint({
   }
 }
 
-function mapNativeMcpResponse(response, id) {
-  if (response.status === 202) return null;
-  if (response.ok && response.json) return response.json;
-
-  if (id === undefined) return null;
-
-  return createJsonRpcError(
-    id,
-    -32000,
-    `Home Assistant native MCP request failed with HTTP ${response.status}`,
-    {
-      endpoint: response.endpoint,
-      status: response.status,
-      body: response.text?.slice(0, 1000) || response.statusText,
-    }
-  );
-}
-
 export async function forwardJsonRpcToNativeMcp({
   fetchImpl = fetch,
   supervisorToken,
@@ -256,190 +215,25 @@ export async function forwardJsonRpcToNativeMcp({
       timeoutMs,
     });
 
-    return mapNativeMcpResponse(response, id);
+    if (response.status === 202) return null;
+    if (response.ok && response.json) return response.json;
+
+    if (id === undefined) return null;
+
+    return createJsonRpcError(
+      id,
+      -32000,
+      `Home Assistant native MCP request failed with HTTP ${response.status}`,
+      {
+        endpoint: response.endpoint,
+        status: response.status,
+        body: response.text?.slice(0, 1000) || response.statusText,
+      }
+    );
   } catch (error) {
     if (id === undefined) return null;
     return createJsonRpcError(id, -32000, "Home Assistant native MCP request failed", {
       message: error?.message || String(error),
     });
   }
-}
-
-/**
- * Validate a client message before it is forwarded to Home Assistant.
- *
- * Home Assistant Core has crashed on malformed POSTs to `/api/mcp`
- * (home-assistant/core#176734, fix still open at the time of writing), so the
- * bridge rejects anything that is not a well-formed JSON-RPC 2.0 message rather
- * than passing it through. JSON-RPC batches (arrays) are rejected too: MCP
- * dropped batching, and Home Assistant validates one message per request.
- */
-export function validateJsonRpcMessage(message) {
-  if (typeof message !== "object" || message === null || Array.isArray(message)) {
-    return { valid: false, id: null, reason: "Message must be a JSON-RPC object" };
-  }
-
-  const id = message.id ?? null;
-
-  if (message.jsonrpc !== "2.0") {
-    return { valid: false, id, reason: "Message must set jsonrpc to \"2.0\"" };
-  }
-
-  if (typeof message.method === "string" && message.method.length > 0) {
-    return { valid: true, id, reason: null };
-  }
-
-  if ("method" in message) {
-    return { valid: false, id, reason: "Message method must be a non-empty string" };
-  }
-
-  const isResponse = "result" in message
-    || (typeof message.error === "object" && message.error !== null);
-  if (isResponse && message.id !== undefined) {
-    return { valid: true, id, reason: null };
-  }
-
-  return { valid: false, id, reason: "Message must be a JSON-RPC request, notification, or response" };
-}
-
-function isUnknownLlmApiResponse(response) {
-  return typeof response?.text === "string" && response.text.includes("Unknown LLM API");
-}
-
-/**
- * How long a negotiated fallback stays latched before the keyed endpoint is
- * retried, in milliseconds.
- *
- * The fallback must be latched, or a long-lived bridge would re-probe a missing
- * keyed endpoint on every single request. But it must not be latched forever:
- * upgrading Home Assistant to 2026.8 restarts Core without restarting the
- * add-on, so a bridge that fell back on 2026.7 would otherwise stay on the
- * configured endpoint until someone restarted it by hand. Re-arming on a timer
- * costs one extra request per interval and picks the keyed endpoint back up on
- * its own. The same applies when the MCP Server integration is added after the
- * bridge starts.
- */
-export const NATIVE_MCP_FALLBACK_RETRY_MS = 15 * 60 * 1000;
-
-/**
- * Create a stateful forwarder that negotiates which native MCP endpoint to use.
- */
-export function createNativeMcpForwarder({
-  fetchImpl = fetch,
-  supervisorToken,
-  baseUrl = DEFAULT_SUPERVISOR_API,
-  apiId = NATIVE_MCP_ASSIST_API_ID,
-  endpointMode = DEFAULT_NATIVE_MCP_ENDPOINT_MODE,
-  timeoutMs = 60000,
-  onEndpointFallback = null,
-  onEndpointRecovered = null,
-  fallbackRetryMs = NATIVE_MCP_FALLBACK_RETRY_MS,
-  now = () => Date.now(),
-} = {}) {
-  const mode = normalizeNativeMcpEndpointMode(endpointMode);
-  const configuredApiId = normalizeNativeMcpApiId(apiId, { allowBaseEndpoint: true });
-  let activeApiId = mode === "configured" ? null : configuredApiId;
-  let fellBackAt = null;
-  // Only state *changes* are reported. A Home Assistant that will never serve
-  // the keyed endpoint would otherwise log a fallback on every retry interval
-  // for as long as the add-on runs.
-  let reportedFallback = false;
-
-  async function request(message, requestApiId) {
-    return requestNativeMcp({
-      fetchImpl,
-      supervisorToken,
-      baseUrl,
-      apiId: requestApiId,
-      message,
-      timeoutMs,
-    });
-  }
-
-  // Re-arm the keyed endpoint when the latch has aged out, so the next request
-  // discovers a Home Assistant that has since gained it. Silent by design: on a
-  // release that will never serve it this runs forever, and only the retry that
-  // actually succeeds is worth telling anyone about.
-  function maybeRetryKeyedEndpoint() {
-    if (mode !== "auto" || fellBackAt === null || activeApiId) return;
-    if (!(fallbackRetryMs > 0)) return;
-    if (now() - fellBackAt < fallbackRetryMs) return;
-
-    fellBackAt = null;
-    activeApiId = configuredApiId;
-  }
-
-  return {
-    get endpointMode() {
-      return mode;
-    },
-    get activeApiId() {
-      return activeApiId;
-    },
-    get endpoint() {
-      return buildNativeMcpUrl({ baseUrl, apiId: activeApiId });
-    },
-    async send(message) {
-      const id = message?.id;
-
-      try {
-        maybeRetryKeyedEndpoint();
-
-        const response = await request(message, activeApiId);
-
-        if (mode !== "auto" || !activeApiId || response.status !== 404) {
-          // A keyed request that did not 404 means a retry has succeeded and
-          // the endpoint is back — the one event in this loop worth reporting.
-          if (activeApiId && reportedFallback) {
-            reportedFallback = false;
-            onEndpointRecovered?.({
-              endpoint: response.endpoint,
-              api_id: configuredApiId,
-            });
-          }
-          return mapNativeMcpResponse(response, id);
-        }
-
-        // Home Assistant 2026.8 answers 404 with "Unknown LLM API" when the
-        // endpoint exists but the ID does not. Falling back there would quietly
-        // serve a different LLM API than the one that was asked for, so the
-        // misconfiguration is reported instead. Only a missing keyed endpoint —
-        // every release before 2026.8 — is worth falling back from.
-        if (isUnknownLlmApiResponse(response)) {
-          if (id === undefined) return null;
-          return createJsonRpcError(
-            id,
-            -32000,
-            `Home Assistant does not know the LLM API ID '${configuredApiId}'`,
-            {
-              endpoint: response.endpoint,
-              api_id: configuredApiId,
-              hint: "Check the API ID against the LLM APIs registered in Home Assistant. Keyed endpoints other than 'assist' require admin access, so an add-on may not be able to reach them. Leave the API ID empty to use the endpoint configured in the MCP Server integration.",
-            }
-          );
-        }
-
-        fellBackAt = now();
-        activeApiId = null;
-
-        if (!reportedFallback) {
-          reportedFallback = true;
-          onEndpointFallback?.({
-            from: response.endpoint,
-            to: buildNativeMcpUrl({ baseUrl, apiId: null }),
-            api_id: configuredApiId,
-            reason: "keyed_endpoint_unavailable",
-            retry_in_ms: fallbackRetryMs > 0 ? fallbackRetryMs : null,
-          });
-        }
-
-        return mapNativeMcpResponse(await request(message, activeApiId), id);
-      } catch (error) {
-        if (id === undefined) return null;
-        return createJsonRpcError(id, -32000, "Home Assistant native MCP request failed", {
-          message: error?.message || String(error),
-        });
-      }
-    },
-  };
 }

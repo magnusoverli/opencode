@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { spawn } from "child_process";
-import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
+import { mkdtemp, readFile, rm } from "fs/promises";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -211,12 +211,7 @@ describe("recording a decision end to end", () => {
     };
   });
 
-  it("writes the note without touching the injected digest", async () => {
-    // Pre-seed the digest so "unchanged" is a real assertion rather than one
-    // that passes on a file nothing ever created.
-    const before = "# Decision notes\n\nAn earlier digest that must survive.\n";
-    await writeFile(digestPath, before, "utf8");
-
+  it("writes the note and refreshes the injected digest", async () => {
     const [recorded] = await converse(env, [
       callTool("remember_decision", {
         title: "Node-RED automations are off limits",
@@ -232,41 +227,11 @@ describe("recording a decision end to end", () => {
     const stored = await readFile(join(notesDir, "decisions.yaml"), "utf8");
     expect(stored).toContain("Node-RED automations are off limits");
 
-    // The digest sits in OpenCode's `instructions` and is re-read on every
-    // request. Rewriting it here would edit the system prompt underneath a
-    // live session and throw away the cached prefix, so recording a note must
-    // leave it exactly as it was — the generator owns this file.
-    expect(await readFile(digestPath, "utf8")).toBe(before);
-
-    // The user still has to be told when the note reaches the standing context.
-    expect(textOf(recorded)).toContain("ha-context refresh");
+    // The digest is what future sessions actually see, so it must be current
+    const digest = await readFile(digestPath, "utf8");
+    expect(digest).toContain("Node-RED automations are off limits");
+    expect(digest).not.toContain("maintained outside Home Assistant"); // rationale stays out
   }, STARTUP_TIMEOUT_MS + 5000);
-
-  it("does not delete the injected digest when the last note is superseded", async () => {
-    const before = "# Decision notes\n\nAn earlier digest that must survive.\n";
-
-    const [recorded] = await converse(env, [
-      callTool("remember_decision", {
-        title: "Only note",
-        decision: "This is the single active note.",
-        user_approved: true,
-      }),
-    ]);
-    // Ids are date-derived, so it has to come from the response.
-    const id = textOf(recorded).match(/as `([^`]+)`/)?.[1];
-    expect(id).toBeTruthy();
-
-    await writeFile(digestPath, before, "utf8");
-
-    const [retired] = await converse(env, [
-      callTool("supersede_decision", { ids: [id], user_approved: true }),
-    ]);
-    expect(retired.isError).toBeFalsy();
-
-    // Superseding the last active note used to unlink the digest, which removes
-    // a whole block from the system prompt mid-session.
-    expect(await readFile(digestPath, "utf8")).toBe(before);
-  }, (STARTUP_TIMEOUT_MS + 5000) * 2);
 
   it("refuses to write anything without explicit user approval", async () => {
     const [result] = await converse(env, [

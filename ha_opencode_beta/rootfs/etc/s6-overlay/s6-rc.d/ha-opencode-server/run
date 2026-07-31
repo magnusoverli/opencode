@@ -1,0 +1,87 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# OpenCode - Optional LAN Server Service
+# ==============================================================================
+
+export HOME="/data"
+export XDG_DATA_HOME="/data/.local/share"
+export XDG_CONFIG_HOME="/data/.config"
+export NPM_CONFIG_PREFIX="/data/.npm-global"
+export NODE_OPTIONS="--max-old-space-size=512"
+
+if [ -f /data/.env_vars ]; then
+    source /data/.env_vars
+fi
+
+if [ -f /data/.env_vars_discovered ]; then
+    source /data/.env_vars_discovered
+fi
+
+# Keep the Supervisor token process-only. Tools that expect HA_TOKEN receive it
+# from the live environment instead of a persisted /data/.env_vars entry.
+if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    export HA_TOKEN="${SUPERVISOR_TOKEN}"
+fi
+
+OPENCODE_UPDATE_POLICY=$(cat /data/.opencode_update_policy 2>/dev/null || echo "latest")
+if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
+    export PATH="${NPM_CONFIG_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+else
+    export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+    export OPENCODE_DISABLE_AUTOUPDATE=true
+fi
+
+ENABLE_SERVER=$(bashio::config 'enable_server' 2>/dev/null || echo "false")
+SERVER_PORT=4096
+
+if ! bashio::var.true "${ENABLE_SERVER}"; then
+    exec sleep infinity
+fi
+
+HOST_PORT=$(bashio::addon.port "${SERVER_PORT}" 2>/dev/null || true)
+
+bashio::log.info "LAN server config: ENABLE_SERVER=${ENABLE_SERVER} INTERNAL_PORT=${SERVER_PORT} HOST_PORT=${HOST_PORT:-unmapped}"
+bashio::log.warning "LAN server mode is enabled. OpenCode will listen on 0.0.0.0:${SERVER_PORT} inside the container."
+bashio::log.warning "Only map this port on trusted networks. Do not expose it to the internet."
+if bashio::var.has_value "${HOST_PORT}"; then
+    bashio::log.info "Home Assistant port mapping: ${SERVER_PORT}/tcp -> ${HOST_PORT}"
+    bashio::log.info "Connect from another computer with: opencode attach http://<home-assistant-host>:${HOST_PORT}"
+else
+    bashio::log.warning "Home Assistant port mapping for ${SERVER_PORT}/tcp is disabled; LAN clients cannot connect yet."
+    bashio::log.info "Map ${SERVER_PORT}/tcp in the add-on Network settings, then connect with: opencode attach http://<home-assistant-host>:<mapped-host-port>"
+fi
+bashio::log.info "If OpenCode prints http://0.0.0.0:${SERVER_PORT}, that is the internal container listener."
+
+# ==============================================================================
+# Optional browser CORS origins
+# ------------------------------------------------------------------------------
+# opencode serve only accepts browser origins via --cors <origin> (no
+# environment variable equivalent). Without it, browser-based clients that
+# talk to this server directly (e.g. a web/VS Code UI, as opposed to the
+# 'opencode attach' CLI) can be blocked by the browser's CORS policy: simple
+# requests like listing providers/models may still get through, while the
+# actual chat message/event-stream requests silently get no response. This
+# option is empty by default, so 'opencode attach' and other non-browser
+# clients are unaffected.
+# ==============================================================================
+CORS_ORIGINS_COUNT=$(bashio::config 'cors_origins | length' 2>/dev/null || echo "0")
+CORS_ARGS=()
+if [ "${CORS_ORIGINS_COUNT}" -gt 0 ]; then
+    for i in $(seq 0 $((CORS_ORIGINS_COUNT - 1))); do
+        CORS_ORIGIN=$(bashio::config "cors_origins[${i}]")
+        if [ -n "${CORS_ORIGIN}" ]; then
+            CORS_ARGS+=(--cors "${CORS_ORIGIN}")
+            bashio::log.info "LAN server: allowing browser origin via CORS: ${CORS_ORIGIN}"
+        fi
+    done
+fi
+
+if [ "${#CORS_ARGS[@]}" -eq 0 ]; then
+    bashio::log.info "LAN server: no CORS origins configured. Browser-based clients (e.g. a web/VS Code UI pointed at this server) will be blocked by the browser; only non-browser clients such as 'opencode attach' are supported without this option."
+    bashio::log.info "Starting OpenCode LAN server: opencode serve --hostname 0.0.0.0 --port ${SERVER_PORT}"
+else
+    bashio::log.info "Starting OpenCode LAN server: opencode serve --hostname 0.0.0.0 --port ${SERVER_PORT} --cors <configured origin(s)>"
+fi
+
+cd /homeassistant
+exec opencode serve --hostname 0.0.0.0 --port "${SERVER_PORT}" "${CORS_ARGS[@]}"
