@@ -28,7 +28,6 @@ const ROADMAP_NEXT = [
   "Track home-assistant/core#176734 and remove the local JSON-RPC guard once its fix ships.",
   "Position OpenCode as a premium consumer of HA-native LLM capabilities for users testing agent-focused Home Assistant features.",
   "Keep MCP tools for OpenCode-specific, add-on, admin, development, validation, and safety workflows that Home Assistant Core does not intend to expose through Assist.",
-  "Confirm whether Supervisor-proxied add-on requests count as admin, which decides whether keyed API IDs other than 'assist' are reachable at all.",
 ];
 
 // Home Assistant releases that expose the native LLM platform to external MCP
@@ -209,6 +208,18 @@ export function buildAgentCapabilities({
           endpoint_pattern: "/api/mcp/<API ID>",
           configured_endpoint: "/api/mcp",
           assist_api_id: "assist",
+        },
+        // What each endpoint actually serves, and who is allowed to reach it.
+        // Home Assistant requires admin for keyed endpoints other than 'assist'
+        // (mcp_server/http.py), which reads as a wall for an add-on and is not
+        // one: the Supervisor proxies add-on requests to Core as its own system
+        // user, and the hassio integration creates that user in the admin group.
+        // Every registered API ID is therefore reachable from here.
+        access_model: {
+          configured_endpoint: "/api/mcp serves every LLM API selected in the MCP Server integration — the setting is a multi-select — and needs no admin access.",
+          keyed_endpoint: "/api/mcp/<API ID> serves exactly one registered LLM API. Home Assistant requires admin for every ID except 'assist'.",
+          addon_requests_are_admin: true,
+          addon_access: "Supervisor-proxied add-on requests reach Core as the Home Assistant Supervisor system user, which is in the admin group. Any registered API ID is reachable from this add-on; an unknown-API-ID error means the ID does not exist, not that access was denied.",
         },
         status: nativeConfiguredMcpAvailable
           ? "configured_api_available"

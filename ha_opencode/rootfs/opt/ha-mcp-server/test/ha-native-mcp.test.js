@@ -4,7 +4,9 @@ import {
   buildNativeMcpUrl,
   createJsonRpcError,
   createNativeMcpForwarder,
+  createNativeMcpInitializeMessage,
   forwardJsonRpcToNativeMcp,
+  NATIVE_MCP_PROTOCOL_VERSION,
   normalizeNativeMcpApiId,
   normalizeNativeMcpEndpointMode,
   probeNativeMcpEndpoint,
@@ -408,5 +410,44 @@ describe("JSON-RPC message validation", () => {
 
   it("reports the message id so the error can be correlated", () => {
     expect(validateJsonRpcMessage({ jsonrpc: "2.0", id: "abc" }).id).toBe("abc");
+  });
+
+  it("sends the MCP protocol version header the spec requires", async () => {
+    // Home Assistant does not read this header today, but the Supervisor proxy
+    // forwards it by name, so the bridge stays correct if Core starts enforcing
+    // it. The declared version must match what initialize declares.
+    const fetchImpl = vi.fn(async () => jsonResponse({ jsonrpc: "2.0", id: 1, result: {} }));
+
+    await forwardJsonRpcToNativeMcp({
+      fetchImpl,
+      supervisorToken: "token",
+      apiId: "assist",
+      message: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    });
+
+    const { headers } = fetchImpl.mock.calls[0][1];
+    expect(headers["MCP-Protocol-Version"]).toBe(NATIVE_MCP_PROTOCOL_VERSION);
+    expect(createNativeMcpInitializeMessage().params.protocolVersion).toBe(
+      NATIVE_MCP_PROTOCOL_VERSION
+    );
+  });
+
+  it("does not blame add-on access for an unknown LLM API ID", async () => {
+    // Keyed endpoints other than 'assist' require admin, which reads as a wall
+    // for an add-on and is not one: the Supervisor calls Core as its own admin
+    // system user. Telling the user access might be the problem would send them
+    // hunting for a permission fix that does not exist.
+    const fetchImpl = vi.fn(async () => new Response("Unknown LLM API 'nope'", { status: 404 }));
+
+    const forwarder = createNativeMcpForwarder({
+      fetchImpl,
+      supervisorToken: "token",
+      apiId: "nope",
+    });
+
+    const { hint } = (await forwarder.send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).error.data;
+
+    expect(hint).toMatch(/reachable from an add-on/);
+    expect(hint).not.toMatch(/may not be able to reach/);
   });
 });

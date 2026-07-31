@@ -15,6 +15,12 @@ export const NATIVE_MCP_PROTOCOL_VERSION = "2025-11-25";
  *   different LLM API would hide that.
  * - `keyed`: only ever use `/api/mcp/<API ID>`.
  * - `configured`: only ever use `/api/mcp`.
+ *
+ * The two endpoints are not the same surface. `/api/mcp/<API ID>` serves exactly
+ * one LLM API. `/api/mcp` serves *every* LLM API selected in the MCP Server
+ * integration — the setting is a multi-select and Core passes the whole list
+ * through — so falling back to it can widen the tool surface rather than narrow
+ * it, and pinning `configured` is the way to ask for all of them on purpose.
  */
 export const NATIVE_MCP_ENDPOINT_MODES = ["auto", "keyed", "configured"];
 export const DEFAULT_NATIVE_MCP_ENDPOINT_MODE = "auto";
@@ -89,6 +95,12 @@ export async function requestNativeMcp({
       Authorization: `Bearer ${supervisorToken}`,
       Accept: "application/json",
       "Content-Type": "application/json",
+      // Required of MCP clients from protocol revision 2025-06-18 onward. Home
+      // Assistant does not read it today — its streamable endpoint is stateless
+      // and checks only Accept and Content-Type — but the Supervisor proxy
+      // explicitly forwards this header, so sending it costs nothing and keeps
+      // the bridge correct if Core starts enforcing it.
+      "MCP-Protocol-Version": NATIVE_MCP_PROTOCOL_VERSION,
     },
     body: JSON.stringify(message),
     signal: AbortSignal.timeout(timeoutMs),
@@ -414,7 +426,7 @@ export function createNativeMcpForwarder({
             {
               endpoint: response.endpoint,
               api_id: configuredApiId,
-              hint: "Check the API ID against the LLM APIs registered in Home Assistant. Keyed endpoints other than 'assist' require admin access, so an add-on may not be able to reach them. Leave the API ID empty to use the endpoint configured in the MCP Server integration.",
+              hint: "Check the API ID against the LLM APIs registered in Home Assistant. Access is not the problem: Home Assistant requires admin for keyed endpoints other than 'assist', and the Supervisor calls Core as its own admin system user, so any registered API ID is reachable from an add-on. The ID itself is unknown. Leave the API ID empty to use every API selected in the MCP Server integration.",
             }
           );
         }

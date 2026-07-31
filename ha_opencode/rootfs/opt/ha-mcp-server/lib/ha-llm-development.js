@@ -50,7 +50,8 @@ Checklist:
 - Keep destructive/admin tools out of Assist unless there is a clear approval model.
 - Add tests for tool visibility, schema validation, success, and error paths.
 - Once the MCP Server integration is set up, registered LLM APIs are exposed at \`/api/mcp/<API ID>\`.
-- Home Assistant also exposes the MCP Server integration's configured API at \`/api/mcp\`; keyed custom API endpoints require admin access except for Assist.
+- Home Assistant also serves every API selected in the MCP Server integration at \`/api/mcp\`. That setting is a multi-select, so this one endpoint can carry several APIs at once.
+- Keyed endpoints require admin access for every API ID except \`assist\`. An add-on clears that bar — the Supervisor calls Core as its own system user, which is created in the admin group — so a custom API you register can be exercised from OpenCode over \`/api/mcp/<your API ID>\` without a long-lived token.
 
 ## Tool parameter schema gotchas
 
