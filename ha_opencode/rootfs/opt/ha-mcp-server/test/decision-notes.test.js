@@ -669,7 +669,18 @@ describe("renderDecisionDigest", () => {
     const result = renderDecisionDigest([sampleNote({ id: "a" }), sampleNote({ id: "b", title: "Second" })]);
     expect(result.droppedNotes).toHaveLength(0);
     expect(result.markdown).toContain("All 2 active notes");
-    expect(result.markdown).toContain("nothing has been left out");
+    expect(result.markdown).toContain("nothing had been left out");
+  });
+
+  // The digest is rebuilt at add-on start and on `ha-context refresh`, not when
+  // a note is recorded, so it can be a snapshot older than the notes file. An
+  // unbounded completeness claim would then be false in the one direction that
+  // causes damage: a decision the user made reading as a decision never made.
+  it("bounds the completeness claim to when the summary was built", () => {
+    const result = renderDecisionDigest([sampleNote({ id: "a" })]);
+    expect(result.markdown).toContain("when this summary was built");
+    expect(result.markdown).toContain("Notes recorded since are in force");
+    expect(result.markdown).toContain("recall_decisions");
   });
 
   // "Nothing has been left out" must not be asserted in the same breath as

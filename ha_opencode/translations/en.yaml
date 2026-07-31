@@ -52,11 +52,11 @@ configuration:
 
   native_ha_mcp_enabled:
     name: "Native Home Assistant MCP bridge (beta)"
-    description: "Adds a second MCP server that proxies to Home Assistant Core's own native LLM MCP endpoint (/api/mcp/<API ID>), on Home Assistant versions that provide it. This complements the MCP integration above rather than replacing it; leave it off unless you are testing Home Assistant's native LLM platform."
+    description: "Adds a second MCP server that proxies to Home Assistant Core's own native LLM MCP endpoint. Requires the MCP Server integration to be set up in Home Assistant first. The keyed /api/mcp/<API ID> endpoints and the native LLM tool platforms first ship in Home Assistant 2026.8; on earlier versions the bridge falls back to the configured /api/mcp endpoint. This complements the MCP integration above rather than replacing it; leave it off unless you are testing Home Assistant's native LLM platform."
 
   native_ha_mcp_api_id:
     name: "Native MCP API ID"
-    description: "Applies only when the native bridge above is on. The default 'assist' targets /api/mcp/assist; leave it empty to use Home Assistant's configured /api/mcp endpoint instead. Home Assistant requires admin access for keyed API IDs other than 'assist', so a custom ID may not be reachable from an add-on."
+    description: "Applies only when the native bridge above is on. The default 'assist' targets /api/mcp/assist; leave it empty to use every LLM API selected in the MCP Server integration. Any registered API ID is reachable from here: Home Assistant requires admin access for keyed IDs other than 'assist', and the Supervisor calls Home Assistant Core as its own admin system user."
 
   home_briefing_enabled:
     name: "Install briefing"

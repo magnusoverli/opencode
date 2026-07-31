@@ -327,12 +327,33 @@ fi
 
 # ==============================================================================
 # CPU Capability Detection - record diagnostics for OpenCode's runtime selector
+#
+# OpenCode ships Bun-compiled binaries, so Bun's CPU floor is OpenCode's. The
+# regular x64 build targets Haswell (AVX2); the x64 "baseline" build targets
+# Nehalem, which still requires SSE4.2 (the x86-64-v2 level). Below SSE4.2 no
+# published build starts at all, and the only useful thing this add-on can do
+# is name the cause instead of leaving the user with a bare "Illegal
+# instruction (core dumped)".
 # ==============================================================================
+
+# Recorded when the CPU is below Bun's floor, so the runtime setup below can
+# explain a failed binary rather than reporting a generic execution failure.
+CPU_UNSUPPORTED_MARKER=/data/.cpu_unsupported
 
 warn_baseline_mode() {
     bashio::log.warning "OpenCode x64 baseline mode may be used because AVX2 is not visible to the container."
     bashio::log.warning "If this add-on runs in a VM on an AVX2-capable host, enable host CPU passthrough; generic QEMU/KVM CPU models can hide AVX2."
+    bashio::log.warning "Upstream currently publishes the regular AVX2 binary inside the x64 baseline package, so baseline mode may still fail with an illegal instruction: https://github.com/anomalyco/opencode/issues/33595"
     bashio::log.warning "Known upstream baseline OOM issue: https://github.com/anomalyco/opencode/issues/20988"
+}
+
+report_unsupported_cpu() {
+    local model_name
+    model_name=$(awk -F': ' '/^model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null)
+    bashio::log.error "This CPU cannot run OpenCode: ${model_name:-unknown CPU} does not support SSE4.2."
+    bashio::log.error "OpenCode is built with Bun, whose oldest supported target (the x64 'baseline' build) requires SSE4.2 - the x86-64-v2 level, meaning Intel Nehalem (2008) or newer, or AMD Bulldozer (2011) / Jaguar (2013) or newer."
+    bashio::log.error "No published OpenCode binary, regular or baseline, will start on this hardware; it exits immediately with 'Illegal instruction (core dumped)'."
+    bashio::log.error "The rest of the add-on still works, but OpenCode itself cannot run on this machine. Setting CPU mode to 'baseline' does not change this."
 }
 
 detect_cpu_capabilities() {
@@ -341,8 +362,13 @@ detect_cpu_capabilities() {
     local cpu_flags=""
     local has_avx2=false
     local has_avx=false
+    local has_sse42=false
 
     machine=$(uname -m)
+
+    # Cleared every boot so moving the disk to a newer machine, or giving the VM
+    # a better CPU model, drops the marker instead of leaving it stale.
+    rm -f "${CPU_UNSUPPORTED_MARKER}"
 
     if [ -f /proc/cpuinfo ]; then
         cpu_flags=$(awk -F': ' '/^flags/ {print $2; exit}' /proc/cpuinfo)
@@ -356,6 +382,10 @@ detect_cpu_capabilities() {
         has_avx=true
     fi
 
+    if echo "${cpu_flags}" | grep -q '\bsse4_2\b'; then
+        has_sse42=true
+    fi
+
     if [ "${machine}" = "aarch64" ] || [ "${machine}" = "arm64" ]; then
         echo "regular" > /data/.cpu_mode
         if [ "${cpu_mode_config}" = "baseline" ]; then
@@ -363,6 +393,16 @@ detect_cpu_capabilities() {
         else
             bashio::log.info "ARM64 architecture detected - using regular OpenCode binary"
         fi
+        return
+    fi
+
+    # Below SSE4.2 the binary choice is moot - neither build runs - so say so
+    # once, plainly, and still record a mode so the rest of start-up proceeds
+    # normally and the message stays visible in the add-on log.
+    if [ "${has_sse42}" != "true" ]; then
+        printf '1\n' > "${CPU_UNSUPPORTED_MARKER}"
+        report_unsupported_cpu
+        echo "baseline" > /data/.cpu_mode
         return
     fi
 
@@ -458,7 +498,11 @@ setup_opencode_runtime() {
     if [ "${use_persistent}" != "true" ]; then
         opencode_select_package_binary "${bundled_package}" "${cpu_mode}" || true
         if ! opencode_bin_runs "${bundled_bin}"; then
-            bashio::log.error "Bundled OpenCode binary failed to execute; the terminal may not start correctly"
+            if [ -f "${CPU_UNSUPPORTED_MARKER}" ]; then
+                bashio::log.error "Bundled OpenCode binary failed to execute because this CPU lacks SSE4.2 (see the CPU message above); the terminal will start but OpenCode will not run"
+            else
+                bashio::log.error "Bundled OpenCode binary failed to execute; the terminal may not start correctly"
+            fi
         fi
     fi
 

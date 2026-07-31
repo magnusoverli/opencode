@@ -285,11 +285,28 @@ class HomeAssistantClient {
 
   async getDevices() {
     return this.getCached("devices", async () => {
-      const result = await this.fetch("/template", "POST", {
-        template: `{% set ids = devices() %}{{ [ids, ids | map('device_attr', 'name') | list, ids | map('device_attr', 'area_id') | list] | tojson }}`
-      });
-      const [ids, names, areas] = JSON.parse(result);
-      return ids.map((id, i) => ({ id, name: names[i], area: areas[i] }));
+      try {
+        // Home Assistant has no all-device global to match areas()/floors()/
+        // labels(): its device extension only registers device_entities,
+        // device_id, device_name, device_attr and is_device_attr. The device
+        // registry itself is reachable only over the WebSocket API
+        // (config/device_registry/list), which this REST-only client cannot
+        // call, so derive the device list from the entities in `states`.
+        //
+        // Caveat: this finds only devices that own at least one entity.
+        // Entity-less devices are missed, which is acceptable for completion
+        // (a device_id worth referencing in YAML has entities) but means this
+        // is not a faithful registry dump.
+        const result = await this.fetch("/template", "POST", {
+          template: `{% set ids = states | map(attribute='entity_id') | map('device_id') | reject('eq', none) | unique | list %}{{ [ids, ids | map('device_attr', 'name') | list, ids | map('device_attr', 'area_id') | list] | tojson }}`
+        });
+        const [ids, names, areas] = JSON.parse(result);
+        return ids.map((id, i) => ({ id, name: names[i], area: areas[i] }));
+      } catch {
+        // Never let a device lookup failure reject cache warm-up — the other
+        // registries stay usable and completion simply offers no device IDs.
+        return [];
+      }
     });
   }
 
@@ -454,16 +471,23 @@ async function warmCache() {
     return;
   }
   
-  try {
-    await Promise.all([
-      haClient.getStates(),
-      haClient.getServices(),
-      haClient.getAreas(),
-      haClient.getDevices(),
-    ]);
+  // allSettled, not all: one failing registry must not discard the caches the
+  // others already populated, nor hide which one actually failed.
+  const warmers = [
+    ["states", haClient.getStates()],
+    ["services", haClient.getServices()],
+    ["areas", haClient.getAreas()],
+    ["devices", haClient.getDevices()],
+  ];
+  const results = await Promise.allSettled(warmers.map(([, promise]) => promise));
+  const failed = results
+    .map((result, i) => (result.status === "rejected" ? `${warmers[i][0]}: ${result.reason?.message ?? result.reason}` : null))
+    .filter(Boolean);
+
+  if (failed.length === 0) {
     connection.console.log("HA cache warmed successfully");
-  } catch (error) {
-    connection.console.error(`Failed to warm cache: ${error.message}`);
+  } else {
+    connection.console.error(`HA cache warmed with ${failed.length} failure(s) - ${failed.join("; ")}`);
   }
 }
 

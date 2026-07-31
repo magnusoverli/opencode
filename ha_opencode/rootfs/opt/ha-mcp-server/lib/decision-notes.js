@@ -803,12 +803,23 @@ const DIGEST_INTRO = [
  * the failure that matters here is silent: a decision that was dropped for space
  * reads exactly like a decision that was never made, which is how a deliberate
  * configuration gets "fixed". So the digest always says which case it is in.
+ *
+ * The completeness claim is bounded to the rebuild it was written at. This file
+ * is regenerated at add-on start and on `ha-context refresh`, not when a note is
+ * recorded — recording writes decisions.yaml alone, so that adding a note cannot
+ * rewrite a prompt OpenCode re-reads on every request. An unbounded "nothing has
+ * been left out" would therefore be a claim this function cannot make good on.
+ * The truncated branch needs no such caveat: it already sends the model to
+ * `recall_decisions`, which reads the notes file itself.
  */
 function completeScope(total, everythingReadable) {
   // "Nothing has been left out" is only true when nothing was withheld for
   // credentials and nothing was unreadable. Claiming it otherwise is the same
   // failure as silent truncation, one level up.
-  const claim = everythingReadable ? " — nothing has been left out" : "";
+  const claim = everythingReadable
+    ? " — nothing had been left out when this summary was built. Notes recorded since are in " +
+      "force but are not listed here; `recall_decisions` reads the file itself"
+    : "";
   return total === 1
     ? `This is the only active note that reached this summary${claim}.`
     : `All ${total} active notes that reached this summary are listed here${claim}.`;

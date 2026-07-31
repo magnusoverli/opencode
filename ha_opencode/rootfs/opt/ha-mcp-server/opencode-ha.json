@@ -2,6 +2,15 @@
   "$schema": "https://opencode.ai/config.json",
   "snapshot": false,
   "permission": {
+    "edit": "ask",
+    "bash": {
+      "*": "allow",
+      "yq -i*": "ask",
+      "sed -i*": "ask",
+      "tee *": "ask",
+      "rm *": "ask",
+      "mv *": "ask"
+    },
     "external_directory": {
       "/homeassistant": "allow",
       "/homeassistant/**": "allow"
