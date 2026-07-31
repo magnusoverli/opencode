@@ -120,9 +120,19 @@ echo "  code is identical across channels"
 
 # A channel string baked into rootfs would survive this copy and mislabel the
 # other channel. Cheap to assert, and the whole design rests on it.
-if grep -rn --exclude-dir=node_modules --exclude-dir=test \
+#
+# Comment lines are excluded. What matters is a channel name the code acts on,
+# and prose that merely mentions one is not that -- the case that surfaced on
+# the first real promotion is index.js explaining why the add-on slug cannot be
+# a literal, naming both channels' slugs to make the point. Failing on an
+# explanation of the rule the guard enforces trains people to bypass the guard.
+channel_leaks=$(grep -rn --exclude-dir=node_modules --exclude-dir=test \
     -e 'ADDON_CHANNEL=[\"'\'']\?beta' -e 'ha_opencode_beta' \
-    "${STABLE}/rootfs" 2>/dev/null; then
+    "${STABLE}/rootfs" 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|#|<!--)' || true)
+
+if [ -n "${channel_leaks}" ]; then
+    echo "${channel_leaks}" >&2
     echo >&2
     echo "error: stable's rootfs names the beta channel (shown above)." >&2
     echo "       Channel identity must come from the ADDON_CHANNEL build arg." >&2
