@@ -57,10 +57,8 @@ RUN apt-get update \
         ca-certificates \
         chromium \
         curl \
-        g++ \
         git \
         jq \
-        make \
         nodejs \
         npm \
         procps \
@@ -104,8 +102,20 @@ RUN python3 -m venv /opt/zigporter-venv \
 # - Prettier: Code formatter for YAML files, configured for HA conventions
 # - ppq-private-mode: local OpenAI-compatible encryption proxy for PPQ TEE models
 # - tsx: pinned runtime for the PPQ package's TypeScript entrypoint
-RUN npm install -g opencode-ai@${OPENCODE_VERSION} @openchamber/web@${OPENCHAMBER_VERSION} prettier ppq-private-mode@${PPQ_PROXY_VERSION} tsx@${TSX_VERSION} \
-    && npm cache clean --force
+# Build tools are needed only while npm installs native dependencies. Peer
+# dependencies are omitted because ppq-private-mode is run as a standalone
+# proxy, not loaded as an OpenClaw plugin.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends g++ make \
+    && npm install -g --omit=dev --omit=peer --no-audit --no-fund \
+        opencode-ai@${OPENCODE_VERSION} \
+        @openchamber/web@${OPENCHAMBER_VERSION} \
+        prettier \
+        ppq-private-mode@${PPQ_PROXY_VERSION} \
+        tsx@${TSX_VERSION} \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get purge -y --auto-remove g++ make
 
 # Copy package.json files first for better layer caching
 # Changes to server code won't invalidate npm install cache
@@ -113,9 +123,22 @@ COPY rootfs/opt/ha-mcp-server/package*.json /opt/ha-mcp-server/
 COPY rootfs/opt/ha-lsp-server/package*.json /opt/ha-lsp-server/
 
 # Install MCP and LSP dependencies in parallel
-RUN (cd /opt/ha-mcp-server && npm install --omit=dev) & \
-    (cd /opt/ha-lsp-server && npm install --omit=dev) & \
-    wait && npm cache clean --force
+RUN (cd /opt/ha-mcp-server && npm install --omit=dev --no-audit --no-fund) & \
+    (cd /opt/ha-lsp-server && npm install --omit=dev --no-audit --no-fund) & \
+    wait \
+    && npm cache clean --force \
+    && find /opt/ha-mcp-server/node_modules /opt/ha-lsp-server/node_modules \
+        -type f \( -name '*.d.ts' -o -name '*.map' \) -delete \
+    && OPENCODE_ARCH=$([ "${BUILD_ARCH}" = "aarch64" ] && echo "arm64" || echo "x64") \
+    && if [ "${OPENCODE_ARCH}" = "arm64" ]; then \
+        find /usr/local/lib/node_modules/opencode-ai/node_modules -mindepth 1 -maxdepth 1 -type d \
+            ! -name "opencode-linux-arm64" -exec rm -rf {} +; \
+    else \
+        find /usr/local/lib/node_modules/opencode-ai/node_modules -mindepth 1 -maxdepth 1 -type d \
+            ! -name "opencode-linux-x64" ! -name "opencode-linux-x64-baseline" -exec rm -rf {} +; \
+    fi \
+    && rm -rf /usr/local/lib/node_modules/ppq-private-mode/node_modules/openclaw \
+    && find /usr/local/lib/node_modules -type f \( -name '*.d.ts' -o -name '*.map' -o -name '*.pdb' \) -delete
 
 # Copy root filesystem (server code, scripts, etc.)
 COPY rootfs /

@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- **Smaller installed image** — production images no longer include unused platform binaries, development artifacts, build toolchains, or the standalone PPQ proxy's optional OpenClaw peer tree; runtime features are unchanged.
+
 ## 2.4.0
 
 The 2.3.9 beta cycle, promoted. A native MCP bridge that finally meets the Home Assistant release it was written for, two Core log errors that made your logs lie about your setup, a class of services that could not be called at all, and a first pass at what every request costs you.
