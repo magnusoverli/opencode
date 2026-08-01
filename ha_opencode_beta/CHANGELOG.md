@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.4.1b1
 
 - **Smaller installed image** — production images no longer include unused platform binaries, development artifacts, build toolchains, or the standalone PPQ proxy's optional OpenClaw peer tree; runtime features are unchanged.
 
