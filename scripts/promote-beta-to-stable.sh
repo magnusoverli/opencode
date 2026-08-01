@@ -77,6 +77,53 @@ for pin in OPENCHAMBER_VERSION; do
     fi
 done
 
+# ---------------------------------------------------------------------------
+# Every option beta's code reads must exist in stable's manifest
+#
+# config.yaml is deliberately NOT copied -- it carries each channel's identity
+# -- so a feature added in beta arrives in stable as code reading a key stable
+# does not declare. bashio hands back the literal string "null" for that, no
+# error is raised anywhere, and the feature is silently dead in stable while
+# looking fine in beta.
+#
+# This runs against BETA's rootfs and BEFORE the copy, so --check reports it and
+# a real promotion stops while stable is still untouched. Checking afterwards
+# would leave a half-promoted tree that reports "nothing to promote" on the
+# retry, skipping the rest of the script including its closing checklist.
+#
+# Only simple quoted keys are checked; expression forms such as
+# 'serial_devices | length' are skipped rather than guessed at.
+# ---------------------------------------------------------------------------
+undeclared=""
+while IFS= read -r key; do
+    [ -n "${key}" ] || continue
+    # Twice: once in options:, once in schema:. A key present in only one of
+    # them is exactly the half-done edit this guard exists to catch, and the
+    # error text below tells the operator to do both.
+    if [ "$(grep -cE "^[[:space:]]+${key}:" "${STABLE}/config.yaml")" -lt 2 ]; then
+        undeclared="${undeclared}  ${key}"$'\n'
+    fi
+done < <(
+    grep -rhoE "bashio::config '[a-z0-9_]+'" "${BETA}/rootfs" \
+        --exclude-dir=node_modules 2>/dev/null \
+        | sed "s/bashio::config '//; s/'\$//" | sort -u
+)
+
+if [ -n "${undeclared}" ]; then
+    echo >&2
+    echo "error: beta's code reads options stable's config.yaml does not declare" >&2
+    echo "       in both 'options:' and 'schema:':" >&2
+    printf '%s' "${undeclared}" >&2
+    echo >&2
+    echo "       config.yaml and translations/ are per channel and are not copied." >&2
+    echo "       Add each option to ${STABLE}/config.yaml (both blocks, same" >&2
+    echo "       position) and ${STABLE}/translations/en.yaml, then run this again." >&2
+    echo "       Nothing has been copied; stable is untouched." >&2
+    exit 1
+fi
+echo "  every option beta's code reads is declared in stable's config.yaml"
+echo
+
 if [ "${drift}" = "0" ]; then
     echo "Stable already carries beta's code. Nothing to promote."
     exit 0

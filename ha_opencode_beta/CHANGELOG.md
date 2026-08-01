@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.4.1b0
+
+One new thing: a supported place to put your own code.
+
+- **Startup hooks ([issue #66](https://github.com/magnusoverli/opencode/issues/66), reported by [@ricardo-cabral-pt](https://github.com/ricardo-cabral-pt))** — everything inside this container except `/data` and your configuration directory is rebuilt from the image on every start. That is normally invisible, and then one day you want to add something to the add-on, and it isn't. The report that led to this one is worth reading: a working Wyoming bridge that turned Home Assistant's voice pipeline into an OpenCode conversation agent, rebuilt three times because each place it was put got erased — first `/data/.cache`, which this add-on deletes at every start; then a patched s6 service definition in `/etc`, which the image restores; then the pip packages it needed, for the same reason. The add-on was destroying the work and never saying so.
+
+  There is now a folder in this add-on's own directory inside your configuration folder, `startup.d`, and every `.sh` file in it runs once, in filename order, each time the add-on starts. It is created with a README and a worked example the first time you turn the option on. Because it lives in the configuration directory rather than inside the container, you can edit hooks with File Editor, Samba or Studio Code Server — the tools you already have — and they survive restarts, updates and reinstalls.
+
+  The contract is deliberately small, because the point of this is to get out of your way rather than to become a service manager. A hook runs as root with the add-on's environment, including the Supervisor token, so it can reach the Home Assistant API without a long-lived token. It must return; anything meant to outlive it is detached with `setsid`, which the shipped example demonstrates. A hook that fails is logged and never stops the next one. Nothing restarts what a hook starts, and the documentation says so rather than leaving you to find out.
+
+  Off by default, and it stays genuinely off: an option missing from an older configuration reads back as the literal string `null`, so this one is an explicit allow-list rather than the "anything but false" test used elsewhere in start-up — a feature that runs arbitrary code does not get to enable itself. When it is on, the add-on log names every file it is about to run with its size and digest before running any of them, so a hook you did not put there is visible rather than silent. The sweep runs detached and de-prioritised, so a hook that hangs cannot delay the terminal or trip the health check, and two starts inside a minute skip hooks entirely so a bad one cannot hold the add-on in a restart loop. Turning the option off disables every hook without deleting anything.
+
+  What it is actually for is broader than the report that prompted it, and the documentation now carries four worked examples rather than describing the mechanism in the abstract: a local git history of your configuration taken at every start, with a `.gitignore` that keeps `secrets.yaml` and Home Assistant's internal state out of it; reinstating a command-line tool that the rebuilt container would otherwise lose on every restart; a small HTTP service, standard library only, that Home Assistant can call through `rest_command`; and the voice bridge itself. A hook reaches Home Assistant's API through the Supervisor with no token setup at all, and — with the **OpenCode LAN server** option on — OpenCode's own API at `127.0.0.1:4096`, which does **not** require mapping the port in Network settings. That last point was wrong in the first draft of these documents, in the direction that would have blocked the original use case: the reserved ports are ports a hook must not *listen* on, and connecting to them is how you reach the add-on.
+
+  New in the terminal: `ha-hooks list` (what exists, when each last ran, how it went), `ha-hooks run [name]` (try a change without restarting the add-on), and `ha-hooks log [name]`. Hook output is kept in the add-on's private `/data/hooks/`, mode `0600` and excluded from backups, because a hook's environment contains credentials and a backup travels.
+
+  When the option is on, OpenCode itself is told how to write one — so "make me a startup hook that runs this at boot" works — and when it is off it is told nothing at all, so nobody pays for those instructions on every request or gets pointed at a feature they have not enabled.
+
 ## 2.3.9b3
 
 Beta stops being a branch and becomes a real add-on, which is mostly invisible except for the one place the two channels had been quietly writing over each other. Plus a correction to what 2.3.9b2 told you about reaching Home Assistant's keyed MCP endpoints.

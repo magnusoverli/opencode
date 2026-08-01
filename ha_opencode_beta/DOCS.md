@@ -23,6 +23,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 
 ## Current Beta Changes
 
+- **Startup hooks**: Your own `.sh` scripts, kept in your configuration directory, run once every time the add-on starts — the supported way to add a bridge or a small service without editing files inside the container, which never survives a restart. Off by default. See [Startup Hooks (Beta)](#startup-hooks-beta).
 - **Home context**: Sessions now start knowing your installation. A generated **Install briefing** describes your setup (version, areas, entity counts, configuration layout, integrations), **decision notes** carry lasting decisions between sessions once you approve them, and `AGENTS.local.md` holds your own instructions where add-on updates cannot overwrite them. Both options default on and switch off independently. See [Home Context (Beta)](#home-context-beta).
 - **OpenChamber interface mode**: New experimental `openchamber` interface mode starts the OpenChamber web UI behind Home Assistant Ingress, while the default `terminal` mode keeps the existing ttyd terminal unchanged.
 - **Native Home Assistant MCP bridge**: Optional bridge from OpenCode to Home Assistant Core's native LLM MCP endpoint (`/api/mcp/<API ID>`, default `assist`) for testing the new native LLM/MCP platform when the running Home Assistant version supports it.
@@ -269,6 +270,214 @@ Security notes:
 - The proxy package is pinned at image build time; the add-on does not run `npx latest` at startup.
 
 Bundled model IDs come from the pinned `ppq-private-mode` package version: `private/kimi-k2-5`, `private/deepseek-r1-0528`, `private/gpt-oss-120b`, `private/llama3-3-70b`, and `private/qwen3-vl-30b`.
+
+## Startup Hooks (Beta)
+
+**New in this beta: you can add your own code to the add-on, and it survives.**
+
+Everything inside the add-on container except `/data` and your Home Assistant configuration directory is rebuilt from the image every time the add-on starts. That is normally invisible — until you want to add something of your own, at which point it is not. This arrived as [issue #66](https://github.com/magnusoverli/opencode/issues/66), where [@ricardo-cabral-pt](https://github.com/ricardo-cabral-pt) built a working bridge that let Home Assistant's voice pipeline talk to OpenCode, and then had to rebuild it three times because every place he put it was erased: first a cache folder the add-on deletes at every start, then a service definition the container image restores, then the Python packages it depended on. The work was fine. The add-on kept throwing it away without saying so.
+
+Startup hooks are the supported place to put it. Turn on **Startup hooks (beta)** in the Configuration tab and restart, and the add-on creates a `startup.d` folder in its own directory inside your Home Assistant configuration folder, seeded with a README and a worked example. Every `.sh` file you put there runs once, in filename order, each time the add-on starts.
+
+Because the folder lives in your configuration directory rather than inside the container, you can edit hooks with File Editor, Samba or Studio Code Server — the tools you already have — and they survive restarts, updates and reinstalls.
+
+This is deliberately a small contract. The add-on runs your scripts and stays out of the way; it does not validate them, supervise them, or restart anything they start.
+
+### What people use this for
+
+Four things that are hard or impossible without it. Each one is a complete hook — drop it in `startup.d` and it works.
+
+**Keep a local git history of your configuration.** A snapshot at every add-on start, so "what did I change last week" has an answer.
+
+```sh
+#!/usr/bin/env bash
+set -euo pipefail
+cd /homeassistant
+
+# Never commit secrets or Home Assistant's own internal state. This is written
+# once; edit it afterwards and the hook leaves your version alone.
+if [ ! -f .gitignore ]; then
+    printf '%s\n' 'secrets.yaml' '.storage/' '.cloud/' 'ssl/' '*.key' '*.pem' \
+        '*.db*' '*.log' 'tts/' 'backups/' 'deps/' '__pycache__/' > .gitignore
+fi
+
+# Settings passed per command rather than written to a global config file, so
+# running this at every start cannot accumulate anything.
+git_cmd=(git -c safe.directory=/homeassistant
+             -c user.email=opencode@local -c user.name=OpenCode)
+
+[ -d .git ] || "${git_cmd[@]}" init -q
+"${git_cmd[@]}" add -A
+if "${git_cmd[@]}" commit -q -m "config snapshot $(date -Iseconds)" >/dev/null 2>&1; then
+    echo "Snapshot taken."
+else
+    echo "Nothing has changed since the last snapshot."
+fi
+echo "Browse it with: git -C /homeassistant log --oneline"
+```
+
+This stays on your machine. If you later add a remote, check `.gitignore` first — a pushed `secrets.yaml` is a bad day.
+
+**Add a tool you want in every terminal session.** The container is rebuilt at each start, so anything you install by hand disappears. A hook reinstates it every time — here, a YAML linter:
+
+```sh
+#!/usr/bin/env bash
+set -euo pipefail
+VENV=/data/venvs/tools
+[ -x "${VENV}/bin/yamllint" ] || {
+    python3 -m venv "${VENV}"
+    "${VENV}/bin/pip" install --quiet --upgrade yamllint
+}
+# /usr/local/bin is rebuilt at every start, which is why this is re-linked here.
+ln -sf "${VENV}/bin/yamllint" /usr/local/bin/yamllint
+echo "yamllint ready: yamllint /homeassistant/automations.yaml"
+```
+
+**Run a small service Home Assistant can call.** Anything Home Assistant can reach over HTTP becomes available to your automations through `rest_command`. This one needs no dependencies at all — it is Python's standard library:
+
+```sh
+#!/usr/bin/env bash
+set -euo pipefail
+APP=/data/refresher
+PORT=9123
+
+mkdir -p "${APP}"
+if [ ! -f "${APP}/server.py" ]; then
+    cat > "${APP}/server.py" <<'PY'
+import subprocess
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        try:
+            subprocess.run(["/usr/local/bin/ha-context", "refresh"],
+                           check=False, timeout=60)
+        except Exception as err:
+            # Answer anyway. An unhandled error here becomes a 500 and a
+            # traceback, and Home Assistant logs a failed rest_command.
+            print(f"refresh failed: {err}", flush=True)
+        self.send_response(204)
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass  # keep the log for real problems only
+
+HTTPServer(("0.0.0.0", int(sys.argv[1])), Handler).serve_forever()
+PY
+fi
+
+# Without this, every add-on start would leave another copy running and the
+# second one would fail with "address already in use".
+if pgrep -f "${APP}/server.py" >/dev/null 2>&1; then
+    echo "Already running."
+    exit 0
+fi
+
+setsid python3 -u "${APP}/server.py" "${PORT}" >/data/refresher.log 2>&1 </dev/null &
+echo "Listening on $(hostname):${PORT} — its log is /data/refresher.log"
+```
+
+Then in `configuration.yaml`, using the hostname the hook printed:
+
+```yaml
+rest_command:
+  opencode_refresh_context:
+    url: "http://<the hostname>:9123/"
+    method: post
+```
+
+**Bridge Home Assistant's voice pipeline to OpenCode.** The use case this feature came from, and the most involved: a [Wyoming](https://github.com/rhasspy/wyoming) server that registers as a conversation agent and forwards what you say to OpenCode. It follows the same shape as the service above — a venv under `/data`, a `setsid` daemon, a `pgrep` guard — and additionally needs the **OpenCode LAN server** option turned on so the hook can reach OpenCode's API at `127.0.0.1:4096`. See [Talking to the add-on itself](#talking-to-the-add-on-itself).
+
+### The rules
+
+- A hook is a file ending in `.sh`. Rename it to anything else (`20-thing.sh.off`) to stop it running — there is no separate enable flag.
+- Hooks run in filename order, so use a number prefix: `10-`, `20-`, `30-`.
+- Each runs as `bash <file>`, as root. The executable bit is not needed, because files written over Samba usually lose it.
+- **A hook must return.** It is killed after 15 minutes. Put `# opencode-hook-timeout: <seconds>` in the first 10 lines to change that, or `0` for no limit.
+- A hook that fails is logged and does not stop the next one.
+- Windows (CRLF) line endings are detected and worked around, with a warning.
+
+### Anything that keeps running
+
+A server started in the foreground is killed when the hook is. Detach it so it leaves the hook's process group, give it its own log, and check first so a re-run does not start a second copy:
+
+```sh
+if pgrep -f "/data/mybridge/server.py" >/dev/null 2>&1; then exit 0; fi
+setsid /data/venvs/mybridge/bin/python3 -u /data/mybridge/server.py \
+    >/data/mybridge.log 2>&1 </dev/null &
+```
+
+Nothing restarts it if it dies. The add-on is not a service manager.
+
+### Dependencies that survive a restart
+
+Only `/data` persists, so install into it.
+
+**Python** — use a virtual environment and call it by full path:
+
+```sh
+[ -d /data/venvs/mybridge ] || python3 -m venv /data/venvs/mybridge
+/data/venvs/mybridge/bin/pip install --quiet wyoming aiohttp
+```
+
+Do not use `pip install --user`: that path contains the Python version number, so it disappears the next time the add-on image moves to a newer Python. There is no compiler-headers package in the image, so prefer packages that publish wheels.
+
+**Node** — `npm install --prefix /data/mybridge <pkg>`. Never `npm install -g`: that prefix is shared with the add-on's own OpenCode updates and the two can corrupt each other.
+
+Put your own files under `/data/<name>/`. Never `/data/.cache` — it is deleted on every start.
+
+### Ports and reachability
+
+Pick a port for your own service that the add-on is not already using. These are taken inside the container: `8099` (the interface behind Ingress), `3010` (OpenChamber), `4096` (OpenCode LAN server), `4097` (OpenChamber LAN), `8787` (PPQ proxy). *Listening* on one of those from a hook breaks the add-on in a way that is hard to trace. **Connecting** to them is fine and expected — see below.
+
+Your service is **not** reachable from your LAN. No port is mapped for it, and that is deliberate: a mapped port would put a service the add-on did not write, with no authentication in front of it, on your network.
+
+It **is** reachable from Home Assistant Core and from other add-ons, at this container's hostname. Run `hostname` in the add-on terminal to see it — it differs between the stable and beta add-ons. That is what makes `rest_command`, a Wyoming service, or a custom integration endpoint work.
+
+### Talking to the add-on itself
+
+A hook can drive OpenCode through its own HTTP API, which is how the voice bridge in issue #66 works.
+
+Turn on **OpenCode LAN server** in the Configuration tab. Despite the name, you do **not** have to map `4096/tcp` in Network settings — mapping is only for reaching it from another computer. Leave it unmapped and the server is reachable at `http://127.0.0.1:4096` from inside the container, which is all a hook needs, with nothing exposed to your network.
+
+For Home Assistant itself, no extra option is needed: `SUPERVISOR_TOKEN` is already in the hook's environment and `http://supervisor/core` proxies to the Core API, so no long-lived access token is required.
+
+```sh
+# Home Assistant Core, through the Supervisor proxy
+curl -fsSL -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+    http://supervisor/core/api/config
+
+# OpenCode's own API (needs the OpenCode LAN server option on)
+curl -fsSL http://127.0.0.1:4096/app
+```
+
+### Seeing what happened
+
+| Command | Description |
+|---------|-------------|
+| `ha-hooks list` | What hooks exist, their digests, when each last ran and how it went |
+| `ha-hooks run` | Run every hook now, without restarting the add-on |
+| `ha-hooks run 20-thing.sh` | Run just one |
+| `ha-hooks log 20-thing.sh` | What that hook printed |
+| `ha-hooks log` | The whole last start-up sweep |
+
+A hook's log is wiped at the start of each run, so anything you leave running in the background should write to its own file instead.
+
+The add-on log names every hook it is about to run, with its size and digest, before running anything.
+
+### If it goes wrong
+
+Turn **Startup hooks (beta)** off and restart. Nothing in `startup.d` runs while it is off, so that always gets you back to a working add-on.
+
+Hooks are also skipped automatically when the add-on restarts within a minute of the last hook run, which breaks the common case of a hook that crashes the add-on on every start. A hook that takes longer than a minute to reach the crash can still loop, so turning the option off is the reliable way out rather than the last resort.
+
+### Security notes
+
+- Hooks run as root with the add-on's environment, which includes the Supervisor token and any keys you configured. Their output can therefore contain credentials — do not use `set -x`, and read a hook log before pasting it into a bug report.
+- Hook logs live in the add-on's private `/data/hooks/`, mode `0600`, and are excluded from backups.
+- The `startup.d` folder is inside your Home Assistant configuration directory, which means anything else that can write there — File Editor, Samba, Studio Code Server — can add a hook. That is the trade for being able to edit hooks with the tools you already use. The option is off by default for exactly this reason, and the add-on log lists the digest of every file it runs.
+- The beta and stable add-ons use separate folders, and neither runs the other's hooks.
 
 ## Reporting Issues
 

@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+# =============================================================================
+# ha-hooks - inspect and re-run your startup hooks
+#
+# Startup hooks are your own scripts, run once every time the add-on starts.
+# This command exists so you can see what ran, read what it printed, and try a
+# change without restarting the add-on.
+#
+# The add-on runs your hooks. It does not maintain them, restart them, or keep
+# anything they start alive.
+# =============================================================================
+
+set -uo pipefail
+
+# shellcheck source=/usr/local/lib/opencode/channel.sh
+source /usr/local/lib/opencode/channel.sh
+
+HOOKS_DIR="${ADDON_STATE_DIR}/startup.d"
+STATE_DIR="/data/hooks"
+RUNNER="/usr/local/bin/opencode-run-hooks"
+BOOT_LOG="/tmp/user-hooks.log"
+ENABLED_MARKER="/data/.user_hooks_enabled"
+
+GREEN='\033[38;2;17;209;22m'
+YELLOW='\033[38;2;246;116;0m'
+RED='\033[38;2;237;51;59m'
+CYAN='\033[38;2;26;188;156m'
+GRAY='\033[38;2;127;140;141m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Ports the add-on's own services listen on inside the container. A hook that
+# binds one of these does not fail - it wins or loses a race, and the symptom
+# lands somewhere else entirely (a blank terminal, an Ingress page serving the
+# wrong app). Naming them is much cheaper than debugging that.
+RESERVED_PORTS="8099 3010 4096 4097 8787"
+
+usage() {
+    cat <<'EOF'
+Usage: ha-hooks <command> [name]
+
+Inspect and re-run your startup hooks.
+
+Commands:
+  list          What hooks exist, when each last ran, and how it went
+  run [name]    Run every hook now, or just one, without restarting the add-on
+  log [name]    Print a hook's output, or the last start-up sweep with no name
+  help          This text
+
+Hooks live in the startup.d folder inside your Home Assistant configuration
+directory, and are plain .sh files run in filename order (10-, 20-, ...).
+Rename one to anything not ending in .sh to stop it running.
+
+Examples:
+  ha-hooks list
+  ha-hooks run
+  ha-hooks run 20-bridge.sh
+  ha-hooks log 20-bridge.sh
+EOF
+}
+
+hooks_enabled() {
+    [ "$(cat "${ENABLED_MARKER}" 2>/dev/null || echo "false")" = "true" ]
+}
+
+# Must stay byte-for-byte equivalent to opencode-run-hooks' safe_name, or this
+# command reads the wrong log file for any name that needs mapping.
+safe_name() {
+    local raw="$1" clean
+    clean=$(printf '%s' "${raw}" | tr -c 'A-Za-z0-9._-' '_')
+    if [ "${clean}" != "${raw}" ]; then
+        clean="${clean}.$(printf '%s' "${raw}" | sha256sum | cut -c1-8)"
+    fi
+    printf '%s' "${clean}"
+}
+
+require_enabled() {
+    if hooks_enabled; then
+        return 0
+    fi
+    printf '%bStartup hooks are turned off.%b\n\n' "${YELLOW}" "${NC}"
+    printf 'Turn on %bStartup hooks%b in the add-on Configuration tab, then restart the add-on.\n' "${BOLD}" "${NC}"
+    printf '%bNothing in %s runs until you do.%b\n' "${GRAY}" "${HOOKS_DIR}" "${NC}"
+    return 1
+}
+
+# Listening TCP ports, read straight out of /proc so this works without ss or
+# netstat being installed.
+listening_ports() {
+    local f hexport
+    {
+        for f in /proc/net/tcp /proc/net/tcp6; do
+            [ -r "${f}" ] || continue
+            # State 0A is LISTEN; the local address is host:port, both in hex.
+            # The conversion happens in bash because mawk (the default awk here)
+            # has no strtonum.
+            awk 'NR>1 && $4 == "0A" { split($2, a, ":"); print a[2] }' "${f}" 2>/dev/null
+        done
+    } | while read -r hexport; do
+        [ -n "${hexport}" ] && printf '%d\n' "$((16#${hexport}))"
+    done | sort -un
+}
+
+human_ago() {
+    local then now delta
+    then="$1"
+    now=$(date +%s)
+    delta=$((now - then))
+    if [ "${delta}" -lt 60 ]; then
+        printf '%ds ago' "${delta}"
+    elif [ "${delta}" -lt 3600 ]; then
+        printf '%dm ago' "$((delta / 60))"
+    elif [ "${delta}" -lt 86400 ]; then
+        printf '%dh ago' "$((delta / 3600))"
+    else
+        printf '%dd ago' "$((delta / 86400))"
+    fi
+}
+
+cmd_list() {
+    printf '\n%bStartup hooks%b\n\n' "${BOLD}" "${NC}"
+
+    if hooks_enabled; then
+        printf '  Status     %bon%b\n' "${GREEN}" "${NC}"
+    else
+        printf '  Status     %boff%b  %b(turn on "Startup hooks" in the Configuration tab)%b\n' \
+            "${YELLOW}" "${NC}" "${GRAY}" "${NC}"
+    fi
+    printf '  Folder     %b%s%b\n' "${CYAN}" "${HOOKS_DIR}" "${NC}"
+    printf '  Logs       %b%s/<name>.log%b  %b(ha-hooks log <name>)%b\n\n' \
+        "${CYAN}" "${STATE_DIR}" "${NC}" "${GRAY}" "${NC}"
+
+    # Mirrors the runner's refusal, which is otherwise invisible: without this
+    # the one command you run to find out why nothing happened would list the
+    # hooks quite happily and never mention that none of them can run.
+    if [ -L "${HOOKS_DIR}" ]; then
+        printf '  %bThat folder is a symlink, so nothing in it will run.%b\n' "${RED}" "${NC}"
+        printf '  %bReplace it with a real directory.%b\n\n' "${GRAY}" "${NC}"
+        return 0
+    fi
+
+    if [ ! -d "${HOOKS_DIR}" ]; then
+        printf '  %bThe folder does not exist yet. It is created when you turn hooks on and restart.%b\n\n' \
+            "${GRAY}" "${NC}"
+        return 0
+    fi
+
+    local found=0 f name safe size digest status epoch rc duration
+    while IFS= read -r f; do
+        [ -n "${f}" ] || continue
+        found=$((found + 1))
+        name=$(basename "${f}")
+        safe=$(safe_name "${name}")
+        size=$(stat -c %s "${f}" 2>/dev/null || echo 0)
+        digest=$(sha256sum "${f}" 2>/dev/null | cut -c1-12)
+
+        printf '  %b%s%b  %b%s bytes · sha256 %s%b\n' \
+            "${BOLD}" "${name}" "${NC}" "${GRAY}" "${size}" "${digest:-unknown}" "${NC}"
+
+        if [ -L "${f}" ]; then
+            printf '      %bignored%b   symlinks are not run\n' "${YELLOW}" "${NC}"
+            continue
+        fi
+
+        status=$(cat "${STATE_DIR}/${safe}.status" 2>/dev/null || echo "")
+        if [ -z "${status}" ]; then
+            printf '      %bnever run%b\n' "${GRAY}" "${NC}"
+        else
+            read -r epoch rc duration <<< "${status}"
+            case "${rc}" in
+                0)   printf '      %bok%b        %s, took %ss\n' "${GREEN}" "${NC}" "$(human_ago "${epoch}")" "${duration:-0}" ;;
+                124|137) printf '      %btimed out%b %s\n' "${RED}" "${NC}" "$(human_ago "${epoch}")" ;;
+                # The runner writes the reason in the third field for the two
+                # cases it declines to run, so they read differently here
+                # instead of both showing up as the same word.
+                -)
+                    case "${duration:-}" in
+                        refused) printf '      %brefused%b   %s — not a shell hook; wrap it in a .sh\n' "${YELLOW}" "${NC}" "$(human_ago "${epoch}")" ;;
+                        *)       printf '      %bskipped%b   %s — the file is empty\n' "${YELLOW}" "${NC}" "$(human_ago "${epoch}")" ;;
+                    esac
+                    ;;
+                *)   printf '      %bexit %s%b    %s, took %ss\n' "${RED}" "${rc}" "${NC}" "$(human_ago "${epoch}")" "${duration:-0}" ;;
+            esac
+        fi
+    done < <(
+        LC_ALL=C
+        shopt -s nullglob
+        for f in "${HOOKS_DIR}"/*.sh; do
+            # Symlinks are listed, not hidden, so the reason they never run is
+            # visible where the user goes looking for it.
+            [ -f "${f}" ] && printf '%s\n' "${f}"
+        done | LC_ALL=C sort
+    )
+
+    if [ "${found}" -eq 0 ]; then
+        printf '  %bNo hooks yet. Add a .sh file to the folder above.%b\n' "${GRAY}" "${NC}"
+        if [ -f "${HOOKS_DIR}/10-example.sh.example" ]; then
+            printf '  %bThere is a worked example beside it: 10-example.sh.example%b\n' "${GRAY}" "${NC}"
+        fi
+    fi
+
+    # Only worth printing when something is actually holding one of them.
+    local busy port open
+    busy=""
+    open=$(listening_ports)
+    for port in ${RESERVED_PORTS}; do
+        if printf '%s\n' "${open}" | grep -qx "${port}"; then
+            busy="${busy} ${port}"
+        fi
+    done
+    if [ -n "${busy}" ]; then
+        printf '\n  %bAlready listening:%b%s  %b(do not listen on these from a hook — connecting to them is fine)%b\n' \
+            "${GRAY}" "${NC}" "${busy}" "${GRAY}" "${NC}"
+    fi
+    printf '\n'
+}
+
+cmd_run() {
+    require_enabled || return 1
+    local target="${1:-}"
+    # The runner reads its first positional as an option, so passing one
+    # through from here would let 'ha-hooks run --boot' stamp the restart-loop
+    # breaker and silently skip hooks on the next genuine restart.
+    case "${target}" in
+        -*)
+            printf '%bha-hooks: "%s" is not a hook name.%b Use: ha-hooks run [name]\n' \
+                "${YELLOW}" "${target}" "${NC}" >&2
+            return 2
+            ;;
+    esac
+    if [ -n "${target}" ]; then
+        printf '%bRunning %s...%b\n\n' "${GRAY}" "${target}" "${NC}"
+        "${RUNNER}" "${target}"
+    else
+        printf '%bRunning every startup hook...%b\n\n' "${GRAY}" "${NC}"
+        "${RUNNER}"
+    fi
+}
+
+cmd_log() {
+    local target="${1:-}"
+    if [ -z "${target}" ]; then
+        if [ -f "${BOOT_LOG}" ]; then
+            printf '%b--- last start-up sweep (%s) ---%b\n' "${GRAY}" "${BOOT_LOG}" "${NC}"
+            cat "${BOOT_LOG}"
+        else
+            printf '%bNo start-up sweep has run since the add-on started.%b\n' "${GRAY}" "${NC}"
+        fi
+        return 0
+    fi
+
+    local log_file
+    log_file="${STATE_DIR}/$(safe_name "$(basename "${target}")").log"
+    if [ ! -f "${log_file}" ]; then
+        printf '%bNo log for %s.%b Run it with: ha-hooks run %s\n' "${YELLOW}" "${target}" "${NC}" "${target}"
+        return 1
+    fi
+    if [ ! -s "${log_file}" ]; then
+        printf '%b%s produced no output.%b\n' "${GRAY}" "${target}" "${NC}"
+        return 0
+    fi
+    printf '%b--- %s ---%b\n' "${GRAY}" "${log_file}" "${NC}"
+    cat "${log_file}"
+}
+
+case "${1:-}" in
+    list)          cmd_list ;;
+    run)           cmd_run "${2:-}" ;;
+    log)           cmd_log "${2:-}" ;;
+    help|-h|--help) usage ;;
+    "")            usage ;;
+    *)
+        printf 'ha-hooks: unknown command "%s"\n\n' "$1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac

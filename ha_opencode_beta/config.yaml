@@ -156,6 +156,11 @@ options:
   env_vars: []
   # Custom OpenCode configuration (JSON)
   opencode_config: ""
+  # Run your own .sh scripts from <config>/opencode_beta/startup.d at every
+  # start. This is the supported way to extend the add-on, and it executes code
+  # the add-on did not write, as root. Off by default; last in the list because
+  # it is the option with the widest blast radius.
+  user_hooks_enabled: false
 
 schema:
   # --- 1. Presentation ---------------------------------------------------
@@ -205,6 +210,7 @@ schema:
     - name: str
       value: str
   opencode_config: str?
+  user_hooks_enabled: bool
 
 # Exclude caches from backups
 backup_exclude:
@@ -217,3 +223,6 @@ backup_exclude:
   # Generated home context is rebuilt at every start; restoring a stale copy
   # would describe a different installation.
   - "context/*"
+  # Startup-hook output. Hooks run with the Supervisor token and any keys the
+  # user configured, so whatever they print must not travel in a backup.
+  - "hooks/*"
