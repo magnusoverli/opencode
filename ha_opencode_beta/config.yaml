@@ -1,7 +1,7 @@
 ---
 name: "OpenCode Beta"
 description: "Beta channel for OpenCode - AI coding agent for Home Assistant. May contain experimental features."
-version: "2.4.1b1"
+version: "2.4.1b2"
 slug: "ha_opencode_beta"
 image: "ghcr.io/magnusoverli/ha_opencode_beta"
 url: "https://github.com/magnusoverli/opencode"
@@ -82,6 +82,9 @@ options:
 
   # --- 2. Home Assistant integration -------------------------------------
   mcp_enabled: true
+  # Scope the built-in MCP tools to reduce tool-selection complexity and prompt
+  # size for local models. full preserves every existing tool.
+  mcp_tool_profile: "full"
   lsp_enabled: true
   # Screenshot tool: visual verification of dashboards and UI changes.
   # Requires the access token below to authenticate with the HA frontend.
@@ -173,6 +176,7 @@ schema:
 
   # --- 2. Home Assistant integration -------------------------------------
   mcp_enabled: bool
+  mcp_tool_profile: list(compact|configuration|full)
   lsp_enabled: bool
   screenshot_enabled: bool
   access_token: password
@@ -220,6 +224,7 @@ backup_exclude:
   - ".local/share/opencode/cache/*"
   - ".env_vars"
   - ".env_vars_discovered"
+  - "evaluations/*"
   # Generated home context is rebuilt at every start; restoring a stale copy
   # would describe a different installation.
   - "context/*"

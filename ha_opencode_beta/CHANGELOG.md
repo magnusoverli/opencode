@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.1b2
+
+- **Sharper Home Assistant agent tools** — choose a compact, configuration, or full MCP tool profile to reduce irrelevant tool definitions; capability status now says whether the native MCP bridge is actually usable; and `ha-agent-eval` can score a real OpenAI-compatible model against safe synthetic tool-call scenarios without touching your Home Assistant instance.
+
 ## 2.4.1b1
 
 - **Smaller installed image** — production images no longer include unused platform binaries, development artifacts, build toolchains, or the standalone PPQ proxy's optional OpenClaw peer tree; runtime features are unchanged.

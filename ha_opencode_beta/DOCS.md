@@ -86,6 +86,32 @@ By default (**Restrict access to sensitive files** = `true`), the add-on adds an
 
 OpenCode snapshots are disabled by default in this add-on to reduce memory and disk pressure on Home Assistant systems. File watching also ignores noisy internal paths such as `.storage/`, `.cloud/`, caches, logs, and the Home Assistant database. You can override these defaults with **Custom OpenCode configuration** if you need OpenCode's built-in snapshot/undo behavior.
 
+## MCP Tool Profiles
+
+The built-in `homeassistant` MCP server can expose a narrower capability set through **MCP tool profile**. This changes the tool definitions supplied to the model and rejects hidden MCP calls before they reach Home Assistant; it does not change OpenCode filesystem access, terminal commands, or permissions. Restart the add-on after changing it.
+
+| Profile | Includes | Excludes |
+|---------|----------|----------|
+| `compact` | Read-only entity state, history, diagnostics, templates, calendars, and home context | Config writes, device control, updates, screenshots, `hab`, and Zigbee administration |
+| `configuration` | Everything in `compact`, plus current docs, syntax checks, validation, safe config writes, and decision notes | Device control, updates, screenshots, `hab`, and Zigbee administration |
+| `full` | Every currently available built-in MCP tool | Nothing beyond separately disabled features |
+
+`full` is the default and preserves current behavior. `get_agent_capabilities` reports the active profile, exposed tool count, and omitted count.
+
+## Model Tool Evaluation
+
+`ha-agent-eval` is an opt-in developer command that calls a real OpenAI-compatible chat-completions endpoint against fixed synthetic Home Assistant scenarios. It supplies mocked tool results and never contacts Home Assistant or executes a real tool.
+
+Configure these environment variables through the add-on's **Environment variables** option:
+
+```text
+HA_AGENT_EVAL_BASE_URL=https://provider.example/v1
+HA_AGENT_EVAL_MODEL=provider-model-id
+HA_AGENT_EVAL_API_KEY=optional-for-local-or-tokenless-providers
+```
+
+Run `ha-agent-eval` to evaluate scenarios supported by the active MCP profile, or use `ha-agent-eval --profile compact` or `ha-agent-eval --scenario safe-configuration-validation`. Reports are written under `/data/evaluations/`, excluded from backups, and the command exits non-zero when any scenario fails. It evaluates model function-calling behavior, not OpenCode's full prompt or a live Home Assistant system.
+
 On low-memory hosts — for example a 4 GB Home Assistant Green running several other add-ons — keep **OpenCode update policy** on `bundled` (the default) so the add-on does no memory-heavy start-up install. 8 GB or more is recommended for comfortable use alongside other memory-heavy add-ons such as Matter Server, Music Assistant, and Whisper/Piper.
 
 ## OpenCode Updates
@@ -117,7 +143,7 @@ The bridge is **off by default**, and Home Assistant does not serve its MCP endp
 1. **Add the Model Context Protocol Server integration in Home Assistant.** Go to **Settings → Devices & Services → Add Integration** and add **Model Context Protocol Server**. Until this exists, Home Assistant registers no `/api/mcp` routes at all and the bridge has nothing to talk to on any version.
 2. **Turn on the bridge in the add-on and restart it.** Set **Enable native Home Assistant MCP bridge** to on in the add-on's Configuration tab, then restart the add-on. The setting is read once at start-up, so it does not take effect until the restart.
 
-To confirm it worked, ask OpenCode to run `get_agent_capabilities`: it reports the detected Home Assistant version, which endpoint the bridge resolved to, and any upstream limitations that still apply. In OpenCode you should also see a second MCP server named `homeassistant_native` alongside the built-in `homeassistant` one.
+To confirm it worked, ask OpenCode to run `get_agent_capabilities`: it reports the detected Home Assistant version, bridge status, which endpoint resolved, and any upstream limitations that still apply. Use `homeassistant_native` only when the bridge status is `enabled_and_reachable`; a reachable endpoint with a disabled bridge is not exposed to OpenCode. In OpenCode you should then see a second MCP server named `homeassistant_native` alongside the built-in `homeassistant` one.
 
 Nothing else is required. You do **not** need to change the API ID, set any environment variable, or supply an access token — the bridge authenticates with the Supervisor token. If you skip step 1, the bridge starts and every request fails with a 404, which `get_agent_capabilities` will report.
 

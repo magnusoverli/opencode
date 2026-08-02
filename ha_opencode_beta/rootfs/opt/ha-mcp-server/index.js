@@ -86,6 +86,13 @@ import {
   truncateText,
 } from "./lib/helpers.js";
 import { buildAgentCapabilities } from "./lib/agent-capabilities.js";
+import {
+  filterToolsForProfile,
+  getToolProfile,
+  isToolAllowedInProfile,
+  normalizeToolProfile,
+  profileDisabledToolMessage,
+} from "./lib/tool-profiles.js";
 import { buildHaLlmDevelopmentGuide } from "./lib/ha-llm-development.js";
 import {
   NATIVE_MCP_ASSIST_API_ID,
@@ -127,6 +134,8 @@ const HA_NATIVE_MCP_API_ID = normalizeNativeMcpApiId(
   process.env.HA_NATIVE_MCP_API_ID ?? NATIVE_MCP_ASSIST_API_ID,
   { allowBaseEndpoint: true }
 );
+const MCP_TOOL_PROFILE = normalizeToolProfile(process.env.OPENCODE_MCP_TOOL_PROFILE);
+const NATIVE_HA_MCP_BRIDGE_ENABLED = process.env.OPENCODE_NATIVE_HA_MCP_ENABLED === "true";
 
 // Clear error message when ESPHome tools are used without an access token
 const ESPHOME_TOKEN_ERROR = "ESPHome tools require a Long-Lived Access Token.\n\n" +
@@ -2306,7 +2315,7 @@ const STATE_RESULT_CAP = 500;
 // largest thing this server can put in a conversation, and it is paid for again
 // on every request that follows it — at 500 a mid-sized home returned roughly
 // as much as the entire system prompt. Filtering by domain is the behaviour
-// AGENTS.md and INSTRUCTIONS.md steer toward, so it keeps the wider ceiling:
+// AGENTS.md and the MCP profile guidance steer toward, so it keeps the wider ceiling:
 // narrowing a query should not cost the model results.
 const UNFILTERED_STATE_RESULT_CAP = 150;
 const HOME_CONTEXT_RESULT_CAP = 80;
@@ -3522,7 +3531,10 @@ async function getAgentCapabilities() {
   return buildAgentCapabilities({
     haConfig: config,
     nativeMcp,
-    tools: TOOLS,
+    tools: getAvailableTools(),
+    allToolCount: getFeatureAvailableTools().length,
+    toolProfile: getToolProfile(MCP_TOOL_PROFILE),
+    nativeMcpBridgeEnabled: NATIVE_HA_MCP_BRIDGE_ENABLED,
     resources: RESOURCES,
     resourceTemplates: RESOURCE_TEMPLATES,
     prompts: PROMPTS,
@@ -3651,13 +3663,26 @@ const DECISION_NOTE_TOOLS = new Set(["remember_decision", "recall_decisions", "s
 const SCREENSHOT_TOOLS = new Set(["screenshot_url"]);
 const SCREENSHOT_AVAILABLE = SCREENSHOT_ENABLED && Boolean(HA_ACCESS_TOKEN);
 
+function getAvailableTools() {
+  return filterToolsForProfile(getFeatureAvailableTools(), MCP_TOOL_PROFILE);
+}
+
+function getFeatureAvailableTools() {
+  return TOOLS
+    .filter((tool) => DECISION_NOTES_ENABLED || !DECISION_NOTE_TOOLS.has(tool.name))
+    .filter((tool) => SCREENSHOT_AVAILABLE || !SCREENSHOT_TOOLS.has(tool.name));
+}
+
+function isToolAvailable(name) {
+  return isToolAllowedInProfile(name, MCP_TOOL_PROFILE)
+    && getAvailableTools().some((tool) => tool.name === name);
+}
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   sendLog("debug", "mcp-server", { action: "list_tools" });
   // Strip newer MCP spec fields that some clients may not support
   // Keep only: name, description, inputSchema (standard fields)
-  const compatibleTools = TOOLS
-    .filter(tool => DECISION_NOTES_ENABLED || !DECISION_NOTE_TOOLS.has(tool.name))
-    .filter(tool => SCREENSHOT_AVAILABLE || !SCREENSHOT_TOOLS.has(tool.name))
+  const compatibleTools = getAvailableTools()
     .map(tool => ({
       name: tool.name,
       description: tool.description,
@@ -3680,6 +3705,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ...(result.isError && { isError: result.isError }),
     };
   };
+
+  if (!isToolAvailable(name)) {
+    return makeCompatibleResponse({
+      isError: true,
+      content: [createTextContent(
+        isToolAllowedInProfile(name, MCP_TOOL_PROFILE)
+          ? `The '${name}' tool is not available in this add-on configuration.`
+          : profileDisabledToolMessage(name, MCP_TOOL_PROFILE),
+      )],
+    });
+  }
 
   try {
     let result;

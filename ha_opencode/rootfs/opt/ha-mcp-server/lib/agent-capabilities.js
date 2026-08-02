@@ -143,6 +143,9 @@ export function buildAgentCapabilities({
   haConfig = {},
   nativeMcp = {},
   tools = [],
+  allToolCount = tools.length,
+  toolProfile = { name: "full", title: "Full", description: "Every Home Assistant MCP capability." },
+  nativeMcpBridgeEnabled = false,
   resources = [],
   resourceTemplates = [],
   prompts = [],
@@ -162,7 +165,9 @@ export function buildAgentCapabilities({
   const loadedConversationComponents = KNOWN_CONVERSATION_COMPONENTS.filter((component) => components.includes(component));
   const loadedAiTaskComponents = KNOWN_AI_TASK_COMPONENTS.filter((component) => components.includes(component));
   const recommendedMode = nativeConfiguredMcpAvailable
-    ? "hybrid_native_llm_api_plus_opencode_mcp"
+    ? nativeMcpBridgeEnabled
+      ? "hybrid_native_llm_api_plus_opencode_mcp"
+      : "opencode_mcp_only_native_bridge_available"
     : "opencode_mcp_only";
   const haVersion = haConfig.version || "unknown";
   const knownIssues = buildNativeMcpKnownIssues(haVersion);
@@ -195,10 +200,14 @@ export function buildAgentCapabilities({
       },
       external_native_llm_api: {
         available_to_addons: nativeConfiguredMcpAvailable,
+        available_to_opencode: nativeConfiguredMcpAvailable && nativeMcpBridgeEnabled,
+        bridge_enabled: nativeMcpBridgeEnabled,
         configured_api_id: configuredApiId || null,
         configured_endpoint_mode: configuredEndpointMode,
-        note: nativeConfiguredMcpAvailable
-          ? "Home Assistant's native LLM API is reachable through the configured native MCP endpoint. Use it for Assist/entity-control behavior where appropriate and keep OpenCode MCP for add-on/admin/dev workflows."
+        note: nativeConfiguredMcpAvailable && nativeMcpBridgeEnabled
+          ? "Home Assistant's native LLM API is reachable through the configured native MCP endpoint and is exposed to OpenCode. Use it for Assist/entity-control behavior where appropriate and keep OpenCode MCP for add-on/admin/dev workflows."
+          : nativeConfiguredMcpAvailable
+            ? "Home Assistant's native LLM API is reachable, but the add-on native MCP bridge is disabled. Enable the bridge before asking OpenCode to use its curated native tools."
           : "Home Assistant's native llm platform may be internal-only or unavailable on this instance. Keep using OpenCode MCP as the working external agent surface.",
       },
       native_mcp: {
@@ -227,6 +236,12 @@ export function buildAgentCapabilities({
             ? "llm_detected_native_mcp_unavailable"
             : "not_available",
         recommended_mode: recommendedMode,
+        bridge: {
+          enabled: nativeMcpBridgeEnabled,
+          status: nativeMcpBridgeEnabled
+            ? nativeConfiguredMcpAvailable ? "enabled_and_reachable" : "enabled_endpoint_unavailable"
+            : nativeConfiguredMcpAvailable ? "disabled_endpoint_available" : "disabled",
+        },
         configured_api_id: configuredApiId || null,
         configured_endpoint_mode: configuredEndpointMode,
         base_endpoint_status: nativeBaseMcpStatus,
@@ -236,8 +251,18 @@ export function buildAgentCapabilities({
         configured_endpoint: nativeConfiguredMcp,
         assist_endpoint: nativeMcp.assist || null,
         known_issues: knownIssues,
-        guidance: nativeConfiguredMcpAvailable
+        routing: {
+          native: nativeConfiguredMcpAvailable && nativeMcpBridgeEnabled
+            ? "Use homeassistant_native for Home Assistant's curated Assist/entity-control tools."
+            : nativeConfiguredMcpAvailable
+              ? "The native endpoint is ready but homeassistant_native is disabled; use homeassistant until the bridge is enabled."
+              : "Native endpoint unavailable; do not attempt native tool calls.",
+          opencode: "Use homeassistant for configuration editing, validation, diagnostics, screenshots, updates, ESPHome, Zigbee, add-on development, and other admin/dev workflows.",
+        },
+        guidance: nativeConfiguredMcpAvailable && nativeMcpBridgeEnabled
           ? "Prefer the configured Home Assistant native MCP API for curated native LLM tools. Prefer OpenCode MCP for configuration editing, validation, diagnostics, screenshots, updates, ESPHome, Zigbee, add-on development, and other admin/dev workflows."
+          : nativeConfiguredMcpAvailable
+            ? "The native endpoint is available but the bridge is disabled. Use OpenCode MCP until the bridge is enabled in the add-on configuration."
           : "Native Home Assistant MCP is not available yet; use OpenCode MCP for all Home Assistant work and check again after upgrading Home Assistant.",
       },
       native_ai_components: {
@@ -252,6 +277,13 @@ export function buildAgentCapabilities({
     },
     mcp: {
       tools: tools.length,
+      all_tools: allToolCount,
+      tool_profile: {
+        name: toolProfile.name,
+        title: toolProfile.title,
+        description: toolProfile.description,
+        omitted_tools: Math.max(0, allToolCount - tools.length),
+      },
       resources: resources.length,
       resource_templates: resourceTemplates.length,
       prompts: prompts.length,

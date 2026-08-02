@@ -45,7 +45,9 @@
       "timeout": 60000,
       "environment": {
         "SUPERVISOR_TOKEN": "{env:SUPERVISOR_TOKEN}",
-        "HA_NATIVE_MCP_API_ID": "assist"
+        "HA_NATIVE_MCP_API_ID": "assist",
+        "OPENCODE_MCP_TOOL_PROFILE": "full",
+        "OPENCODE_NATIVE_HA_MCP_ENABLED": "false"
       }
     },
     "homeassistant_native": {
@@ -66,6 +68,6 @@
     }
   },
   "instructions": [
-    "/opt/ha-mcp-server/INSTRUCTIONS.md"
+    "/opt/ha-mcp-server/MCP_CORE_INSTRUCTIONS.md"
   ]
 }

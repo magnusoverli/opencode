@@ -31,9 +31,9 @@ Some tools return machine-readable JSON text with `summary`, `data`, and `meta` 
 
 Home Assistant is adding a native `llm` integration, `<integration>/llm.py` platform, and native MCP endpoints such as `/api/mcp/<API ID>` so Core integrations and custom integrations can provide curated tools to Assist and other registered LLM APIs. The built-in Assist API uses `/api/mcp/assist`. Treat that as complementary to OpenCode MCP:
 
-- If the optional `homeassistant_native` MCP server is available, prefer it for requests that fit the configured native Home Assistant LLM API because those tools are curated by Home Assistant.
+- Use `homeassistant_native` only when `get_agent_capabilities` reports its bridge as enabled and reachable. A reachable native endpoint alone does not expose native tools to OpenCode.
 - Use OpenCode MCP tools for the working add-on surface: configuration editing, safe writes, validation, diagnostics, screenshots, updates, ESPHome, `hab`, Zigbee workflows, add-on development, and Home Assistant documentation lookup.
-- Use `get_agent_capabilities` or read `ha://agent/capabilities` before discussing native LLM support. It reports whether the running HA instance exposes the `llm` component and native MCP endpoints.
+- Use `get_agent_capabilities` or read `ha://agent/capabilities` before discussing native LLM support. It reports the active MCP tool profile plus whether the native bridge is disabled, unavailable, or ready for OpenCode.
 - Use `get_ha_llm_development_guide` when helping develop or review a custom integration's native `<integration>/llm.py` provider.
 - If editing a custom integration's future `llm.py`, follow Home Assistant's upstream developer docs and keep changes scoped to the user's request.
 - Do not assume the add-on can register tools directly with HA's native `llm` platform. Native tool registration is an internal Home Assistant integration/custom-integration platform; the add-on can consume configured native APIs through native MCP when Home Assistant exposes them.

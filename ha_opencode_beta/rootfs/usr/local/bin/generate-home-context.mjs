@@ -19,6 +19,7 @@
  *   OPENCODE_HOME_BRIEFING         "true" to generate the briefing
  *   OPENCODE_DECISION_NOTES        "true" to render the notes digest
  *   OPENCODE_ADDON_ACCESS_ENABLED, SCREENSHOT_ENABLED, OPENCODE_MCP_ENABLED,
+ *   OPENCODE_MCP_TOOL_PROFILE,
  *   OPENCODE_LSP_ENABLED, OPENCODE_RESTRICT_SENSITIVE_FILES, Z2M_URL
  *                                  reported under "Add-on capabilities"
  *   HOME_CONTEXT_SINGLE_PASS       "true" to try Home Assistant once instead of
@@ -93,6 +94,7 @@ async function removeIfPresent(path) {
 function addonCapabilities() {
   return {
     mcp: flag("OPENCODE_MCP_ENABLED"),
+    mcpToolProfile: process.env.OPENCODE_MCP_TOOL_PROFILE || "full",
     lsp: flag("OPENCODE_LSP_ENABLED"),
     screenshot: flag("SCREENSHOT_ENABLED"),
     addonAccess: flag("OPENCODE_ADDON_ACCESS_ENABLED"),

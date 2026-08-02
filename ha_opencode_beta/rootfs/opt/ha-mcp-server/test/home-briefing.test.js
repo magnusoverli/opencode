@@ -38,6 +38,7 @@ function facts(overrides = {}) {
     stacks: ["esphome", "zha"],
     addon: {
       mcp: true,
+      mcpToolProfile: "full",
       lsp: true,
       screenshot: false,
       addonAccess: false,
@@ -233,6 +234,11 @@ describe("renderHomeBriefing", () => {
     const result = renderHomeBriefing(facts());
     expect(result.markdown).toContain("Not available:");
     expect(result.markdown).toContain("screenshot tool");
+  });
+
+  it("identifies a scoped MCP tool profile", () => {
+    const result = renderHomeBriefing(facts({ addon: { ...facts().addon, mcpToolProfile: "compact" } }));
+    expect(result.markdown).toContain("MCP tools (compact profile)");
   });
 
   it("frames itself as a snapshot rather than live state", () => {

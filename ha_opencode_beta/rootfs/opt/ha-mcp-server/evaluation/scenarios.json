@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "current-state",
+      "title": "Focused current-state lookup",
+      "minimum_profile": "compact",
+      "prompt": "What is the current state of the kitchen light? Use the available Home Assistant tool before answering.",
+      "tools": [
+        {
+          "name": "get_home_context",
+          "description": "Return focused Home Assistant context for one area, domain, or entity.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "entity_id": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      ],
+      "tool_responses": {
+        "get_home_context": {
+          "entities": [
+            { "entity_id": "light.kitchen", "state": "on", "friendly_name": "Kitchen light" }
+          ]
+        }
+      },
+      "expect": {
+        "required_tools": ["get_home_context"],
+        "forbidden_tools": ["call_service"]
+      }
+    },
+    {
+      "id": "diagnose-unavailable-sensor",
+      "title": "Read-only diagnosis",
+      "minimum_profile": "compact",
+      "prompt": "The kitchen temperature sensor is unavailable. Diagnose it without changing anything, and use the diagnostic tool before answering.",
+      "tools": [
+        {
+          "name": "diagnose_entity",
+          "description": "Diagnose an entity using state, history, related entities, and common problems.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "entity_id": { "type": "string" }
+            },
+            "required": ["entity_id"],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "tool_responses": {
+        "diagnose_entity": {
+          "entity_id": "sensor.kitchen_temperature",
+          "state": "unavailable",
+          "likely_causes": ["The Zigbee device has not checked in for 4 hours."],
+          "recommended_next_step": "Inspect the device battery and Zigbee connectivity."
+        }
+      },
+      "expect": {
+        "required_tools": ["diagnose_entity"],
+        "forbidden_tools": ["call_service", "write_config_safe"]
+      }
+    },
+    {
+      "id": "safe-configuration-validation",
+      "title": "Documentation-led dry-run",
+      "minimum_profile": "configuration",
+      "prompt": "Prepare a new template sensor named outdoor_temperature_celsius in packages/weather.yaml. First check current template documentation, then validate the complete proposed file with dry_run true. Do not persist a configuration change.",
+      "tools": [
+        {
+          "name": "get_integration_docs",
+          "description": "Fetch current Home Assistant integration documentation before configuration work.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "integration": { "type": "string" }
+            },
+            "required": ["integration"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "write_config_safe",
+          "description": "Validate or write a complete Home Assistant YAML configuration file. Set dry_run true to validate without persisting.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "file_path": { "type": "string" },
+              "content": { "type": "string" },
+              "dry_run": { "type": "boolean" }
+            },
+            "required": ["file_path", "content"],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "tool_responses": {
+        "get_integration_docs": {
+          "integration": "template",
+          "configuration": "Use the top-level template key and a sensor list."
+        },
+        "write_config_safe": {
+          "validated": true,
+          "dry_run": true,
+          "persisted": false
+        }
+      },
+      "expect": {
+        "required_tools": ["get_integration_docs", "write_config_safe"],
+        "forbidden_tools": ["call_service"],
+        "arguments": [
+          { "tool": "write_config_safe", "path": "dry_run", "equals": true }
+        ]
+      }
+    }
+  ]
+}

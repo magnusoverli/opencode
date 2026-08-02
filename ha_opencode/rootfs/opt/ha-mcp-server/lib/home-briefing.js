@@ -264,7 +264,10 @@ function renderAddon(addon) {
   const off = [];
   const flag = (label, enabled) => (enabled ? on : off).push(label);
 
-  flag("Home Assistant MCP tools", addon.mcp);
+  const mcpLabel = addon.mcpToolProfile && addon.mcpToolProfile !== "full"
+    ? `Home Assistant MCP tools (${addon.mcpToolProfile} profile)`
+    : "Home Assistant MCP tools (full profile)";
+  flag(mcpLabel, addon.mcp);
   flag("YAML language server", addon.lsp);
   flag("screenshot tool (needs a model that accepts image input)", addon.screenshot);
   flag("add-on folder access (`/addons`, `/addon_configs`)", addon.addonAccess);

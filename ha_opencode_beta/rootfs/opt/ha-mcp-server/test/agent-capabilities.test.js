@@ -28,6 +28,7 @@ describe("buildAgentCapabilities", () => {
       resources: [{ uri: "ha://config" }],
       resourceTemplates: [{ uriTemplate: "ha://states/{domain}" }],
       prompts: [{ name: "create_automation" }],
+      nativeMcpBridgeEnabled: true,
     });
 
     expect(capabilities.home_assistant.version).toBe("2026.7.0");
@@ -41,6 +42,8 @@ describe("buildAgentCapabilities", () => {
     expect(capabilities.home_assistant.native_mcp.assist_endpoint_status).toBe("available");
     expect(capabilities.home_assistant.native_ai_components.loaded).toContain("ollama");
     expect(capabilities.mcp.tools).toBe(2);
+    expect(capabilities.mcp.tool_profile.name).toBe("full");
+    expect(capabilities.home_assistant.native_mcp.bridge.status).toBe("enabled_and_reachable");
     expect(capabilities.mcp.resources).toBe(1);
     expect(capabilities.mcp.resource_templates).toBe(1);
     expect(capabilities.mcp.prompts).toBe(1);
@@ -103,6 +106,8 @@ describe("buildAgentCapabilities", () => {
     expect(capabilities.home_assistant.native_mcp.status).toBe("configured_api_available");
     expect(capabilities.home_assistant.native_mcp.configured_endpoint_status).toBe("available");
     expect(capabilities.home_assistant.native_mcp.assist_endpoint_status).toBe("not_found");
+    expect(capabilities.home_assistant.native_mcp.bridge.status).toBe("disabled_endpoint_available");
+    expect(capabilities.home_assistant.native_mcp.routing.native).toContain("disabled");
   });
 
   it("reports configured catch-all native MCP endpoint availability", () => {

@@ -120,6 +120,7 @@ show_shell_help() {
     echo -e "  ${GREEN}opencode${NC}          Restart the AI coding agent"
     echo -e "  ${GREEN}ha-logs${NC} ${GRAY}<type>${NC}    View logs (core, error, supervisor, host)"
     echo -e "  ${GREEN}ha-mcp${NC} ${GRAY}<cmd>${NC}     MCP integration (enable, disable, status)"
+    echo -e "  ${GREEN}ha-agent-eval${NC} ${GRAY}[args]${NC}  Run synthetic model tool-selection checks"
     echo -e "  ${GREEN}ha-context${NC} ${GRAY}<cmd>${NC} What OpenCode knows about your setup (show, refresh, reset)"
     echo -e "  ${GREEN}hab${NC} ${GRAY}<cmd>${NC}         HA admin CLI (entities, areas, dashboards, backups)"
     echo -e "  ${GREEN}zigporter${NC} ${GRAY}<cmd>${NC}   Zigbee tools (rename, inspect, stale, mesh)"

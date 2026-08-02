@@ -24,6 +24,7 @@ CPU_MODE_CONFIG=$(bashio::config 'cpu_mode' || echo "auto")
 OPENCODE_UPDATE_POLICY=$(bashio::config 'opencode_update_policy' || echo "latest")
 INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
 MCP_ENABLED=$(bashio::config 'mcp_enabled')
+MCP_TOOL_PROFILE=$(bashio::config 'mcp_tool_profile' 2>/dev/null || echo "full")
 NATIVE_HA_MCP_ENABLED=$(bashio::config 'native_ha_mcp_enabled' 2>/dev/null || echo "false")
 NATIVE_HA_MCP_API_ID=$(bashio::config 'native_ha_mcp_api_id' 2>/dev/null || echo "assist")
 LSP_ENABLED=$(bashio::config 'lsp_enabled' || echo "true")
@@ -41,6 +42,15 @@ PPQ_API_KEY=$(bashio::config 'ppq_api_key' || echo "")
 if [ "${NATIVE_HA_MCP_API_ID}" = "null" ]; then
     NATIVE_HA_MCP_API_ID=""
 fi
+
+case "${MCP_TOOL_PROFILE}" in
+    compact|configuration|full)
+        ;;
+    *)
+        bashio::log.warning "Unknown mcp_tool_profile '${MCP_TOOL_PROFILE}' - defaulting to full"
+        MCP_TOOL_PROFILE="full"
+        ;;
+esac
 
 case "${OPENCODE_UPDATE_POLICY}" in
     latest|bundled)
@@ -64,7 +74,7 @@ if [ "${DECISION_NOTES_ENABLED}" != "false" ]; then
     DECISION_NOTES_ENABLED="true"
 fi
 
-bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED}"
+bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} MCP_TOOL_PROFILE=${MCP_TOOL_PROFILE} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED}"
 
 # Set up persistent HOME and npm global prefix for OpenCode runtime updates.
 export HOME="/data"
@@ -100,7 +110,7 @@ OPTIONS_FILE="/data/options.json"
 ENV_VARS_COUNT=$(jq -r '.env_vars // [] | length' "${OPTIONS_FILE}")
 
 # Reserved names that would break the add-on if overridden
-ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_UPDATE_POLICY","SHELL","USER","PWD"'
+ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","OPENCODE_MCP_TOOL_PROFILE","OPENCODE_NATIVE_HA_MCP_ENABLED","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_UPDATE_POLICY","SHELL","USER","PWD"'
 
 if [ "${ENV_VARS_COUNT}" -gt 0 ]; then
     bashio::log.info "Processing ${ENV_VARS_COUNT} user-defined environment variable(s)..."
@@ -297,6 +307,8 @@ fi
 printf 'export OPENCODE_HOME_BRIEFING=%s\n' "${HOME_BRIEFING_ENABLED}" >> "${ENV_VARS_FILE}"
 printf 'export OPENCODE_DECISION_NOTES=%s\n' "${DECISION_NOTES_ENABLED}" >> "${ENV_VARS_FILE}"
 printf 'export OPENCODE_MCP_ENABLED=%s\n' "${MCP_ENABLED}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_MCP_TOOL_PROFILE=%q\n' "${MCP_TOOL_PROFILE}" >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_NATIVE_HA_MCP_ENABLED=%s\n' "${NATIVE_HA_MCP_ENABLED}" >> "${ENV_VARS_FILE}"
 printf 'export OPENCODE_LSP_ENABLED=%s\n' "${LSP_ENABLED}" >> "${ENV_VARS_FILE}"
 printf 'export OPENCODE_RESTRICT_SENSITIVE_FILES=%s\n' "${RESTRICT_SENSITIVE_FILES}" >> "${ENV_VARS_FILE}"
 chmod 600 "${ENV_VARS_FILE}"
@@ -816,9 +828,11 @@ if [ "${ADDON_AGENTS_IN_CONFIG_DIR}" != "true" ]; then
     CHANNEL_AGENTS_INSTRUCTION="${ADDON_AGENTS_FILE}"
 fi
 
-jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --arg channel_agents "${CHANNEL_AGENTS_INSTRUCTION}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" --argjson restrict "${RESTRICT_BOOL}" --argjson focus "${FOCUS_BOOL}" --argjson briefing "${BRIEFING_BOOL}" --argjson notes "${NOTES_BOOL}" '
+jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --arg mcp_tool_profile "${MCP_TOOL_PROFILE}" --arg profile_instruction "/opt/ha-mcp-server/MCP_PROFILE_$(echo "${MCP_TOOL_PROFILE}" | tr "[:lower:]" "[:upper:]").md" --arg channel_agents "${CHANNEL_AGENTS_INSTRUCTION}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" --argjson restrict "${RESTRICT_BOOL}" --argjson focus "${FOCUS_BOOL}" --argjson briefing "${BRIEFING_BOOL}" --argjson notes "${NOTES_BOOL}" '
     .mcp.homeassistant.enabled = $mcp |
     .mcp.homeassistant.environment.HA_NATIVE_MCP_API_ID = $native_ha_mcp_api_id |
+    .mcp.homeassistant.environment.OPENCODE_MCP_TOOL_PROFILE = $mcp_tool_profile |
+    .mcp.homeassistant.environment.OPENCODE_NATIVE_HA_MCP_ENABLED = ($native_ha_mcp | tostring) |
     .mcp.homeassistant_native.enabled = ($mcp and $native_ha_mcp) |
     .mcp.homeassistant_native.command = ["node", "/opt/ha-mcp-server/ha-native-mcp-proxy.js", $native_ha_mcp_api_id] |
     .mcp.homeassistant_native.environment.HA_NATIVE_MCP_API_ID = $native_ha_mcp_api_id |
@@ -837,6 +851,7 @@ jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --arg channel_agents "${
     if $focus then
         .instructions = ((.instructions // []) + ["/opt/ha-mcp-server/FOCUS_MODE.md"])
     else . end |
+    if $mcp then .instructions = ((.instructions // []) + [$profile_instruction]) else . end |
     if $briefing then
         .instructions = ((.instructions // []) + ["/data/context/home-briefing.md"])
     else . end |
@@ -916,6 +931,7 @@ if [ "${HOME_BRIEFING_ENABLED}" = "true" ] || [ "${DECISION_NOTES_ENABLED}" = "t
     OPENCODE_HOME_BRIEFING="${HOME_BRIEFING_ENABLED}" \
     OPENCODE_DECISION_NOTES="${DECISION_NOTES_ENABLED}" \
     OPENCODE_MCP_ENABLED="${MCP_ENABLED}" \
+    OPENCODE_MCP_TOOL_PROFILE="${MCP_TOOL_PROFILE}" \
     OPENCODE_LSP_ENABLED="${LSP_ENABLED}" \
     OPENCODE_RESTRICT_SENSITIVE_FILES="${RESTRICT_SENSITIVE_FILES}" \
     OPENCODE_ADDON_ACCESS_ENABLED="${ADDON_ACCESS_ENABLED}" \

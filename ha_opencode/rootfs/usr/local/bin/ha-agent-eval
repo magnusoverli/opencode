@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec node /opt/ha-mcp-server/evaluate-agent.mjs "$@"

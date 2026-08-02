@@ -80,6 +80,7 @@ OpenChamber's own built-in update check is disabled in this add-on. OpenChamber 
 | Option | Default | Description |
 |--------|---------|-------------|
 | **MCP integration** | `true` | Let OpenCode query entities and call services through its built-in Model Context Protocol server. |
+| **MCP tool profile** | `full` | Select `compact` for read-only diagnostics, `configuration` to add documentation, validation, and safe config writes, or `full` for every tool. Smaller profiles reduce tool-selection ambiguity and prompt size for local models. |
 | **LSP integration** | `true` | Give OpenCode live diagnostics, entity and service auto-completion, and validation while it edits Home Assistant YAML. |
 | **Screenshot tool** | `false` | Requires the access token below. Lets OpenCode photograph Home Assistant pages in a headless browser to check dashboard changes. |
 | **Home Assistant access token** | `""` | Long-lived access token for Home Assistant Core. Required by the screenshot tool and ESPHome commands. |
@@ -168,7 +169,7 @@ Every request carries roughly:
 | OpenCode's agent prompt and built-in tools | varies by version |
 | Home Assistant MCP tool definitions (41 tools) | ~25 KB |
 | `AGENTS.md` from your configuration folder | ~35 KB |
-| `INSTRUCTIONS.md` (MCP usage guidance) | ~20 KB |
+| MCP core/profile guidance | compact and profile-specific |
 | Install briefing | capped at ~500 tokens |
 | `AGENTS.local.md`, if you use one | your own content |
 
@@ -179,6 +180,7 @@ To make local models usable:
 - **Set the context window to fit.** Ollama defaults `num_ctx` to 4096. A 25,000-token prompt is silently truncated at that size, so the model loses most of its tools and instructions before it sees your message. Raise it (`OLLAMA_CONTEXT_LENGTH`, or `num_ctx` in the model's parameters) and expect higher memory use.
 - **Turn off MCP integration** to remove the 41 tool definitions. This is the single largest saving, but OpenCode then loses the ability to query entities and call services — it becomes a file editor for your YAML rather than a Home Assistant agent.
 - **Turn off Install briefing** for a smaller saving.
+- **Choose a smaller MCP tool profile.** `compact` is a read-only diagnostic surface; `configuration` adds the safe configuration workflow without device control or admin commands. The default `full` profile preserves every existing capability. Profile changes take effect after restarting the add-on.
 - **Use a model that supports tool calling**, and a large one. Small models (roughly under 7B) generally cannot drive a 41-tool agent loop reliably regardless of how fast they run — a common symptom is the model replying with a raw JSON envelope instead of normal text.
 - **Do not run the model on the Home Assistant host** if you can avoid it. Inference competing with Home Assistant for CPU and RAM makes both worse.
 
@@ -524,6 +526,18 @@ The app includes an enhanced MCP (Model Context Protocol) server that provides d
 
 OpenCode's MCP server remains the complete working agent surface for this add-on today. Home Assistant is also developing a native `llm` integration and `<integration>/llm.py` platform so Core integrations and custom integrations can contribute curated LLM tools to Assist. OpenCode is designed to complement that work, not compete with it: as HA-native LLM capabilities become stable and accessible, this add-on will follow them closely and use them where they help users.
 
+### MCP Tool Profiles
+
+The built-in `homeassistant` MCP server can expose a narrower capability set through **MCP tool profile**. This changes the tool definitions supplied to the model and rejects hidden MCP calls before they reach Home Assistant; it does not alter filesystem access, terminal commands, or OpenCode permissions.
+
+| Profile | Includes | Excludes |
+|---------|----------|----------|
+| `compact` | Read-only entity state, history, diagnostics, templates, calendars, and home context | Config writes, device control, updates, screenshots, `hab`, and Zigbee administration |
+| `configuration` | Everything in `compact`, plus current docs, syntax checks, full validation, safe config writes, and decision notes | Device control, updates, screenshots, `hab`, and Zigbee administration |
+| `full` | Every currently available built-in MCP tool | Nothing beyond separately disabled features such as screenshots without a token |
+
+`full` is the default and preserves existing behavior. Restart the add-on after changing profiles. `get_agent_capabilities` reports the active profile, exposed tool count, and omitted count so an agent can explain what it can actually do.
+
 ### Home Assistant Native LLM Readiness
 
 The current Home Assistant native LLM work is primarily an internal platform for Home Assistant integrations and custom integrations. It lets integrations expose an `<integration>/llm.py` file with an `async_get_tools(hass, llm_context, api_id) -> llm.LLMTools | None` hook. At the time of this add-on release, that platform is not a public external API that an add-on container can register with directly.
@@ -561,7 +575,7 @@ The bridge is **off by default**, and Home Assistant does not serve its MCP endp
 1. **Add the Model Context Protocol Server integration in Home Assistant.** Go to **Settings → Devices & Services → Add Integration** and add **Model Context Protocol Server**. Until this exists, Home Assistant registers no `/api/mcp` routes at all and the bridge has nothing to talk to on any version.
 2. **Turn on the bridge in the add-on and restart it.** Set **Native Home Assistant MCP bridge (beta)** to on in the add-on's Configuration tab, then restart the add-on. The setting is read once at start-up, so it does not take effect until the restart.
 
-To confirm it worked, ask OpenCode to run `get_agent_capabilities`: it reports the detected Home Assistant version, which endpoint the bridge resolved to, and any upstream limitations that still apply. In OpenCode you should also see a second MCP server named `homeassistant_native` alongside the built-in `homeassistant` one.
+To confirm it worked, ask OpenCode to run `get_agent_capabilities`: it reports the detected Home Assistant version, bridge status, which endpoint resolved, and any upstream limitations that still apply. Use `homeassistant_native` only when the bridge status is `enabled_and_reachable`; a reachable endpoint with a disabled bridge is not exposed to OpenCode. In OpenCode you should then see a second MCP server named `homeassistant_native` alongside the built-in `homeassistant` one.
 
 Nothing else is required. You do **not** need to change the API ID, set any environment variable, or supply an access token — the bridge authenticates with the Supervisor token. If you skip step 1, the bridge starts and every request fails with a 404, which `get_agent_capabilities` will report.
 
@@ -580,6 +594,27 @@ That admin requirement is not a wall for this add-on. The Supervisor calls Home 
 - **Malformed-message guard.** Every message is validated as JSON-RPC 2.0 before it is forwarded, because malformed POSTs to `/api/mcp` have been reported to crash Home Assistant Core ([home-assistant/core#176734](https://github.com/home-assistant/core/issues/176734)). This one is **not fixed in 2026.8** — the upstream fix is still open — so the guard applies on every version.
 
 The regular `homeassistant` MCP server remains available and is the supported tool surface either way. The two are intentionally separate: `homeassistant_native` carries Home Assistant's curated native LLM tools, while `homeassistant` covers configuration editing, validation, admin and development workflows, screenshots, and updates.
+
+### Model Tool Evaluation
+
+`ha-agent-eval` is an opt-in developer command for comparing a real model's tool selection against fixed synthetic Home Assistant scenarios. It calls an OpenAI-compatible chat-completions endpoint, supplies mocked tool results, and never contacts Home Assistant or executes a real tool.
+
+Set these environment variables, preferably through the add-on's **Environment variables** option:
+
+```text
+HA_AGENT_EVAL_BASE_URL=https://provider.example/v1
+HA_AGENT_EVAL_MODEL=provider-model-id
+HA_AGENT_EVAL_API_KEY=optional-for-local-or-tokenless-providers
+```
+
+Run `ha-agent-eval` to evaluate scenarios supported by the active MCP profile, or select one explicitly:
+
+```bash
+ha-agent-eval --profile compact
+ha-agent-eval --scenario safe-configuration-validation
+```
+
+The command writes a JSON transcript and pass/fail score under `/data/evaluations/`, excluded from add-on backups, and exits non-zero when a scenario fails. It measures model function-calling behavior, not OpenCode's full prompt, provider configuration, or live Home Assistant integration.
 
 ### MCP Capabilities Overview
 
