@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.2b0
+
+- **OpenChamber 1.18.1** — updates the pinned web UI through the latest upstream release while preserving Home Assistant Ingress sign-in: browser OAuth providers with a container-local callback now show the paste-code flow, so the add-on can replay the failed localhost redirect inside the container instead of waiting for a browser redirect it cannot receive.
+
 ## 2.4.1b3
 
 - **LAN custom agents can write their allowed files ([issue #92](https://github.com/magnusoverli/opencode/issues/92))** — scoped absolute edit rules now work in headless server sessions, while unapproved writes are denied instead of hanging indefinitely.

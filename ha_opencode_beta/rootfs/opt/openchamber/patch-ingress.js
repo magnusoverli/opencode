@@ -87,7 +87,7 @@ const cssFiles = fs.readdirSync(assetsDir)
 // between OpenChamber releases (e.g. qo/Jo in 1.13.8, mn/Sn in 1.13.9, da/ma in
 // 1.16.x). Each pattern therefore captures the names structurally and reuses
 // them via a function replacement instead of hardcoding them, so the patch
-// survives minor version bumps. Validated against 1.14.x and 1.16.2.
+// survives minor version bumps. Validated against 1.14.x through 1.18.1.
 const runtimeUrlPattern =
   /try\{return new URL\((\w+),`\$\{(\w+)\.replace\(\/\\\/\+\$\/,""\)\}\/`\)\.toString\(\)\}catch\{return \1\}\}/;
 const runtimeUrlReplacement = (_m, arg, base) =>
