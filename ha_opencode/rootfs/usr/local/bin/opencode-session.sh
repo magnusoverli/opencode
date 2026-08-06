@@ -58,6 +58,7 @@ NC='\033[0m'
 CPU_MODE=$(cat /data/.cpu_mode 2>/dev/null || echo "unknown")
 ADDON_VERSION=$(cat /data/.addon_version 2>/dev/null || echo "unknown")
 ADDON_ACCESS_ENABLED=$(cat /data/.addon_access_enabled 2>/dev/null || echo "false")
+USER_HOOKS_ENABLED=$(cat /data/.user_hooks_enabled 2>/dev/null || echo "false")
 OPENCODE_UPDATE_POLICY=$(cat /data/.opencode_update_policy 2>/dev/null || echo "latest")
 OPENCODE_VERSION=$(cat /data/.opencode_version 2>/dev/null || opencode --version 2>/dev/null || echo "unknown")
 CPU_INFO=""
@@ -124,6 +125,9 @@ show_shell_help() {
     echo -e "  ${GREEN}ha-context${NC} ${GRAY}<cmd>${NC} What OpenCode knows about your setup (show, refresh, reset)"
     echo -e "  ${GREEN}hab${NC} ${GRAY}<cmd>${NC}         HA admin CLI (entities, areas, dashboards, backups)"
     echo -e "  ${GREEN}zigporter${NC} ${GRAY}<cmd>${NC}   Zigbee tools (rename, inspect, stale, mesh)"
+    if [ "${USER_HOOKS_ENABLED}" = "true" ]; then
+        echo -e "  ${GREEN}ha-hooks${NC} ${GRAY}<cmd>${NC}   Your startup hooks (list, run, log)"
+    fi
     echo ""
 }
 
@@ -136,6 +140,9 @@ if [ "${ADDON_ACCESS_ENABLED}" = "true" ]; then
 fi
 echo -e "${GRAY}First time? Use ${NC}${GREEN}/connect${NC} ${GRAY}inside OpenCode to add your AI provider${NC}"
 echo -e "${GRAY}Add your own instructions in ${NC}${GREEN}AGENTS.local.md${NC} ${GRAY}— add-on updates never overwrite it${NC}"
+if [ "${USER_HOOKS_ENABLED}" = "true" ]; then
+    echo -e "${GRAY}Startup hooks are on — ${NC}${GREEN}ha-hooks list${NC} ${GRAY}shows what runs at start${NC}"
+fi
 echo -e "${GRAY}Copy: select text (auto-copies) · Paste: ${NC}${GREEN}Ctrl+V${NC}${GRAY} or right-click${NC}"
 echo ""
 

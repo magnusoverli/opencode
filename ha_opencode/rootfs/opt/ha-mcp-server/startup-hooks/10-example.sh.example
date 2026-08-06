@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Want longer than the 15-minute default? Delete one '#' from the line below.
+# Use 0 for no limit at all, which is what you want if a first run has to
+# compile something on slow hardware. The directive is only read in the first
+# 10 lines of the file, which is why it sits up here rather than further down.
+#
+## opencode-hook-timeout: 1800
+#
+# =============================================================================
+# Example startup hook
+#
+# This file does nothing until you rename it:
+#
+#     mv 10-example.sh.example 10-example.sh
+#
+# ...and then it only prints a few lines. Everything interesting below is
+# commented out, so you can uncomment the parts you want.
+#
+# Run it without restarting the add-on:  ha-hooks run 10-example.sh
+# Read what it printed:                  ha-hooks log 10-example.sh
+# =============================================================================
+
+# Stop on the first error, and treat an unset variable as a bug. Worth keeping:
+# a hook that half-worked is harder to debug than one that stopped.
+set -euo pipefail
+
+# Do NOT use `set -x` here. This script's environment contains your Home
+# Assistant tokens, and the log is a file you might paste into a bug report.
+
+echo "Hello from ${OPENCODE_HOOK_NAME:-this hook}."
+echo "My hooks folder is ${OPENCODE_HOOKS_DIR:-unknown}."
+echo "This container is reachable from Home Assistant as: $(hostname)"
+
+# -----------------------------------------------------------------------------
+# A Python service that keeps running
+#
+# The three things that matter:
+#   1. the virtual environment lives under /data, so it survives a restart
+#   2. `setsid` puts the process in its own session, so it is not killed with
+#      this hook
+#   3. `pgrep` first, so running the hook twice does not start it twice
+# -----------------------------------------------------------------------------
+
+# APP_DIR=/data/mybridge
+# VENV=/data/venvs/mybridge
+# ENTRY="${APP_DIR}/server.py"
+#
+# if pgrep -f "${ENTRY}" >/dev/null 2>&1; then
+#     echo "Already running; nothing to do."
+#     exit 0
+# fi
+#
+# mkdir -p "${APP_DIR}"
+#
+# # Without this the hook cheerfully reports success, starts nothing, and then
+# # reinstalls the packages on every single add-on start, because the pgrep
+# # above can never match. `setsid ... &` fails in the background where `set -e`
+# # cannot see it.
+# if [ ! -f "${ENTRY}" ]; then
+#     echo "Write your server to ${ENTRY} first; nothing to start yet."
+#     exit 0
+# fi
+#
+# if [ ! -x "${VENV}/bin/python3" ]; then
+#     echo "Creating the virtual environment (this takes a minute the first time)..."
+#     python3 -m venv "${VENV}"
+# fi
+#
+# "${VENV}/bin/pip" install --quiet --upgrade wyoming aiohttp
+#
+# # -u keeps Python from buffering its output, so a crash still leaves a
+# # readable log instead of an empty file.
+# setsid "${VENV}/bin/python3" -u "${ENTRY}" \
+#     >/data/mybridge.log 2>&1 </dev/null &
+#
+# echo "Started ${ENTRY}. Its own log is /data/mybridge.log"
+
+# -----------------------------------------------------------------------------
+# Talking to Home Assistant
+#
+# SUPERVISOR_TOKEN is already in the environment, and http://supervisor/core
+# proxies to the Core API. No long-lived access token needed.
+# -----------------------------------------------------------------------------
+
+# curl -fsSL -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+#     http://supervisor/core/api/config | head -c 200
+
+# -----------------------------------------------------------------------------
+# Talking to OpenCode itself
+#
+# Turn on "OpenCode LAN server" in the Configuration tab first. You do NOT need
+# to map port 4096 in Network settings - mapping is only for reaching it from
+# another computer. Unmapped, it is still here for your hook and exposed to
+# nothing.
+# -----------------------------------------------------------------------------
+
+# curl -fsSL http://127.0.0.1:4096/app
+
+echo "Done."

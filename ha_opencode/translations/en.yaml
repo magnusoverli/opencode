@@ -125,3 +125,7 @@ configuration:
   opencode_config:
     name: "Custom OpenCode configuration"
     description: "A JSON object merged into OpenCode's own configuration, for providers, keybindings, permission rules and similar. Leave empty for the defaults; the full schema is at https://opencode.ai/docs/config."
+
+  user_hooks_enabled:
+    name: "Startup hooks"
+    description: "Runs your own .sh scripts from the 'startup.d' folder in this add-on's directory, once every time the add-on starts. These scripts run as root with access to the Home Assistant API, and the add-on does not check, supervise, or restart them; leave this off unless you want that responsibility."

@@ -1,0 +1,464 @@
+#!/usr/bin/env bash
+# =============================================================================
+# opencode-run-hooks - run the user's startup hooks
+#
+# Startup hooks are the supported extension point for this add-on: shell
+# scripts the user drops into their configuration directory that run once,
+# after initialization, every time the add-on starts.
+#
+# They exist because the container's filesystem is not a good place to keep
+# anything. /etc and /usr are rebuilt from the image on every start, and
+# /data/.cache is deleted by init-opencode. Only /data and the configuration
+# directory survive, and the second of those is the one you can reach from
+# File Editor, Samba or Studio Code Server.
+#
+# The contract with a hook is deliberately small:
+#
+#   - it runs as root, with the add-on's own environment
+#   - it must RETURN. Anything that should outlive it starts with `setsid`
+#   - its exit status is recorded and reported, and never stops another hook
+#   - it is the user's code. This add-on runs it and gets out of the way
+#
+# Usage:
+#   opencode-run-hooks            run every hook
+#   opencode-run-hooks NAME       run one hook
+#   opencode-run-hooks --boot     as above, plus the restart-loop breaker
+#   opencode-run-hooks --manifest print what would run (name, size, digest)
+#
+# Deliberately NOT `set -e`: a failing hook must not end the sweep.
+# =============================================================================
+
+set -uo pipefail
+
+# -----------------------------------------------------------------------------
+# The user's environment comes FIRST, and everything this script relies on is
+# assigned after it.
+#
+# /data/.env_vars is written from the add-on's Environment variables option, so
+# its contents are chosen by the user. The reserved-name list in init-opencode
+# protects the add-on's own variables, not this script's, so a user variable
+# called MODE or HOOKS_DIR would otherwise redirect the sweep - including
+# turning the synchronous --manifest call at boot into a full run on the
+# critical path. Sourcing first and assigning after makes that impossible.
+#
+# The one variable deliberately left overridable is OPENCODE_HOOK_TIMEOUT.
+# -----------------------------------------------------------------------------
+
+# shellcheck disable=SC1091
+[ -f /data/.env_vars ] && . /data/.env_vars
+# Written by the detached service discovery, so at boot it usually does not
+# exist yet. Present on a later `ha-hooks run`.
+# shellcheck disable=SC1091
+[ -f /data/.env_vars_discovered ] && . /data/.env_vars_discovered
+
+# Which channel this add-on is, and therefore whose hooks these are. Stable and
+# beta ship identical trees, so the directory can only come from here.
+# shellcheck source=/usr/local/lib/opencode/channel.sh
+source /usr/local/lib/opencode/channel.sh
+
+HOOKS_DIR="${ADDON_STATE_DIR}/startup.d"
+STATE_DIR="/data/hooks"
+LOCK_FILE="${STATE_DIR}/.lock"
+LAST_RUN_FILE="${STATE_DIR}/.last_run"
+ENABLED_MARKER="/data/.user_hooks_enabled"
+SEED_SRC="/opt/ha-mcp-server/startup-hooks"
+
+# Long enough that a first-run `pip install` compiling a wheel on a Raspberry Pi
+# finishes. A hook that hangs is worth catching; a hook that is merely slow once
+# is not, and killing it produces the worst diagnostic shape there is - works on
+# every boot but the first.
+DEFAULT_TIMEOUT="${OPENCODE_HOOK_TIMEOUT:-900}"
+
+# Two starts closer together than this means the add-on is restarting in a loop.
+# Running the hooks again would be pouring fuel on it.
+MIN_RESTART_GAP=60
+
+# A hook log past this is reported, not truncated - it is the user's data.
+LOG_WARN_BYTES=$((10 * 1024 * 1024))
+
+MODE="all"
+ONLY=""
+
+case "${1:-}" in
+    --boot)     MODE="boot" ;;
+    --manifest) MODE="manifest" ;;
+    "")         ;;
+    -*)         printf 'opencode-run-hooks: unknown option %s\n' "$1" >&2; exit 2 ;;
+    *)          ONLY="$1" ;;
+esac
+
+log()  { printf '[hooks] %s\n' "$*"; }
+warn() { printf '[hooks] WARNING: %s\n' "$*"; }
+
+# Hook names reach the filesystem as log paths, so anything outside this set is
+# replaced rather than trusted. A name that actually changes under the mapping
+# also gets a digest, because two names differing only in a replaced character
+# would otherwise share one log and one status file - and each would then be
+# reported with the other's result.
+safe_name() {
+    local raw="$1" clean
+    clean=$(printf '%s' "${raw}" | tr -c 'A-Za-z0-9._-' '_')
+    if [ "${clean}" != "${raw}" ]; then
+        clean="${clean}.$(printf '%s' "${raw}" | sha256sum | cut -c1-8)"
+    fi
+    printf '%s' "${clean}"
+}
+
+# -----------------------------------------------------------------------------
+# The hook directory
+#
+# Created only when the feature is on - a folder appearing in every user's
+# configuration directory for something they never enabled is a regression in
+# itself. Seeded once with a README and an inert example, using the same
+# "only if neither exists" guard the add-on uses for AGENTS.local.md.example,
+# because clobbering a file the user edited is a data-loss bug.
+# -----------------------------------------------------------------------------
+ensure_hooks_dir() {
+    if [ -L "${HOOKS_DIR}" ]; then
+        warn "${HOOKS_DIR} is a symlink; refusing to run anything from it"
+        return 1
+    fi
+    if [ -e "${HOOKS_DIR}" ] && [ ! -d "${HOOKS_DIR}" ]; then
+        warn "${HOOKS_DIR} exists but is not a directory; refusing to run anything"
+        return 1
+    fi
+    mkdir -p "${HOOKS_DIR}" 2>/dev/null || {
+        warn "could not create ${HOOKS_DIR}"
+        return 1
+    }
+
+    local readme="${HOOKS_DIR}/README.md"
+    if [ ! -f "${readme}" ] && [ -f "${SEED_SRC}/README.md" ]; then
+        # The shipped copy cannot name a channel, so the real directory is
+        # substituted as it is written out.
+        sed "s#@@HOOKS_DIR@@#${HOOKS_DIR}#g" "${SEED_SRC}/README.md" > "${readme}" 2>/dev/null \
+            && log "Wrote ${readme}"
+    fi
+
+    local example="${HOOKS_DIR}/10-example.sh.example"
+    if [ ! -f "${example}" ] && [ ! -f "${HOOKS_DIR}/10-example.sh" ] \
+        && [ -f "${SEED_SRC}/10-example.sh.example" ]; then
+        cp "${SEED_SRC}/10-example.sh.example" "${example}" 2>/dev/null \
+            && log "Wrote ${example} - rename it to 10-example.sh to run it"
+    fi
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Which files are hooks
+#
+# *.sh only, in LC_ALL=C order so the documented 10-/20- prefix convention means
+# the same thing on every system. Directories, symlinks and dotfiles are not
+# hooks: a directory literally named "foo.sh" matches the glob, and a symlink
+# lets anything that can write the configuration directory point the hook set
+# somewhere else entirely.
+# -----------------------------------------------------------------------------
+collect_hooks() {
+    local f
+    HOOKS=()
+    [ -d "${HOOKS_DIR}" ] || return 0
+    while IFS= read -r f; do
+        [ -n "${f}" ] || continue
+        HOOKS+=("${f}")
+    done < <(
+        LC_ALL=C
+        shopt -s nullglob
+        for f in "${HOOKS_DIR}"/*.sh; do
+            [ -f "${f}" ] || continue
+            [ -L "${f}" ] && continue
+            case "$(basename "${f}")" in .*) continue ;; esac
+            printf '%s\n' "${f}"
+        done | LC_ALL=C sort
+    )
+}
+
+# A hook may ask for its own limit. 0 means "no limit" - the escape hatch for a
+# genuinely long first-run build, chosen deliberately by the person who wrote it.
+hook_timeout() {
+    local f="$1" value
+    value=$(head -n 10 "${f}" 2>/dev/null \
+        | sed -n 's/^[[:space:]]*#[[:space:]]*opencode-hook-timeout:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+        | head -n 1)
+    if [ -n "${value}" ]; then
+        printf '%s' "${value}"
+    else
+        printf '%s' "${DEFAULT_TIMEOUT}"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Manifest
+#
+# Printed synchronously into the add-on log before anything runs. Hooks are
+# arbitrary root code, so the one thing the add-on owes the user is that they
+# can always see what ran - including a file they did not put there.
+# -----------------------------------------------------------------------------
+print_manifest() {
+    collect_hooks
+    # Silent when there is nothing, so the caller can log every line it gets
+    # without having to recognise and filter an "empty" message.
+    if [ "${#HOOKS[@]}" -eq 0 ]; then
+        return 0
+    fi
+    local f size digest
+    for f in "${HOOKS[@]}"; do
+        size=$(stat -c %s "${f}" 2>/dev/null || echo "?")
+        digest=$(sha256sum "${f}" 2>/dev/null | cut -c1-12)
+        printf '%s (%s bytes, sha256 %s)\n' "$(basename "${f}")" "${size}" "${digest:-unknown}"
+    done
+}
+
+# -----------------------------------------------------------------------------
+# Running one hook
+# -----------------------------------------------------------------------------
+run_hook() {
+    local f="$1"
+    local name safe log_file limit rc started finished shebang runner cleanup=""
+
+    name=$(basename "${f}")
+    safe=$(safe_name "${name}")
+    log_file="${STATE_DIR}/${safe}.log"
+    limit=$(hook_timeout "${f}")
+
+    if [ ! -s "${f}" ]; then
+        log "${name}: empty file, skipped"
+        printf '%s %s skipped\n' "$(date +%s)" "-" > "${STATE_DIR}/${safe}.status"
+        return 0
+    fi
+
+    # A non-shell shebang is refused rather than silently run by bash, which
+    # would fail somewhere deep inside the file with a syntax error. Wrapping an
+    # interpreter in a .sh is one line; guessing an interpreter contract is a
+    # feature the add-on would then own.
+    shebang=$(head -n 1 "${f}" 2>/dev/null)
+    case "${shebang}" in
+        '#!'*)
+            case "${shebang}" in
+                *sh*) ;;
+                *)
+                    warn "${name}: only shell hooks are run (found ${shebang}) - call your interpreter from a .sh wrapper"
+                    printf '%s %s refused\n' "$(date +%s)" "-" > "${STATE_DIR}/${safe}.status"
+                    return 0
+                    ;;
+            esac
+            ;;
+    esac
+
+    runner="${f}"
+
+    # Edited on Windows over Samba, saved with CRLF, and bash fails on the
+    # invisible \r with an error that names neither the character nor the cause.
+    # Normalising a copy is friendlier than diagnosing it, and the warning still
+    # says how to make it stop.
+    # Detected with tr rather than grep: tr works on bytes, while grep goes
+    # through a line reader that can strip the very character being looked for.
+    # The whole file is inspected, not a prefix - appending Windows-saved lines
+    # to a Unix file is exactly how mixed endings happen, and a prefix check
+    # would miss it.
+    if [ -n "$(tr -dc '\r' < "${f}" 2>/dev/null | head -c 1)" ]; then
+        warn "${name}: Windows (CRLF) line endings - running a normalised copy; save the file with Unix (LF) endings to silence this"
+        runner="${TMPDIR:-/tmp}/opencode-hook-${safe}.$$.sh"
+        if sed 's/\r$//' "${f}" > "${runner}" 2>/dev/null; then
+            cleanup="${runner}"
+        else
+            warn "${name}: could not normalise line endings, running the file as-is"
+            runner="${f}"
+        fi
+    fi
+
+    if [ -f "${log_file}" ]; then
+        local log_size
+        log_size=$(stat -c %s "${log_file}" 2>/dev/null || echo 0)
+        if [ "${log_size}" -ge "${LOG_WARN_BYTES}" ]; then
+            warn "${name}: its log reached $((log_size / 1024 / 1024)) MB - a daemon started by this hook should redirect its own output elsewhere"
+        fi
+    fi
+
+    # Truncated once here, then opened in append mode for the run. A plain '>'
+    # against a file a previously-started daemon still holds open recreates it
+    # at that daemon's stale offset, which shows up as a multi-gigabyte sparse
+    # file full of NULs - the exact opposite of bounding the log.
+    : > "${log_file}" 2>/dev/null || true
+    chmod 600 "${log_file}" 2>/dev/null || true
+
+    started=$(date +%s)
+    log "${name}: running (timeout ${limit}s)"
+
+    # So a hook can name itself in its own output without hardcoding it.
+    export OPENCODE_HOOK_NAME="${name}"
+
+    # No `--foreground`: a runaway hook should take its whole process group with
+    # it. That is exactly why a daemon has to `setsid` itself out of that group,
+    # which is what the example and the documentation tell it to do.
+    #
+    # 9>&- closes the sweep's lock descriptor for the hook and everything it
+    # starts. Without it a detached daemon - which is exactly what the example
+    # and the documentation tell people to start - inherits the open file
+    # description and holds the lock for the life of the container, so every
+    # later `ha-hooks run` reports "already running" and never recovers.
+    if [ "${limit}" = "0" ]; then
+        bash "${runner}" >> "${log_file}" 2>&1 < /dev/null 9>&-
+        rc=$?
+    else
+        timeout -k 10 "${limit}" bash "${runner}" >> "${log_file}" 2>&1 < /dev/null 9>&-
+        rc=$?
+    fi
+    finished=$(date +%s)
+
+    [ -n "${cleanup}" ] && rm -f "${cleanup}" 2>/dev/null
+
+    printf '%s %s %s\n' "${finished}" "${rc}" "$((finished - started))" > "${STATE_DIR}/${safe}.status"
+
+    if [ "${rc}" -eq 0 ]; then
+        log "${name}: ok ($((finished - started))s)"
+    elif [ "${rc}" -eq 124 ] || [ "${rc}" -eq 137 ]; then
+        warn "${name}: timed out after ${limit}s and was killed - see 'ha-hooks log ${name}'"
+        warn "${name}: a hook must return; start anything long-running with 'setsid ... </dev/null >LOG 2>&1 &'"
+    else
+        warn "${name}: exited ${rc} after $((finished - started))s - see 'ha-hooks log ${name}'"
+    fi
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Sweep
+# -----------------------------------------------------------------------------
+main() {
+    umask 077
+
+    # The option is the gate, and it is checked here rather than only in the
+    # callers. This script is on PATH, so without this an interactive shell
+    # could run every hook - and create the hooks folder in the user's
+    # configuration directory - with the feature switched off, which is exactly
+    # what the documentation promises cannot happen.
+    if [ "$(cat "${ENABLED_MARKER}" 2>/dev/null || echo "false")" != "true" ]; then
+        warn "startup hooks are turned off; nothing will run"
+        warn "turn on 'Startup hooks' in the add-on Configuration tab and restart"
+        return 0
+    fi
+
+    mkdir -p "${STATE_DIR}" 2>/dev/null || true
+    chmod 700 "${STATE_DIR}" 2>/dev/null || true
+
+    if [ "${MODE}" = "manifest" ]; then
+        print_manifest
+        return 0
+    fi
+
+    ensure_hooks_dir || return 0
+
+    # One sweep at a time. Without this, `ha-hooks run` during the boot sweep
+    # starts a second copy of every daemon - which surfaces as "address already
+    # in use" attributed to the hook rather than to the double start.
+    #
+    # The guard is best-effort in both directions. If the lock file cannot be
+    # opened, or flock is not present, the sweep still runs: refusing to run the
+    # user's hooks because a lock could not be taken would turn a minor problem
+    # into the feature not working at all. Only a lock that is actively held by
+    # another sweep stops us.
+    if command -v flock >/dev/null 2>&1 && exec 9>"${LOCK_FILE}" 2>/dev/null; then
+        if ! flock -n 9; then
+            warn "startup hooks are already running; nothing to do"
+            return 1
+        fi
+    else
+        warn "no lock available; continuing without the concurrency guard"
+    fi
+
+    if [ "${MODE}" = "boot" ]; then
+        local previous now
+        now=$(date +%s)
+        previous=$(cat "${LAST_RUN_FILE}" 2>/dev/null || echo 0)
+        case "${previous}" in ''|*[!0-9]*) previous=0 ;; esac
+        if [ "${previous}" -gt 0 ] && [ "$((now - previous))" -lt "${MIN_RESTART_GAP}" ]; then
+            warn "skipped - the add-on restarted $((now - previous))s ago, which looks like a restart loop"
+            warn "run them by hand with 'ha-hooks run' once the add-on is stable"
+            return 0
+        fi
+        # Stamped before the sweep so a hook that kills the container part-way
+        # through is still counted, and again after it (see the end of main) so
+        # a sweep that takes longer than the gap does not reset the clock and
+        # let a slow-but-fatal hook loop forever.
+        printf '%s\n' "${now}" > "${LAST_RUN_FILE}"
+    fi
+
+    collect_hooks
+
+    # Matched against the collected set rather than rebuilt as a path, so a
+    # named run obeys every rule a start-up run obeys. Re-deriving the path
+    # would happily run a hook the user had disabled by renaming it, a dotfile,
+    # a symlink, or a file that is not a hook at all.
+    if [ -n "${ONLY}" ]; then
+        local want match="" f
+        want=$(basename "${ONLY}")
+        if [ "${#HOOKS[@]}" -gt 0 ]; then
+            for f in "${HOOKS[@]}"; do
+                if [ "$(basename "${f}")" = "${want}" ]; then
+                    match="${f}"
+                    break
+                fi
+            done
+        fi
+        if [ -z "${match}" ]; then
+            warn "no such hook: ${ONLY}"
+            warn "it has to be a .sh file in ${HOOKS_DIR} - 'ha-hooks list' shows what is there"
+            return 1
+        fi
+        run_hook "${match}"
+        return 0
+    fi
+
+    if [ "${#HOOKS[@]}" -eq 0 ]; then
+        log "no startup hooks in ${HOOKS_DIR}"
+        return 0
+    fi
+
+    log "running ${#HOOKS[@]} startup hook(s) from ${HOOKS_DIR}"
+    for f in "${HOOKS[@]}"; do
+        run_hook "${f}"
+    done
+
+    # See the note where this is first written: the second stamp is what makes
+    # the breaker cover a sweep that outlasts MIN_RESTART_GAP.
+    if [ "${MODE}" = "boot" ]; then
+        date +%s > "${LAST_RUN_FILE}"
+    fi
+
+    log "finished"
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Environment handed to hooks
+#
+# The same environment the add-on's own services get. A hook runs as root, so
+# withholding any of it would be theatre - it can read /proc/1/environ in one
+# line - and the documentation says plainly what a hook can reach.
+#
+# The user's own variables were sourced at the top of this file. These are set
+# afterwards so the add-on's own paths win over anything sharing their name.
+# -----------------------------------------------------------------------------
+export HOME="/data"
+export XDG_DATA_HOME="/data/.local/share"
+export XDG_CONFIG_HOME="/data/.config"
+export NPM_CONFIG_PREFIX="/data/.npm-global"
+
+# Kept process-only, exactly as the add-on's own services do - never written to
+# /data/.env_vars.
+if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    export HA_TOKEN="${SUPERVISOR_TOKEN}"
+fi
+
+export TMPDIR="${TMPDIR:-/data/.cache/opencode-tmp}"
+mkdir -p "${TMPDIR}" 2>/dev/null || true
+
+# CPython block-buffers stdout when it is not a terminal, and it never is here,
+# so a hook that is killed loses everything it printed. This is the difference
+# between a crash you can read and an empty log file.
+export PYTHONUNBUFFERED=1
+export PYTHONFAULTHANDLER=1
+
+export OPENCODE_HOOKS_DIR="${HOOKS_DIR}"
+export OPENCODE_HOOKS_STATE_DIR="${STATE_DIR}"
+
+main "$@"

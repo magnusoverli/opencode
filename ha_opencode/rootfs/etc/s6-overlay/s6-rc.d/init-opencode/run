@@ -35,6 +35,7 @@ RESTRICT_SENSITIVE_FILES=$(bashio::config 'restrict_sensitive_files' 2>/dev/null
 FOCUS_MODE=$(bashio::config 'focus_mode' 2>/dev/null || echo "false")
 HOME_BRIEFING_ENABLED=$(bashio::config 'home_briefing_enabled' 2>/dev/null || echo "true")
 DECISION_NOTES_ENABLED=$(bashio::config 'decision_notes_enabled' 2>/dev/null || echo "true")
+USER_HOOKS_ENABLED=$(bashio::config 'user_hooks_enabled' 2>/dev/null || echo "false")
 
 ACCESS_TOKEN=$(bashio::config 'access_token' || echo "")
 PPQ_API_KEY=$(bashio::config 'ppq_api_key' || echo "")
@@ -74,7 +75,15 @@ if [ "${DECISION_NOTES_ENABLED}" != "false" ]; then
     DECISION_NOTES_ENABLED="true"
 fi
 
-bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} MCP_TOOL_PROFILE=${MCP_TOOL_PROFILE} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED}"
+# Startup hooks run arbitrary code the add-on did not write, so this one is an
+# allow-list rather than the "anything but false" form used above: an option
+# absent from an older options.json reads back as the literal string "null",
+# and that must never turn this on.
+if [ "${USER_HOOKS_ENABLED}" != "true" ]; then
+    USER_HOOKS_ENABLED="false"
+fi
+
+bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} MCP_TOOL_PROFILE=${MCP_TOOL_PROFILE} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED} USER_HOOKS=${USER_HOOKS_ENABLED}"
 
 # Set up persistent HOME and npm global prefix for OpenCode runtime updates.
 export HOME="/data"
@@ -233,6 +242,10 @@ fi
 # ==============================================================================
 
 printf '%s\n' "${ADDON_ACCESS_ENABLED}" > /data/.addon_access_enabled
+
+# Read by ha-hooks and the terminal banner, so an interactive shell does not
+# have to reach for bashio to find out whether hooks are on.
+printf '%s\n' "${USER_HOOKS_ENABLED}" > /data/.user_hooks_enabled
 
 if bashio::var.true "${ADDON_ACCESS_ENABLED}"; then
     printf 'export OPENCODE_ADDON_ACCESS_ENABLED=true\n' >> "${ENV_VARS_FILE}"
@@ -818,6 +831,10 @@ RESTRICT_BOOL=$([ "${RESTRICT_SENSITIVE_FILES}" = "true" ] && echo "true" || ech
 FOCUS_BOOL=$([ "${FOCUS_MODE}" = "true" ] && echo "true" || echo "false")
 BRIEFING_BOOL=$([ "${HOME_BRIEFING_ENABLED}" = "true" ] && echo "true" || echo "false")
 NOTES_BOOL=$([ "${DECISION_NOTES_ENABLED}" = "true" ] && echo "true" || echo "false")
+# Only loaded when hooks are on. The instructions cost tokens on every request,
+# and describing a feature the user has not enabled would train the model to
+# recommend it.
+HOOKS_BOOL=$([ "${USER_HOOKS_ENABLED}" = "true" ] && echo "true" || echo "false")
 
 # Stable's AGENTS.md sits in the working directory, where OpenCode finds it by
 # convention and listing it again would load it twice. Beta's lives in /data
@@ -828,7 +845,7 @@ if [ "${ADDON_AGENTS_IN_CONFIG_DIR}" != "true" ]; then
     CHANNEL_AGENTS_INSTRUCTION="${ADDON_AGENTS_FILE}"
 fi
 
-jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --arg mcp_tool_profile "${MCP_TOOL_PROFILE}" --arg profile_instruction "/opt/ha-mcp-server/MCP_PROFILE_$(echo "${MCP_TOOL_PROFILE}" | tr "[:lower:]" "[:upper:]").md" --arg channel_agents "${CHANNEL_AGENTS_INSTRUCTION}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" --argjson restrict "${RESTRICT_BOOL}" --argjson focus "${FOCUS_BOOL}" --argjson briefing "${BRIEFING_BOOL}" --argjson notes "${NOTES_BOOL}" '
+jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --arg mcp_tool_profile "${MCP_TOOL_PROFILE}" --arg profile_instruction "/opt/ha-mcp-server/MCP_PROFILE_$(echo "${MCP_TOOL_PROFILE}" | tr "[:lower:]" "[:upper:]").md" --arg channel_agents "${CHANNEL_AGENTS_INSTRUCTION}" --argjson mcp "${MCP_BOOL}" --argjson native_ha_mcp "${NATIVE_HA_MCP_BOOL}" --argjson lsp_disabled "${LSP_DISABLED}" --argjson ppq "${PPQ_PROVIDER_ENABLED}" --argjson restrict "${RESTRICT_BOOL}" --argjson focus "${FOCUS_BOOL}" --argjson briefing "${BRIEFING_BOOL}" --argjson notes "${NOTES_BOOL}" --argjson hooks "${HOOKS_BOOL}" '
     .mcp.homeassistant.enabled = $mcp |
     .mcp.homeassistant.environment.HA_NATIVE_MCP_API_ID = $native_ha_mcp_api_id |
     .mcp.homeassistant.environment.OPENCODE_MCP_TOOL_PROFILE = $mcp_tool_profile |
@@ -857,6 +874,9 @@ jq --arg native_ha_mcp_api_id "${NATIVE_HA_MCP_API_ID}" --arg mcp_tool_profile "
     else . end |
     if $notes then
         .instructions = ((.instructions // []) + ["/data/context/decision-notes.md"])
+    else . end |
+    if $hooks then
+        .instructions = ((.instructions // []) + ["/opt/ha-mcp-server/USER_HOOKS.md"])
     else . end |
     if ($channel_agents | length) > 0 then
         .instructions = ((.instructions // []) + [$channel_agents])
@@ -974,6 +994,50 @@ if [ -f "${OPTIONS_FILE}" ]; then
         # No custom config provided - remove any stale config.json from a previous run
         rm -f "${CONFIG_TARGET}"
     fi
+fi
+
+# ==============================================================================
+# User startup hooks (opt-in)
+#
+# Scripts the user keeps in their own configuration directory, run once per
+# start. This is the supported alternative to editing files inside the
+# container, which never survives a restart.
+#
+# Two things this block must never do. It must not change this oneshot's exit
+# status — the base image sets S6_BEHAVIOUR_IF_STAGE2_FAILS=2, so a failed
+# oneshot takes the whole container down, and a default-off feature does not get
+# a vote on whether the add-on boots. And it must not block: the sweep is
+# detached exactly like service discovery and the context generator above, so a
+# hook that hangs cannot delay ingress or the health check.
+#
+# What is NOT detached is the manifest. Hooks are arbitrary root code, so the
+# add-on log names every file it is about to run, with its digest, while anyone
+# reading the log can still see it.
+# ==============================================================================
+
+if [ "${USER_HOOKS_ENABLED}" = "true" ]; then
+    {
+        bashio::log.warning "Startup hooks are enabled. Scripts in ${ADDON_STATE_DIR}/startup.d run as root on every start."
+        bashio::log.warning "They are your own code: the add-on runs them, and does not check, supervise or restart them."
+
+        while IFS= read -r hook_line; do
+            [ -n "${hook_line}" ] && bashio::log.warning "  hook: ${hook_line}"
+        done < <(/usr/local/bin/opencode-run-hooks --manifest 2>/dev/null || true)
+
+        # nice, because a hook competing with ttyd for CPU on a small machine
+        # shows up as an unresponsive terminal and then as a failed health check.
+        # </dev/null and a log file, because a oneshot's descriptors are passed
+        # in by s6 and a daemon that inherits them holds them open for good.
+        nice -n 10 setsid /usr/local/bin/opencode-run-hooks --boot \
+            >/tmp/user-hooks.log 2>&1 </dev/null &
+
+        # "started", not "running": the sweep can still decline to do anything
+        # (restart-loop breaker, a symlinked folder, a lock another sweep holds)
+        # and claiming it ran would send people looking in the wrong place.
+        bashio::log.info "Startup hooks started in the background - 'ha-hooks list' and 'ha-hooks log' show what happened"
+    } || true
+else
+    bashio::log.info "Startup hooks disabled"
 fi
 
 bashio::log.info "OpenCode initialization complete"

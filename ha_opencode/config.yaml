@@ -145,6 +145,9 @@ options:
   env_vars: []
   # Custom OpenCode configuration (JSON)
   opencode_config: ""
+  # Run your own .sh scripts from <config>/opencode/startup.d at every start.
+  # These scripts run as root, so this explicit opt-in remains last.
+  user_hooks_enabled: false
 
 schema:
   # --- 1. Presentation ---------------------------------------------------
@@ -195,6 +198,7 @@ schema:
     - name: str
       value: str
   opencode_config: str?
+  user_hooks_enabled: bool
 
 # Exclude caches from backups
 backup_exclude:
@@ -208,3 +212,5 @@ backup_exclude:
   # Generated home context is rebuilt at every start; restoring a stale copy
   # would describe a different installation.
   - "context/*"
+  # Startup-hook output can contain credentials from the hook environment.
+  - "hooks/*"

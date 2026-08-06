@@ -28,6 +28,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **PPQ Private TEE Models (Beta)**: Optional encrypted proxy for PPQ private models running in remote TEEs. Included in stable releases, but still considered beta.
 - **Serial Device Access**: Optionally map selected host serial devices into the add-on for USB flashing and adapter inspection workflows
 - **Optional LAN Server Mode**: Attach from another computer on your local network using the OpenCode CLI
+- **Startup Hooks**: Optional persistent shell scripts that run at add-on startup
 
 ## Configuration
 
@@ -151,6 +152,7 @@ Everything else stays fully readable, and this doesn't change how the agent edit
 |--------|---------|-------------|
 | **Environment variables** | `[]` | Define extra environment variables for OpenCode and the terminal shell. Critical system variables cannot be overridden. |
 | **Custom OpenCode configuration** | `""` | A JSON object merged into OpenCode's configuration. See [OpenCode config docs](https://opencode.ai/docs/config) for the full schema. |
+| **Startup hooks** | `false` | Run your own `.sh` scripts from the add-on's persistent `startup.d` folder. See [Startup Hooks](#startup-hooks). |
 
 ### Resource Usage
 
@@ -244,6 +246,24 @@ Bundled model IDs come from the pinned `ppq-private-mode` package version:
 | `private/gpt-oss-120b` | Budget-friendly general use |
 | `private/llama3-3-70b` | Open-source tasks |
 | `private/qwen3-vl-30b` | Vision and text, 262K context window |
+
+### Startup Hooks
+
+Startup hooks are the supported way to add your own script, bridge, or small service without editing the container. Turn on **Startup hooks** in the Configuration tab and restart the add-on. It creates an `startup.d` folder in this add-on's directory under your Home Assistant configuration folder, with a README and inert example; run `ha-hooks list` in the terminal to see its exact path.
+
+Every `.sh` file in that folder runs as root, in filename order, each time the add-on starts. Keep a number prefix such as `10-` or `20-`; rename a file so it no longer ends in `.sh` to disable it. The add-on runs hooks but does not validate, supervise, or restart anything they start.
+
+Use `ha-hooks list` to inspect hooks and their previous status, `ha-hooks run [name]` to test one without restarting, and `ha-hooks log [name]` to view output. A hook must return and is stopped after 15 minutes by default; use `# opencode-hook-timeout: <seconds>` in its first ten lines to change that, or `0` for no limit. Start an intended long-running process with `setsid`, redirect it to its own log, and guard it so a re-run does not start a second copy.
+
+```sh
+if pgrep -f "/data/mybridge/server.py" >/dev/null 2>&1; then exit 0; fi
+setsid /data/venvs/mybridge/bin/python3 -u /data/mybridge/server.py \
+    >/data/mybridge.log 2>&1 </dev/null &
+```
+
+Keep persistent dependencies and payload files under `/data`, not inside the container. A hook can reach Home Assistant through `http://supervisor/core` with its existing `SUPERVISOR_TOKEN`. It can reach OpenCode at `http://127.0.0.1:4096` when **OpenCode LAN server** is enabled; the port need not be mapped to the LAN for a hook to use it.
+
+Security matters: hooks run with the add-on's credentials, including the Supervisor token and configured environment variables. Do not use `set -x`, review hook logs before sharing them, and leave the option off unless you intentionally want scripts in your configuration directory to execute. Hook logs are private to the add-on and excluded from backups. Turn **Startup hooks** off and restart to disable every hook if something goes wrong.
 
 ### Serial Devices
 
