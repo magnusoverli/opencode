@@ -279,6 +279,19 @@ The add-on log shows the current Home Assistant port mapping when the server sta
 
 Security warning: enabling this service and mapping the port exposes an OpenCode server on your LAN. Only use this on trusted networks, restrict access with your network/firewall controls, and never expose the port to the internet or untrusted networks.
 
+LAN server sessions have no terminal prompt to answer an `ask` permission. To prevent an HTTP client from leaving a write tool call running forever, the add-on denies unmatched `edit: ask` rules in this mode only. The terminal and Ingress UI keep their normal confirmation prompts.
+
+For a write-capable custom agent, grant only the directory it needs and deny the rest. OpenCode evaluates edit rules relative to `/homeassistant`; the add-on also accepts the documented absolute form and translates it for LAN sessions.
+
+```yaml
+permission:
+  edit:
+    "*": deny
+    "docs/**": allow
+```
+
+The equivalent `"/homeassistant/docs/**": allow` works in LAN server mode after an add-on restart. An explicit `edit: allow` remains fully write-capable. The rule is applied when the server starts, so restart the add-on after adding or changing a custom agent file.
+
 #### Connecting a browser-based client (CORS)
 
 `opencode attach` and other non-browser clients work without extra configuration. Browser-based clients that call the LAN server directly are subject to the browser's CORS policy. Without an allowed origin, a client may list providers and models but fail when sending chat messages or opening the event stream.

@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- **LAN custom agents can write their allowed files ([issue #92](https://github.com/magnusoverli/opencode/issues/92))** — scoped absolute edit rules now work in headless server sessions, while unapproved writes are denied instead of hanging indefinitely.
 - **Sharper Home Assistant agent tools** — choose a compact, configuration, or full MCP tool profile to reduce irrelevant tool definitions; capability status now says whether the native MCP bridge is actually usable; and `ha-agent-eval` can score a real OpenAI-compatible model against safe synthetic tool-call scenarios without touching your Home Assistant instance.
 - **Smaller installed image** — production images no longer include unused platform binaries, development artifacts, build toolchains, or the standalone PPQ proxy's optional OpenClaw peer tree; runtime features are unchanged.
 

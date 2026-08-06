@@ -84,4 +84,10 @@ else
 fi
 
 cd /homeassistant
+if HEADLESS_PERMISSION_CONFIG=$(node /opt/ha-mcp-server/headless-permissions.mjs); then
+    export OPENCODE_CONFIG_CONTENT="${HEADLESS_PERMISSION_CONFIG}"
+    bashio::log.info "LAN server: explicit edit allows are enabled; unmatched headless edit requests are denied."
+else
+    bashio::log.warning "LAN server: could not prepare the headless permission policy; OpenCode's normal permission handling applies."
+fi
 exec opencode serve --hostname 0.0.0.0 --port "${SERVER_PORT}" "${CORS_ARGS[@]}"

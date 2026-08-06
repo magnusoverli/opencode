@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **LAN custom agents can write their allowed files ([issue #92](https://github.com/magnusoverli/opencode/issues/92))** — scoped absolute edit rules now work in headless server sessions, while unapproved writes are denied instead of hanging indefinitely.
+
 ## 2.4.1b2
 
 - **Sharper Home Assistant agent tools** — choose a compact, configuration, or full MCP tool profile to reduce irrelevant tool definitions; capability status now says whether the native MCP bridge is actually usable; and `ha-agent-eval` can score a real OpenAI-compatible model against safe synthetic tool-call scenarios without touching your Home Assistant instance.
