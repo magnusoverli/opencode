@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.4.1b3
 
 - **LAN custom agents can write their allowed files ([issue #92](https://github.com/magnusoverli/opencode/issues/92))** — scoped absolute edit rules now work in headless server sessions, while unapproved writes are denied instead of hanging indefinitely.
 
