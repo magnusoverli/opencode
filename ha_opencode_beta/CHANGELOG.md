@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.2b5
+
+- **OpenChamber restarts no longer leave port-holding orphan processes** — the server and Home Assistant Ingress proxy are now independently supervised, so restarting either cannot strand the other on ports 3010 or 8099.
+
 ## 2.4.2b4
 
 - **Unambiguous history timestamps ([issue #94](https://github.com/magnusoverli/opencode/issues/94))** — history, logbook, and calendar queries now require caller-provided timestamps to include `Z` or a UTC offset, preventing Home Assistant local-time interpretation from silently shifting requested windows.

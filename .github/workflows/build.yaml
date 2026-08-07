@@ -38,6 +38,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Test OpenChamber service ownership
+        shell: bash
+        run: node --test ha_opencode/test/openchamber-s6-services.test.js
+
       - name: Get version
         id: version
         shell: bash

@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- **OpenChamber restarts no longer leave port-holding orphan processes** — the server and Home Assistant Ingress proxy are now independently supervised, so restarting either cannot strand the other on ports 3010 or 8099.
+
 ## 2.4.1
 
 - **Startup hooks ([issue #66](https://github.com/magnusoverli/opencode/issues/66))** — an opt-in, persistent `startup.d` folder is now the supported place for your own shell scripts that need to run at add-on startup. Hooks run as root in filename order; `ha-hooks list`, `ha-hooks run`, and `ha-hooks log` let you inspect and test them. They are off by default, are bounded against hangs and restart loops, and their credential-bearing logs are excluded from backups.

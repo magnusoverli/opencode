@@ -1,0 +1,46 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# OpenCode - OpenChamber Home Assistant Ingress Proxy Service
+# ==============================================================================
+
+export HOME="/data"
+export XDG_DATA_HOME="/data/.local/share"
+export XDG_CONFIG_HOME="/data/.config"
+export NPM_CONFIG_PREFIX="/data/.npm-global"
+export NODE_OPTIONS="--max-old-space-size=768"
+
+if [ -f /data/.env_vars ]; then
+    source /data/.env_vars
+fi
+
+INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+if [ "${INTERFACE_MODE}" != "openchamber" ]; then
+    bashio::log.info "Interface mode is '${INTERFACE_MODE}'; OpenChamber ingress proxy is inactive."
+    exec sleep infinity
+fi
+
+OPENCHAMBER_INTERNAL_PORT=3010
+OPENCHAMBER_INGRESS_PORT=8099
+
+# The default Ingress proxy must not inherit a permissive setting from user
+# environment variables. Only the separate LAN service permits remote clients.
+export OPENCHAMBER_ALLOW_ANY_REMOTE="false"
+export OPENCHAMBER_INGRESS_HOST="0.0.0.0"
+export OPENCHAMBER_INGRESS_PORT
+export OPENCHAMBER_UPSTREAM_HOST="127.0.0.1"
+export OPENCHAMBER_UPSTREAM_PORT="${OPENCHAMBER_INTERNAL_PORT}"
+
+bashio::log.info "Waiting for OpenChamber server on 127.0.0.1:${OPENCHAMBER_INTERNAL_PORT}"
+for _ in $(seq 1 120); do
+    if curl -fsS --max-time 2 "http://127.0.0.1:${OPENCHAMBER_INTERNAL_PORT}/health" >/dev/null 2>&1; then
+        bashio::log.info "Starting OpenChamber ingress proxy on 0.0.0.0:${OPENCHAMBER_INGRESS_PORT}"
+        exec node /usr/local/bin/openchamber-ingress-proxy.js
+    fi
+    sleep 0.5
+done
+
+bashio::log.error "OpenChamber did not become ready within 60 seconds; restarting it."
+# Preserve the former coordinator's retry behaviour without making this proxy
+# the server's parent. s6 owns the server directly and restarts it after TERM.
+/command/s6-svc -r /run/service/ha-openchamber || bashio::log.error "Could not request OpenChamber server restart"
+exit 1
