@@ -101,6 +101,7 @@ import {
 } from "./lib/ha-native-mcp.js";
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
 import { createSupervisorAppsClient } from "./lib/supervisor-apps.js";
+import { requireTimezoneAwareTimestamp } from "./lib/timestamps.js";
 import {
   DEFAULT_LIST_LIMIT as SUPERVISOR_DEFAULT_LIST_LIMIT,
   DEFAULT_LOG_LINES as SUPERVISOR_DEFAULT_LOG_LINES,
@@ -140,7 +141,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const SUPERVISOR_API = "http://supervisor/core/api";
+const SUPERVISOR_API = process.env.HA_API_BASE_URL || "http://supervisor/core/api";
 const SUPERVISOR_BASE_URL = process.env.SUPERVISOR_BASE_URL || "http://supervisor";
 const HA_CONFIG_DIR = "/homeassistant";
 const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
@@ -2645,7 +2646,7 @@ const TOOLS = [
   {
     name: "get_history",
     title: "Get Entity History",
-    description: "Get historical state data for entities. Essential for analyzing trends, debugging issues, or understanding patterns.",
+    description: "Get historical state data for entities. Essential for analyzing trends, debugging issues, or understanding patterns. History timestamps are returned in UTC.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2655,11 +2656,11 @@ const TOOLS = [
         },
         start_time: {
           type: "string",
-          description: "Start time in ISO format (e.g., '2024-01-15T00:00:00'). Defaults to 24 hours ago.",
+          description: "Start time as a timezone-aware RFC 3339 timestamp, for example '2024-01-15T00:00:00Z' or '2024-01-15T00:00:00+02:00'. Z or an explicit UTC offset is required when supplied. Defaults to 24 hours ago in UTC.",
         },
         end_time: {
           type: "string",
-          description: "End time in ISO format. Defaults to now.",
+          description: "End time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to now in UTC.",
         },
         minimal: {
           type: "boolean",
@@ -2677,13 +2678,13 @@ const TOOLS = [
   {
     name: "get_logbook",
     title: "Get Activity Logbook",
-    description: "Get logbook entries showing what happened in Home Assistant. Useful for understanding recent activity and debugging.",
+    description: "Get logbook entries showing what happened in Home Assistant. Useful for understanding recent activity and debugging. Logbook timestamps are returned in UTC.",
     inputSchema: {
       type: "object",
       properties: {
         entity_id: { type: "string", description: "Filter by specific entity" },
-        start_time: { type: "string", description: "Start time in ISO format. Defaults to 24 hours ago." },
-        end_time: { type: "string", description: "End time in ISO format. Defaults to now." },
+        start_time: { type: "string", description: "Start time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to 24 hours ago in UTC." },
+        end_time: { type: "string", description: "End time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to now in UTC." },
       },
       additionalProperties: false,
     },
@@ -2843,13 +2844,13 @@ const TOOLS = [
   {
     name: "get_calendar_events",
     title: "Get Calendar Events",
-    description: "Get events from a specific calendar within a time range.",
+    description: "Get events from a specific calendar within a time range. Calendar dateTime responses use Home Assistant local time with an explicit offset; all-day events use dates.",
     inputSchema: {
       type: "object",
       properties: {
         calendar_entity: { type: "string", description: "Calendar entity ID (e.g., 'calendar.family')" },
-        start: { type: "string", description: "Start time in ISO format" },
-        end: { type: "string", description: "End time in ISO format" },
+        start: { type: "string", description: "Start time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to now in UTC." },
+        end: { type: "string", description: "End time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to seven days from now in UTC." },
       },
       required: ["calendar_entity"],
       additionalProperties: false,
@@ -4150,9 +4151,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // === HISTORY & LOGBOOK ===
       case "get_history": {
         const entityId = args.entity_id;
-        const startTime = args.start_time || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const startTime = args.start_time === undefined
+          ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+          : requireTimezoneAwareTimestamp(args.start_time, "start_time");
+        const endTime = args.end_time === undefined
+          ? null
+          : requireTimezoneAwareTimestamp(args.end_time, "end_time");
         const params = new URLSearchParams({ filter_entity_id: entityId });
-        if (args.end_time) params.append("end_time", args.end_time);
+        if (endTime) params.append("end_time", endTime);
         // Full attribute payloads are opt-in; minimal keeps chatty sensors cheap
         if (args.minimal !== false) {
           params.append("minimal_response", "true");
@@ -4173,7 +4179,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               entity_id: entityId,
               start_time: startTime,
-              end_time: args.end_time || null,
+              end_time: endTime,
+              input_time_requirement: "RFC 3339 timestamp with Z or UTC offset",
+              response_time_reference: "UTC",
               minimal: args.minimal !== false,
               total_events: events.length,
               returned_events: returnedEvents.length,
@@ -4185,10 +4193,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_logbook": {
-        const startTime = args.start_time || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const startTime = args.start_time === undefined
+          ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+          : requireTimezoneAwareTimestamp(args.start_time, "start_time");
+        const endTime = args.end_time === undefined
+          ? null
+          : requireTimezoneAwareTimestamp(args.end_time, "end_time");
         const params = new URLSearchParams();
         if (args.entity_id) params.append("entity", args.entity_id);
-        if (args.end_time) params.append("end_time", args.end_time);
+        if (endTime) params.append("end_time", endTime);
 
         const logbook = await callHA(`/logbook/${encodeURIComponent(startTime)}?${params}`);
         const entries = Array.isArray(logbook) ? logbook : [];
@@ -4203,7 +4216,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               entity_id: args.entity_id || null,
               start_time: startTime,
-              end_time: args.end_time || null,
+              end_time: endTime,
+              input_time_requirement: "RFC 3339 timestamp with Z or UTC offset",
+              response_time_reference: "UTC",
               total_entries: entries.length,
               returned_entries: returnedEntries.length,
               truncated,
@@ -4314,8 +4329,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_calendar_events": {
         const { calendar_entity } = args;
-        const start = args.start || new Date().toISOString();
-        const end = args.end || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const start = args.start === undefined
+          ? new Date().toISOString()
+          : requireTimezoneAwareTimestamp(args.start, "start");
+        const end = args.end === undefined
+          ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+          : requireTimezoneAwareTimestamp(args.end, "end");
         const events = await callHA(
           `/calendars/${calendar_entity}?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
         );

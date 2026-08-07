@@ -596,7 +596,8 @@ Read and modify YAML files to understand and change Home Assistant's defined beh
 Query and interact with the running Home Assistant instance:
 - `get_states`, `search_entities`, `get_home_context` - Current entity states and compact area/domain/entity context
 - `call_service` - Control devices (with confirmation), and read from services that answer with data (`recorder.get_statistics`, `weather.get_forecasts`, `calendar.get_events`, `todo.get_items`) — the response comes back automatically
-- `get_history`, `get_logbook` - Historical data
+- `get_history`, `get_logbook` - Historical data; supplied timestamps must include `Z` or a UTC offset
+- `get_calendar_events` - Calendar events; supplied start/end timestamps must include `Z` or a UTC offset
 - `get_devices`, `get_areas` - Device and area registry info
 - `write_config_safe` - **Safe config writing with automatic validation, content protection, and backup**
 - `validate_config` - Check configuration validity

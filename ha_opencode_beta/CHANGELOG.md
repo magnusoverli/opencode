@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.2b4
+
+- **Unambiguous history timestamps ([issue #94](https://github.com/magnusoverli/opencode/issues/94))** — history, logbook, and calendar queries now require caller-provided timestamps to include `Z` or a UTC offset, preventing Home Assistant local-time interpretation from silently shifting requested windows.
+
 ## 2.4.2b3
 
 - **Supervisor operations diagnostics** — six new read-only tools provide bounded health, Resolution, backup posture, support-log, store-audit, and metrics evidence without exposing network addresses, backup locations, repository credentials, app options, or unredacted log secrets.
