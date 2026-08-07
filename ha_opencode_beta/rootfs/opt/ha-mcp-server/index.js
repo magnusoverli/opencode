@@ -100,6 +100,7 @@ import {
   probeNativeMcpEndpoint,
 } from "./lib/ha-native-mcp.js";
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
+import { createSupervisorAppsClient } from "./lib/supervisor-apps.js";
 import {
   buildServiceCallPath,
   listResponseCapableServices,
@@ -267,7 +268,13 @@ async function callHA(endpoint, method = "GET", body = null, timeoutMs = API_TIM
  * Call Home Assistant Supervisor API directly
  * Used for add-on management, updates, jobs, and system operations
  */
-async function callSupervisor(endpoint, method = "GET", body = null, timeoutMs = API_TIMEOUT_MS) {
+async function callSupervisor(
+  endpoint,
+  method = "GET",
+  body = null,
+  timeoutMs = API_TIMEOUT_MS,
+  { suppressNotFoundLog = false } = {},
+) {
   sendLog("debug", "supervisor-api", { action: "request", endpoint, method });
 
   const options = {
@@ -287,8 +294,10 @@ async function callSupervisor(endpoint, method = "GET", body = null, timeoutMs =
   
   if (!response.ok) {
     const text = await response.text();
-    sendLog("error", "supervisor-api", { action: "error", endpoint, status: response.status, error: text });
-    throw new Error(`Supervisor API error (${response.status}): ${text}`);
+    if (!(suppressNotFoundLog && response.status === 404)) {
+      sendLog("error", "supervisor-api", { action: "error", endpoint, status: response.status, error: text });
+    }
+    throw Object.assign(new Error(`Supervisor API error (${response.status}): ${text}`), { status: response.status });
   }
 
   const contentType = response.headers.get("content-type");
@@ -300,6 +309,18 @@ async function callSupervisor(endpoint, method = "GET", body = null, timeoutMs =
   }
   return response.text();
 }
+
+const supervisorApps = createSupervisorAppsClient({
+  request: (endpoint, method, body, timeoutMs) => callSupervisor(
+    endpoint,
+    method,
+    body,
+    timeoutMs,
+    { suppressNotFoundLog: endpoint === "/v2/apps" },
+  ),
+  onFallback: (details) => sendLog("notice", "supervisor-api", { action: "v2_apps_fallback", ...details }),
+  onRecovered: (details) => sendLog("info", "supervisor-api", { action: "v2_apps_recovered", ...details }),
+});
 
 /**
  * The slug of the add-on this server is running inside.
@@ -317,7 +338,7 @@ let selfAddonSlug;
 async function getSelfAddonSlug() {
   if (selfAddonSlug !== undefined) return selfAddonSlug;
   try {
-    const info = await callSupervisor("/addons/self/info");
+    const info = await supervisorApps.info("self");
     selfAddonSlug = info?.slug || null;
   } catch (e) {
     sendLog("warning", "updates", { action: "self_slug_lookup_failed", error: e.message });
@@ -781,26 +802,26 @@ async function discoverESPHome() {
     haConfigPromise.catch(() => {});
 
     // Step 1: Find ESPHome addon
-    let addonsInfo;
+    let addons;
     try {
-      addonsInfo = await callSupervisor("/addons");
-      step("fetch_addons", "ok", { addonCount: addonsInfo.addons?.length });
+      addons = await supervisorApps.list();
+      step("fetch_addons", "ok", { addonCount: addons.length });
     } catch (e) {
       step("fetch_addons", "error", e.message);
       return { ok: false, error: `Failed to list addons: ${e.message}`, diagnostics: diag };
     }
     
-    // The Supervisor /addons endpoint does NOT reliably set `installed: true`.
+    // Supervisor's installed-app list does NOT reliably set `installed: true`.
     // Instead, an installed addon has a `state` field ("started", "stopped", etc.)
     // and/or a `version` field with the installed version string.
-    const esphome = addonsInfo.addons?.find(a => 
+    const esphome = addons.find(a =>
       a.slug.includes("esphome") && (a.state === "started" || a.state === "stopped" || a.version)
     );
     
     if (!esphome) {
       step("find_esphome", "error", "No installed addon with 'esphome' in slug");
       // Include matching slugs and their fields for debugging
-      const slugs = (addonsInfo.addons || [])
+      const slugs = addons
         .filter(a => a.slug.includes("esphome"))
         .map(a => ({ slug: a.slug, installed: a.installed, version: a.version, state: a.state }));
       diag.esphomeSlugs = slugs;
@@ -814,7 +835,7 @@ async function discoverESPHome() {
     // Step 2: Get addon info
     let info;
     try {
-      info = await callSupervisor(`/addons/${esphome.slug}/info`);
+      info = await supervisorApps.info(esphome.slug);
       diag.addonState = info.state;
       diag.ingressEntry = info.ingress_entry;
       step("addon_info", "ok", { state: info.state, version: info.version, ingress_entry: info.ingress_entry });
@@ -5216,7 +5237,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           wants("core") ? callSupervisor("/core/info") : Promise.resolve(null),
           wants("os") ? callSupervisor("/os/info") : Promise.resolve(null),
           wants("supervisor") ? callSupervisor("/supervisor/info") : Promise.resolve(null),
-          wants("addons") ? callSupervisor("/addons") : Promise.resolve(null),
+          wants("addons") ? supervisorApps.list() : Promise.resolve(null),
         ]);
 
         if (coreResult.status === "fulfilled" && coreResult.value) {
@@ -5260,7 +5281,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         if (addonsResult.status === "fulfilled" && addonsResult.value) {
-          for (const addon of addonsResult.value.addons.filter(a => a.installed)) {
+          for (const addon of addonsResult.value) {
             updates.push({
               type: "addon",
               slug: addon.slug,
@@ -5319,8 +5340,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         try {
           const [addonInfo, changelog] = await Promise.all([
-            callSupervisor(`/addons/${addon_slug}/info`),
-            callSupervisor(`/addons/${addon_slug}/changelog`),
+            supervisorApps.info(addon_slug),
+            supervisorApps.changelog(addon_slug),
           ]);
           
           const truncatedChangelog = truncateText(changelog, { maxChars: CHANGELOG_MAX_CHARS });
@@ -5355,29 +5376,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
         
-        let endpoint;
         let payload = { background: true };
         let componentName;
         
         switch (component) {
           case "core":
-            endpoint = "/core/update";
             payload.backup = backup;
             componentName = "Home Assistant Core";
             break;
           case "os":
-            endpoint = "/os/update";
             componentName = "Home Assistant OS";
             break;
           case "supervisor":
-            endpoint = "/supervisor/update";
             componentName = "Supervisor";
             break;
           case "addon":
             if (!addon_slug) {
               throw new Error("addon_slug is required when component is 'addon'");
             }
-            endpoint = `/store/addons/${addon_slug}/update`;
             payload.backup = backup;
             componentName = addon_slug;
             break;
@@ -5386,7 +5402,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         
         try {
-          const result = await callSupervisor(endpoint, "POST", payload, UPDATE_TIMEOUT_MS);
+          const result = component === "addon"
+            ? await supervisorApps.update(addon_slug, payload, UPDATE_TIMEOUT_MS)
+            : await callSupervisor(`/${component}/update`, "POST", payload, UPDATE_TIMEOUT_MS);
 
           // Background mode returns job_id
           const jobId = result?.job_id || result;

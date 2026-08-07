@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.2b2
+
+- **Supervisor apps API compatibility ([issue #90](https://github.com/magnusoverli/opencode/issues/90))** — Home Assistant update checks, app changelogs, ESPHome discovery, and startup service discovery now prefer the feature-gated Supervisor V2 apps API while safely retaining V1 add-ons API support.
+
 ## 2.4.2b1
 
 - **Firefox terminal sizing ([issue #87](https://github.com/magnusoverli/opencode/issues/87))** — the Home Assistant Ingress terminal now reconciles an inconsistent Firefox pixel ratio with the actual terminal canvas, so high-DPI displays render at the full viewport width without affecting other browsers or page code.
