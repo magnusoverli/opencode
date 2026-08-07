@@ -100,6 +100,21 @@ import {
   probeNativeMcpEndpoint,
 } from "./lib/ha-native-mcp.js";
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
+import { createSupervisorAppsClient } from "./lib/supervisor-apps.js";
+import { requireTimezoneAwareTimestamp } from "./lib/timestamps.js";
+import {
+  DEFAULT_LIST_LIMIT as SUPERVISOR_DEFAULT_LIST_LIMIT,
+  DEFAULT_LOG_LINES as SUPERVISOR_DEFAULT_LOG_LINES,
+  MAX_LIST_LIMIT as SUPERVISOR_MAX_LIST_LIMIT,
+  MAX_LOG_LINES as SUPERVISOR_MAX_LOG_LINES,
+  formatSupportLog,
+  projectBackupPosture,
+  projectResolution,
+  projectStoreAudit,
+  projectSupervisorHealth,
+  projectSupervisorMetrics,
+  redactSensitiveText,
+} from "./lib/supervisor-operations.js";
 import {
   buildServiceCallPath,
   listResponseCapableServices,
@@ -126,7 +141,8 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const SUPERVISOR_API = "http://supervisor/core/api";
+const SUPERVISOR_API = process.env.HA_API_BASE_URL || "http://supervisor/core/api";
+const SUPERVISOR_BASE_URL = process.env.SUPERVISOR_BASE_URL || "http://supervisor";
 const HA_CONFIG_DIR = "/homeassistant";
 const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
 const HA_ACCESS_TOKEN = process.env.HA_ACCESS_TOKEN;   // Long-lived token for direct HA Core calls
@@ -225,6 +241,7 @@ const API_TIMEOUT_MS = 30000;
 const CHECK_CONFIG_TIMEOUT_MS = 120000;
 const UPDATE_TIMEOUT_MS = 600000;
 const NATIVE_MCP_PROBE_TIMEOUT_MS = 5000;
+const SUPERVISOR_METRICS_CACHE_TTL_MS = 10_000;
 
 /**
  * Call Home Assistant via Supervisor API proxy
@@ -250,8 +267,9 @@ async function callHA(endpoint, method = "GET", body = null, timeoutMs = API_TIM
   
   if (!response.ok) {
     const text = await response.text();
-    sendLog("error", "ha-api", { action: "error", endpoint, status: response.status, error: text });
-    throw Object.assign(new Error(`HA API error (${response.status}): ${text}`), { status: response.status });
+    const safeText = redactSensitiveText(text).text.slice(0, 2_000);
+    sendLog("error", "ha-api", { action: "error", endpoint, status: response.status, error: safeText });
+    throw Object.assign(new Error(`HA API error (${response.status}): ${safeText}`), { status: response.status });
   }
 
   const contentType = response.headers.get("content-type");
@@ -267,7 +285,13 @@ async function callHA(endpoint, method = "GET", body = null, timeoutMs = API_TIM
  * Call Home Assistant Supervisor API directly
  * Used for add-on management, updates, jobs, and system operations
  */
-async function callSupervisor(endpoint, method = "GET", body = null, timeoutMs = API_TIMEOUT_MS) {
+async function callSupervisor(
+  endpoint,
+  method = "GET",
+  body = null,
+  timeoutMs = API_TIMEOUT_MS,
+  { suppressNotFoundLog = false } = {},
+) {
   sendLog("debug", "supervisor-api", { action: "request", endpoint, method });
 
   const options = {
@@ -283,12 +307,15 @@ async function callSupervisor(endpoint, method = "GET", body = null, timeoutMs =
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(`http://supervisor${endpoint}`, options);
+  const response = await fetch(`${SUPERVISOR_BASE_URL}${endpoint}`, options);
   
   if (!response.ok) {
     const text = await response.text();
-    sendLog("error", "supervisor-api", { action: "error", endpoint, status: response.status, error: text });
-    throw new Error(`Supervisor API error (${response.status}): ${text}`);
+    const safeText = redactSensitiveText(text).text.slice(0, 2_000);
+    if (!(suppressNotFoundLog && response.status === 404)) {
+      sendLog("error", "supervisor-api", { action: "error", endpoint, status: response.status, error: safeText });
+    }
+    throw Object.assign(new Error(`Supervisor API error (${response.status}): ${safeText}`), { status: response.status });
   }
 
   const contentType = response.headers.get("content-type");
@@ -299,6 +326,66 @@ async function callSupervisor(endpoint, method = "GET", body = null, timeoutMs =
     return result.data !== undefined ? result.data : result;
   }
   return response.text();
+}
+
+const supervisorApps = createSupervisorAppsClient({
+  request: (endpoint, method, body, timeoutMs) => callSupervisor(
+    endpoint,
+    method,
+    body,
+    timeoutMs,
+    { suppressNotFoundLog: endpoint === "/v2/apps" },
+  ),
+  onFallback: (details) => sendLog("notice", "supervisor-api", { action: "v2_apps_fallback", ...details }),
+  onRecovered: (details) => sendLog("info", "supervisor-api", { action: "v2_apps_recovered", ...details }),
+});
+
+const supervisorMetricsCache = new Map();
+
+function clampSupervisorLimit(value, fallback, maximum) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, maximum);
+}
+
+function requireSupervisorAppSlug(value) {
+  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9_-]{0,127}$/i.test(value)) {
+    throw new Error("addon_slug must be a valid Supervisor app slug");
+  }
+  return value;
+}
+
+function supportLogEndpoint(source, addonSlug, lines) {
+  const suffix = `?lines=${lines}&no_colors`;
+  if (source === "addon") {
+    return `/addons/${encodeURIComponent(requireSupervisorAppSlug(addonSlug))}/logs${suffix}`;
+  }
+  return `/${source}/logs${suffix}`;
+}
+
+async function readSupervisorMetrics(component, addonSlug) {
+  const endpoint = component === "addon"
+    ? `/addons/${encodeURIComponent(requireSupervisorAppSlug(addonSlug))}/stats`
+    : `/${component}/stats`;
+  const cached = supervisorMetricsCache.get(endpoint);
+  const now = Date.now();
+  if (cached?.value && now - cached.fetchedAt < SUPERVISOR_METRICS_CACHE_TTL_MS) {
+    return { value: cached.value, cached: true };
+  }
+  if (cached?.inflight) return cached.inflight;
+
+  const inflight = callSupervisor(endpoint)
+    .then((stats) => ({ value: projectSupervisorMetrics(stats), cached: false }))
+    .then((result) => {
+      supervisorMetricsCache.set(endpoint, { value: result.value, fetchedAt: Date.now(), inflight: null });
+      return result;
+    })
+    .finally(() => {
+      const current = supervisorMetricsCache.get(endpoint);
+      if (current?.inflight === inflight) supervisorMetricsCache.set(endpoint, { ...current, inflight: null });
+    });
+  supervisorMetricsCache.set(endpoint, { value: cached?.value || null, fetchedAt: cached?.fetchedAt || 0, inflight });
+  return inflight;
 }
 
 /**
@@ -317,7 +404,7 @@ let selfAddonSlug;
 async function getSelfAddonSlug() {
   if (selfAddonSlug !== undefined) return selfAddonSlug;
   try {
-    const info = await callSupervisor("/addons/self/info");
+    const info = await supervisorApps.info("self");
     selfAddonSlug = info?.slug || null;
   } catch (e) {
     sendLog("warning", "updates", { action: "self_slug_lookup_failed", error: e.message });
@@ -781,26 +868,26 @@ async function discoverESPHome() {
     haConfigPromise.catch(() => {});
 
     // Step 1: Find ESPHome addon
-    let addonsInfo;
+    let addons;
     try {
-      addonsInfo = await callSupervisor("/addons");
-      step("fetch_addons", "ok", { addonCount: addonsInfo.addons?.length });
+      addons = await supervisorApps.list();
+      step("fetch_addons", "ok", { addonCount: addons.length });
     } catch (e) {
       step("fetch_addons", "error", e.message);
       return { ok: false, error: `Failed to list addons: ${e.message}`, diagnostics: diag };
     }
     
-    // The Supervisor /addons endpoint does NOT reliably set `installed: true`.
+    // Supervisor's installed-app list does NOT reliably set `installed: true`.
     // Instead, an installed addon has a `state` field ("started", "stopped", etc.)
     // and/or a `version` field with the installed version string.
-    const esphome = addonsInfo.addons?.find(a => 
+    const esphome = addons.find(a =>
       a.slug.includes("esphome") && (a.state === "started" || a.state === "stopped" || a.version)
     );
     
     if (!esphome) {
       step("find_esphome", "error", "No installed addon with 'esphome' in slug");
       // Include matching slugs and their fields for debugging
-      const slugs = (addonsInfo.addons || [])
+      const slugs = addons
         .filter(a => a.slug.includes("esphome"))
         .map(a => ({ slug: a.slug, installed: a.installed, version: a.version, state: a.state }));
       diag.esphomeSlugs = slugs;
@@ -814,7 +901,7 @@ async function discoverESPHome() {
     // Step 2: Get addon info
     let info;
     try {
-      info = await callSupervisor(`/addons/${esphome.slug}/info`);
+      info = await supervisorApps.info(esphome.slug);
       diag.addonState = info.state;
       diag.ingressEntry = info.ingress_entry;
       step("addon_info", "ok", { state: info.state, version: info.version, ingress_entry: info.ingress_entry });
@@ -2559,7 +2646,7 @@ const TOOLS = [
   {
     name: "get_history",
     title: "Get Entity History",
-    description: "Get historical state data for entities. Essential for analyzing trends, debugging issues, or understanding patterns.",
+    description: "Get historical state data for entities. Essential for analyzing trends, debugging issues, or understanding patterns. History timestamps are returned in UTC.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2569,11 +2656,11 @@ const TOOLS = [
         },
         start_time: {
           type: "string",
-          description: "Start time in ISO format (e.g., '2024-01-15T00:00:00'). Defaults to 24 hours ago.",
+          description: "Start time as a timezone-aware RFC 3339 timestamp, for example '2024-01-15T00:00:00Z' or '2024-01-15T00:00:00+02:00'. Z or an explicit UTC offset is required when supplied. Defaults to 24 hours ago in UTC.",
         },
         end_time: {
           type: "string",
-          description: "End time in ISO format. Defaults to now.",
+          description: "End time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to now in UTC.",
         },
         minimal: {
           type: "boolean",
@@ -2591,13 +2678,13 @@ const TOOLS = [
   {
     name: "get_logbook",
     title: "Get Activity Logbook",
-    description: "Get logbook entries showing what happened in Home Assistant. Useful for understanding recent activity and debugging.",
+    description: "Get logbook entries showing what happened in Home Assistant. Useful for understanding recent activity and debugging. Logbook timestamps are returned in UTC.",
     inputSchema: {
       type: "object",
       properties: {
         entity_id: { type: "string", description: "Filter by specific entity" },
-        start_time: { type: "string", description: "Start time in ISO format. Defaults to 24 hours ago." },
-        end_time: { type: "string", description: "End time in ISO format. Defaults to now." },
+        start_time: { type: "string", description: "Start time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to 24 hours ago in UTC." },
+        end_time: { type: "string", description: "End time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to now in UTC." },
       },
       additionalProperties: false,
     },
@@ -2757,13 +2844,13 @@ const TOOLS = [
   {
     name: "get_calendar_events",
     title: "Get Calendar Events",
-    description: "Get events from a specific calendar within a time range.",
+    description: "Get events from a specific calendar within a time range. Calendar dateTime responses use Home Assistant local time with an explicit offset; all-day events use dates.",
     inputSchema: {
       type: "object",
       properties: {
         calendar_entity: { type: "string", description: "Calendar entity ID (e.g., 'calendar.family')" },
-        start: { type: "string", description: "Start time in ISO format" },
-        end: { type: "string", description: "End time in ISO format" },
+        start: { type: "string", description: "Start time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to now in UTC." },
+        end: { type: "string", description: "End time as a timezone-aware RFC 3339 timestamp. Z or an explicit UTC offset is required when supplied. Defaults to seven days from now in UTC." },
       },
       required: ["calendar_entity"],
       additionalProperties: false,
@@ -3114,6 +3201,135 @@ const TOOLS = [
         },
       },
       required: ["addon_slug"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  // === SUPERVISOR OPERATIONS ===
+  {
+    name: "get_supervisor_health",
+    title: "Get Supervisor Health",
+    description: "Return a privacy-preserving Home Assistant Supervisor, host, connectivity, Resolution, and job-health summary. Network addresses, hostnames, Wi-Fi data, and job error payloads are excluded.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_supervisor_resolution",
+    title: "Get Supervisor Resolution",
+    description: "List bounded Supervisor Resolution issues, unhealthy/unsupported items, suggestions, and checks without applying any remediation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: SUPERVISOR_MAX_LIST_LIMIT,
+          description: `Maximum items per Resolution category (default ${SUPERVISOR_DEFAULT_LIST_LIMIT}).`,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_backup_posture",
+    title: "Get Backup Posture",
+    description: "Return a bounded backup age, size, protection, and content summary without exposing backup locations or modifying backups.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: SUPERVISOR_MAX_LIST_LIMIT,
+          description: `Maximum backups to return, newest first (default ${SUPERVISOR_DEFAULT_LIST_LIMIT}).`,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_support_logs",
+    title: "Get Bounded Support Logs",
+    description: "Read a bounded Core, Supervisor, host, or app journal window. Credential-like values are redacted before the log is returned.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: {
+          type: "string",
+          enum: ["core", "supervisor", "host", "addon"],
+          description: "Journal source (default 'core').",
+        },
+        addon_slug: {
+          type: "string",
+          description: "Required when source is 'addon'.",
+        },
+        lines: {
+          type: "integer",
+          minimum: 1,
+          maximum: SUPERVISOR_MAX_LOG_LINES,
+          description: `Maximum recent lines to return (default ${SUPERVISOR_DEFAULT_LOG_LINES}).`,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_store_audit",
+    title: "Get Store Audit",
+    description: "Return a bounded read-only audit of Supervisor store apps and repositories. Repository credentials, query strings, and fragments are removed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: SUPERVISOR_MAX_LIST_LIMIT,
+          description: `Maximum apps and repositories to return (default ${SUPERVISOR_DEFAULT_LIST_LIMIT}).`,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_supervisor_metrics",
+    title: "Get Supervisor Metrics",
+    description: "Return a low-frequency CPU, memory, network, and block-I/O snapshot for Core, Supervisor, or an app. Results are cached briefly to avoid polling the Supervisor.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        component: {
+          type: "string",
+          enum: ["core", "supervisor", "addon"],
+          description: "Component to inspect.",
+        },
+        addon_slug: {
+          type: "string",
+          description: "Required when component is 'addon'.",
+        },
+      },
+      required: ["component"],
       additionalProperties: false,
     },
     annotations: {
@@ -3935,9 +4151,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // === HISTORY & LOGBOOK ===
       case "get_history": {
         const entityId = args.entity_id;
-        const startTime = args.start_time || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const startTime = args.start_time === undefined
+          ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+          : requireTimezoneAwareTimestamp(args.start_time, "start_time");
+        const endTime = args.end_time === undefined
+          ? null
+          : requireTimezoneAwareTimestamp(args.end_time, "end_time");
         const params = new URLSearchParams({ filter_entity_id: entityId });
-        if (args.end_time) params.append("end_time", args.end_time);
+        if (endTime) params.append("end_time", endTime);
         // Full attribute payloads are opt-in; minimal keeps chatty sensors cheap
         if (args.minimal !== false) {
           params.append("minimal_response", "true");
@@ -3958,7 +4179,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               entity_id: entityId,
               start_time: startTime,
-              end_time: args.end_time || null,
+              end_time: endTime,
+              input_time_requirement: "RFC 3339 timestamp with Z or UTC offset",
+              response_time_reference: "UTC",
               minimal: args.minimal !== false,
               total_events: events.length,
               returned_events: returnedEvents.length,
@@ -3970,10 +4193,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_logbook": {
-        const startTime = args.start_time || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const startTime = args.start_time === undefined
+          ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+          : requireTimezoneAwareTimestamp(args.start_time, "start_time");
+        const endTime = args.end_time === undefined
+          ? null
+          : requireTimezoneAwareTimestamp(args.end_time, "end_time");
         const params = new URLSearchParams();
         if (args.entity_id) params.append("entity", args.entity_id);
-        if (args.end_time) params.append("end_time", args.end_time);
+        if (endTime) params.append("end_time", endTime);
 
         const logbook = await callHA(`/logbook/${encodeURIComponent(startTime)}?${params}`);
         const entries = Array.isArray(logbook) ? logbook : [];
@@ -3988,7 +4216,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               entity_id: args.entity_id || null,
               start_time: startTime,
-              end_time: args.end_time || null,
+              end_time: endTime,
+              input_time_requirement: "RFC 3339 timestamp with Z or UTC offset",
+              response_time_reference: "UTC",
               total_entries: entries.length,
               returned_entries: returnedEntries.length,
               truncated,
@@ -4099,8 +4329,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_calendar_events": {
         const { calendar_entity } = args;
-        const start = args.start || new Date().toISOString();
-        const end = args.end || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const start = args.start === undefined
+          ? new Date().toISOString()
+          : requireTimezoneAwareTimestamp(args.start, "start");
+        const end = args.end === undefined
+          ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+          : requireTimezoneAwareTimestamp(args.end, "end");
         const events = await callHA(
           `/calendars/${calendar_entity}?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
         );
@@ -5204,6 +5438,116 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // === UPDATE MANAGEMENT ===
+      case "get_supervisor_health": {
+        sendLog("debug", "supervisor-read", { action: "get_supervisor_health" });
+        const [supervisor, host, network, resolution, jobs] = await Promise.all([
+          callSupervisor("/supervisor/info"),
+          callSupervisor("/host/info"),
+          callSupervisor("/network/info"),
+          callSupervisor("/resolution/info"),
+          callSupervisor("/jobs/info"),
+        ]);
+        const data = projectSupervisorHealth({ supervisor, host, network, resolution, jobs });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            "Returned Home Assistant Supervisor health summary",
+            data,
+            { source: "supervisor", sensitive_fields_omitted: true },
+            { audience: ["assistant"], priority: 0.9 },
+          )],
+        });
+      }
+
+      case "get_supervisor_resolution": {
+        const limit = clampSupervisorLimit(args?.limit, SUPERVISOR_DEFAULT_LIST_LIMIT, SUPERVISOR_MAX_LIST_LIMIT);
+        sendLog("debug", "supervisor-read", { action: "get_supervisor_resolution", limit });
+        const data = projectResolution(await callSupervisor("/resolution/info"), { limit });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            "Returned bounded Supervisor Resolution evidence",
+            data,
+            { source: "supervisor", limit, sensitive_fields_omitted: true },
+            { audience: ["assistant"], priority: 0.9 },
+          )],
+        });
+      }
+
+      case "get_backup_posture": {
+        const limit = clampSupervisorLimit(args?.limit, SUPERVISOR_DEFAULT_LIST_LIMIT, SUPERVISOR_MAX_LIST_LIMIT);
+        sendLog("debug", "supervisor-read", { action: "get_backup_posture", limit });
+        const data = projectBackupPosture(await callSupervisor("/backups/info"), { limit });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            "Returned bounded Home Assistant backup posture",
+            data,
+            { source: "supervisor", limit, locations_omitted: true },
+            { audience: ["assistant"], priority: 0.8 },
+          )],
+        });
+      }
+
+      case "get_support_logs": {
+        const source = args?.source || "core";
+        if (!new Set(["core", "supervisor", "host", "addon"]).has(source)) {
+          throw new Error("source must be one of: core, supervisor, host, addon");
+        }
+        const lines = clampSupervisorLimit(args?.lines, SUPERVISOR_DEFAULT_LOG_LINES, SUPERVISOR_MAX_LOG_LINES);
+        const addonSlug = args?.addon_slug;
+        const endpoint = supportLogEndpoint(source, addonSlug, lines);
+        sendLog("debug", "supervisor-read", { action: "get_support_logs", source, lines });
+        const result = formatSupportLog(await callSupervisor(endpoint), { source, addonSlug, lines });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            result.summary,
+            result.data,
+            result.meta,
+            { audience: ["assistant"], priority: 0.8 },
+          )],
+        });
+      }
+
+      case "get_store_audit": {
+        const limit = clampSupervisorLimit(args?.limit, SUPERVISOR_DEFAULT_LIST_LIMIT, SUPERVISOR_MAX_LIST_LIMIT);
+        sendLog("debug", "supervisor-read", { action: "get_store_audit", limit });
+        const data = projectStoreAudit(await callSupervisor("/store"), { limit });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            "Returned bounded Supervisor store and repository audit",
+            data,
+            { source: "supervisor", limit, repository_credentials_omitted: true },
+            { audience: ["assistant"], priority: 0.8 },
+          )],
+        });
+      }
+
+      case "get_supervisor_metrics": {
+        const component = args?.component;
+        if (!new Set(["core", "supervisor", "addon"]).has(component)) {
+          throw new Error("component must be one of: core, supervisor, addon");
+        }
+        if (component === "addon" && (typeof args?.addon_slug !== "string" || !args.addon_slug.trim())) {
+          throw new Error("addon_slug is required when component is 'addon'");
+        }
+        sendLog("debug", "supervisor-read", { action: "get_supervisor_metrics", component });
+        const result = await readSupervisorMetrics(component, args?.addon_slug);
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            `Returned ${result.cached ? "cached " : ""}Supervisor metrics for ${component}`,
+            {
+              component,
+              ...(component === "addon" ? { addon_slug: args.addon_slug } : {}),
+              metrics: result.value,
+            },
+            {
+              source: "supervisor",
+              cached: result.cached,
+              cache_ttl_ms: SUPERVISOR_METRICS_CACHE_TTL_MS,
+            },
+            { audience: ["assistant"], priority: 0.7 },
+          )],
+        });
+      }
+
       case "get_available_updates": {
         const component = args?.component || "all";
         sendLog("info", "updates", { action: "check_updates", component });
@@ -5216,7 +5560,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           wants("core") ? callSupervisor("/core/info") : Promise.resolve(null),
           wants("os") ? callSupervisor("/os/info") : Promise.resolve(null),
           wants("supervisor") ? callSupervisor("/supervisor/info") : Promise.resolve(null),
-          wants("addons") ? callSupervisor("/addons") : Promise.resolve(null),
+          wants("addons") ? supervisorApps.list() : Promise.resolve(null),
         ]);
 
         if (coreResult.status === "fulfilled" && coreResult.value) {
@@ -5260,7 +5604,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         if (addonsResult.status === "fulfilled" && addonsResult.value) {
-          for (const addon of addonsResult.value.addons.filter(a => a.installed)) {
+          for (const addon of addonsResult.value) {
             updates.push({
               type: "addon",
               slug: addon.slug,
@@ -5319,8 +5663,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         try {
           const [addonInfo, changelog] = await Promise.all([
-            callSupervisor(`/addons/${addon_slug}/info`),
-            callSupervisor(`/addons/${addon_slug}/changelog`),
+            supervisorApps.info(addon_slug),
+            supervisorApps.changelog(addon_slug),
           ]);
           
           const truncatedChangelog = truncateText(changelog, { maxChars: CHANGELOG_MAX_CHARS });
@@ -5355,29 +5699,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
         
-        let endpoint;
         let payload = { background: true };
         let componentName;
         
         switch (component) {
           case "core":
-            endpoint = "/core/update";
             payload.backup = backup;
             componentName = "Home Assistant Core";
             break;
           case "os":
-            endpoint = "/os/update";
             componentName = "Home Assistant OS";
             break;
           case "supervisor":
-            endpoint = "/supervisor/update";
             componentName = "Supervisor";
             break;
           case "addon":
             if (!addon_slug) {
               throw new Error("addon_slug is required when component is 'addon'");
             }
-            endpoint = `/store/addons/${addon_slug}/update`;
             payload.backup = backup;
             componentName = addon_slug;
             break;
@@ -5386,7 +5725,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         
         try {
-          const result = await callSupervisor(endpoint, "POST", payload, UPDATE_TIMEOUT_MS);
+          const result = component === "addon"
+            ? await supervisorApps.update(addon_slug, payload, UPDATE_TIMEOUT_MS)
+            : await callSupervisor(`/${component}/update`, "POST", payload, UPDATE_TIMEOUT_MS);
 
           // Background mode returns job_id
           const jobId = result?.job_id || result;

@@ -212,13 +212,13 @@ describe("openchamber ingress proxy: provider OAuth loopback bridge", () => {
   const callback = (code, provider = "openai") =>
     postJson(proxyPort, `${INGRESS_PATH}/api/provider/${provider}/oauth/callback`, { method: 0, code });
 
-  it("passes the authorize response through and rewrites the misleading instructions", async () => {
+  it("rewrites an armed loopback auto flow to code entry with actionable instructions", async () => {
     const response = await authorize();
     assert.equal(response.statusCode, 200);
 
     const payload = JSON.parse(response.body);
     assert.equal(payload.url, authorizeResponse.url, "the authorize URL must reach the UI unchanged");
-    assert.equal(payload.method, "auto");
+    assert.equal(payload.method, "code");
     assert.match(payload.instructions, /cannot reach this add-on/);
     assert.match(payload.instructions, new RegExp(`http://localhost:${callbackPort}/auth/callback`));
   });

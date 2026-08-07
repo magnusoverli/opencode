@@ -1,9 +1,16 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 2.4.2
 
-- **OpenChamber restarts no longer leave port-holding orphan processes** — the server and Home Assistant Ingress proxy are now independently supervised, so restarting either cannot strand the other on ports 3010 or 8099.
+The 2.4.2 beta cycle, promoted: a current OpenChamber web UI, resilient service supervision, safer timestamps, and clearer Home Assistant operations diagnostics.
+
+- **OpenChamber stays available after an add-on restart ([issue #95](https://github.com/magnusoverli/opencode/issues/95))** — the server and Home Assistant Ingress proxy are independently supervised, so restarting either cannot strand a port-holding orphan process on 3010 or 8099.
+- **OpenChamber 1.18.1 with working browser OAuth** — browser providers whose callback is container-local now show a paste-code flow, allowing the add-on to replay the failed localhost redirect inside the container instead of waiting for an unreachable browser callback.
+- **Firefox terminal sizing** — high-DPI Firefox sessions reconcile their pixel ratio with the rendered terminal canvas, restoring the full terminal width without affecting other browsers.
+- **Reliable Supervisor app discovery ([issue #90](https://github.com/magnusoverli/opencode/issues/90))** — update checks, app changelogs, ESPHome discovery, and startup service discovery prefer the feature-gated Supervisor V2 apps API while retaining V1 support.
+- **Supervisor operations diagnostics** — six read-only tools provide bounded health, Resolution, backup posture, support-log, store-audit, and metrics evidence without exposing sensitive configuration or log secrets.
+- **Unambiguous history timestamps ([issue #94](https://github.com/magnusoverli/opencode/issues/94))** — history, logbook, and calendar queries now require timestamps with `Z` or a UTC offset, preventing local-time interpretation from silently shifting requested windows.
 
 ## 2.4.1
 

@@ -108,6 +108,16 @@ services per domain under `returns_response`.
 | `get_logbook` | Get Activity Logbook | `readOnly`, `idempotent` |
 | `get_error_log` | Get Error Log | `readOnly`, `idempotent` |
 
+### Supervisor Operations
+| Tool | Title | Annotations |
+|------|-------|-------------|
+| `get_supervisor_health` | Get Supervisor Health | `readOnly`, `idempotent` |
+| `get_supervisor_resolution` | Get Supervisor Resolution | `readOnly`, `idempotent` |
+| `get_backup_posture` | Get Backup Posture | `readOnly`, `idempotent` |
+| `get_support_logs` | Get Bounded Support Logs | `readOnly`, `idempotent` |
+| `get_store_audit` | Get Store Audit | `readOnly`, `idempotent` |
+| `get_supervisor_metrics` | Get Supervisor Metrics | `readOnly`, `idempotent` |
+
 ### Configuration
 | Tool | Title | Annotations |
 |------|-------|-------------|

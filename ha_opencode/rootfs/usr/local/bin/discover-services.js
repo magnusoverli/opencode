@@ -4,7 +4,7 @@
 //
 // Discovers the Zigbee2MQTT addon (Z2M_URL, Z2M_MQTT_TOPIC) and the ESPHome
 // addon's ingress URL/session (HAB_ESPHOME_URL, HAB_ESPHOME_SESSION) in one
-// pass, sharing a single Supervisor /addons fetch. Writes shell "export"
+// pass, sharing a single Supervisor application-list fetch. Writes shell "export"
 // statements to /data/.env_vars_discovered for sourcing by shells/services.
 //
 // Launched detached from init-opencode so boot never blocks on discovery.
@@ -56,6 +56,13 @@ function supervisorGet(endpoint) {
       let body = "";
       res.on("data", (chunk) => (body += chunk));
       res.on("end", () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(Object.assign(
+            new Error(`Supervisor API error (${res.statusCode}) on ${endpoint}: ${body}`),
+            { status: res.statusCode },
+          ));
+          return;
+        }
         try {
           const json = JSON.parse(body);
           resolve(json.data !== undefined ? json.data : json);
@@ -163,8 +170,8 @@ function shellQuote(value) {
 // ---------------------------------------------------------------------------
 // Zigbee2MQTT discovery — returns export lines (or [] on skip)
 // ---------------------------------------------------------------------------
-async function discoverZ2M(addons) {
-  const z2m = addons.find((a) =>
+async function discoverZ2M(apps, supervisorApps) {
+  const z2m = apps.find((a) =>
     a.slug &&
     a.slug.includes("zigbee2mqtt") &&
     !a.slug.includes("zigbee2mqtt_edge") &&
@@ -172,7 +179,7 @@ async function discoverZ2M(addons) {
   );
   if (!z2m) return [];
 
-  const info = await supervisorGet(`/addons/${z2m.slug}/info`);
+  const info = await supervisorApps.info(z2m.slug);
   if (info.state !== "started") return [];
 
   // Inside the HA Docker network, addons are reachable by hostname.
@@ -202,8 +209,8 @@ async function discoverZ2M(addons) {
 // ESPHome discovery — returns export lines (or [] on skip)
 // (mirrors discoverESPHome() in the MCP server)
 // ---------------------------------------------------------------------------
-async function discoverESPHome(addons) {
-  const esphome = addons.find((a) =>
+async function discoverESPHome(apps, supervisorApps) {
+  const esphome = apps.find((a) =>
     a.slug &&
     a.slug.includes("esphome") &&
     (a.state === "started" || a.state === "stopped" || a.version)
@@ -211,7 +218,7 @@ async function discoverESPHome(addons) {
   if (!esphome) return [];
 
   const [info, haConfig] = await Promise.all([
-    supervisorGet(`/addons/${esphome.slug}/info`),
+    supervisorApps.info(esphome.slug),
     haGet("/config"),
   ]);
   if (!info.ingress_entry) return [];
@@ -251,20 +258,20 @@ async function discoverESPHome(addons) {
 }
 
 // ---------------------------------------------------------------------------
-// Main — one shared /addons fetch, both discoveries concurrent
+// Main — one shared application-list fetch, both discoveries concurrent
 // ---------------------------------------------------------------------------
 async function main() {
   const wantZ2M = DISCOVER_Z2M;
   const wantESPHome = !!(HA_ACCESS_TOKEN && WebSocket);
   if (!wantZ2M && !wantESPHome) return;
 
-  const addonsData = await supervisorGet("/addons");
-  const addonsRaw = addonsData.addons || addonsData;
-  const addons = Array.isArray(addonsRaw) ? addonsRaw : [];
+  const { createSupervisorAppsClient } = await import("/opt/ha-mcp-server/lib/supervisor-apps.js");
+  const supervisorApps = createSupervisorAppsClient({ request: supervisorGet });
+  const apps = await supervisorApps.list();
 
   const results = await Promise.allSettled([
-    wantZ2M ? discoverZ2M(addons) : Promise.resolve([]),
-    wantESPHome ? discoverESPHome(addons) : Promise.resolve([]),
+    wantZ2M ? discoverZ2M(apps, supervisorApps) : Promise.resolve([]),
+    wantESPHome ? discoverESPHome(apps, supervisorApps) : Promise.resolve([]),
   ]);
 
   const lines = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));

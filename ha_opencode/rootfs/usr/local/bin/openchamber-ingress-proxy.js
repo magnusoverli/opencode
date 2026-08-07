@@ -370,8 +370,12 @@ function armOauthBridge(providerID, decoded) {
   if (!entry) return null;
 
   // Upstream's copy ("this window will close automatically") describes the
-  // same-machine flow. Tell the user what actually happens behind Ingress.
+  // same-machine flow. OpenChamber 1.18's `auto` flow now immediately sends the
+  // callback request and waits for the browser redirect, but that redirect lands
+  // on the user's localhost rather than this container. Keep the existing
+  // paste-and-replay bridge available only for an armed loopback callback.
   const body = oauthAuthorizationPayload(payload);
+  body.method = "code";
   body.instructions = oauthBridgeInstructions(entry);
   try {
     return Buffer.from(JSON.stringify(payload));

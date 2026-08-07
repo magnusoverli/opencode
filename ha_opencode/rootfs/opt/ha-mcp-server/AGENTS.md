@@ -596,11 +596,15 @@ Read and modify YAML files to understand and change Home Assistant's defined beh
 Query and interact with the running Home Assistant instance:
 - `get_states`, `search_entities`, `get_home_context` - Current entity states and compact area/domain/entity context
 - `call_service` - Control devices (with confirmation), and read from services that answer with data (`recorder.get_statistics`, `weather.get_forecasts`, `calendar.get_events`, `todo.get_items`) — the response comes back automatically
-- `get_history`, `get_logbook` - Historical data
+- `get_history`, `get_logbook` - Historical data; supplied timestamps must include `Z` or a UTC offset
+- `get_calendar_events` - Calendar events; supplied start/end timestamps must include `Z` or a UTC offset
 - `get_devices`, `get_areas` - Device and area registry info
 - `write_config_safe` - **Safe config writing with automatic validation, content protection, and backup**
 - `validate_config` - Check configuration validity
 - `get_error_log` - System errors and warnings
+- `get_supervisor_health`, `get_supervisor_resolution` - Read-only Supervisor, host, connectivity, and repair evidence
+- `get_backup_posture`, `get_store_audit`, `get_supervisor_metrics` - Bounded backup, software-source, and resource evidence
+- `get_support_logs` - Bounded, credential-redacted Core, Supervisor, host, or app logs
 - `diagnose_entity` - Comprehensive entity troubleshooting
 - `get_agent_capabilities` - OpenCode MCP capabilities and native HA `llm` / MCP readiness
 - `get_ha_llm_development_guide` - Upstream references and starter template for native `<integration>/llm.py` providers
@@ -618,7 +622,7 @@ Query and interact with the running Home Assistant instance:
 | Control devices | N/A | `call_service` | `hab action call` | N/A |
 | Read from a service that answers with data | N/A | `call_service` (automatic) | `hab action call --return-response` | N/A |
 | Add new integrations | Primary | N/A | N/A | N/A |
-| Troubleshoot issues | Review configs | `diagnose_entity`, `get_error_log` | `hab system health` | N/A |
+| Troubleshoot issues | Review configs | `diagnose_entity`, `get_error_log`, `get_supervisor_health`, `get_supervisor_resolution` | `hab system health` | N/A |
 | Check agent/LLM readiness | N/A | `get_agent_capabilities` | N/A | N/A |
 | Develop native HA LLM tools | `custom_components/*/llm.py` | `get_ha_llm_development_guide` | N/A | N/A |
 | Find entities | Grep YAML files | `search_entities` | `hab entity list --domain` | N/A |
@@ -627,7 +631,7 @@ Query and interact with the running Home Assistant instance:
 | **Verify UI changes** | N/A | **`screenshot_url`** | N/A | N/A |
 | **Manage areas/floors** | N/A | `get_areas` (read-only) | **`hab area/floor` (CRUD)** | N/A |
 | **Manage helpers** | N/A | N/A | **`hab helper` (primary)** | N/A |
-| **Backups** | N/A | N/A | **`hab backup` (primary)** | N/A |
+| **Backups** | N/A | `get_backup_posture` | **`hab backup` (primary)** | N/A |
 | **Blueprints** | N/A | N/A | **`hab blueprint` (primary)** | N/A |
 | **Update firmware** | N/A | **`watch_firmware_update`** | N/A | N/A |
 | **Check for updates** | N/A | `get_available_updates` | N/A | N/A |

@@ -78,6 +78,18 @@ update_component(component="core", backup=true)
 get_update_progress(job_id="...")
 ```
 
+### Supervisor Operations Diagnostics
+Use these read-only tools before proposing any host, backup, repository, or Resolution change. They return bounded, privacy-preserving evidence and never apply a suggestion or modification.
+
+| Tool | Purpose |
+|------|---------|
+| `get_supervisor_health` | Summarize Supervisor, host capacity, connectivity, Resolution counts, and job health |
+| `get_supervisor_resolution` | Review Resolution issues and suggestions without applying them |
+| `get_backup_posture` | Review backup age, size, protection, and contents without locations |
+| `get_support_logs` | Read a bounded, credential-redacted Core, Supervisor, host, or app log window |
+| `get_store_audit` | Review store apps and repositories with credential-bearing URL parts removed |
+| `get_supervisor_metrics` | Read a briefly cached Core, Supervisor, or app resource snapshot |
+
 ## Intelligence Features
 
 ### Anomaly Detection

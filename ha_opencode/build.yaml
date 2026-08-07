@@ -19,7 +19,7 @@ build_from:
 args:
   # Mirrors ha_opencode/Dockerfile — see the note above.
   OPENCODE_VERSION: "latest"
-  OPENCHAMBER_VERSION: "1.16.2"
+  OPENCHAMBER_VERSION: "1.18.1"
   PPQ_PROXY_VERSION: "0.1.0"
   TSX_VERSION: "4.20.6"
   TTYD_VERSION: "1.7.7"
