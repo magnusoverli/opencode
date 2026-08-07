@@ -1,7 +1,8 @@
 # Changelog
 
-## 2.4.2b0
+## 2.4.2b1
 
+- **Firefox terminal sizing ([issue #87](https://github.com/magnusoverli/opencode/issues/87))** — the Home Assistant Ingress terminal now reconciles an inconsistent Firefox pixel ratio with the actual terminal canvas, so high-DPI displays render at the full viewport width without affecting other browsers or page code.
 - **OpenChamber 1.18.1** — updates the pinned web UI through the latest upstream release while preserving Home Assistant Ingress sign-in: browser OAuth providers with a container-local callback now show the paste-code flow, so the add-on can replay the failed localhost redirect inside the container instead of waiting for a browser redirect it cannot receive.
 
 ## 2.4.1b3
