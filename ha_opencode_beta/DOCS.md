@@ -92,7 +92,7 @@ The built-in `homeassistant` MCP server can expose a narrower capability set thr
 
 | Profile | Includes | Excludes |
 |---------|----------|----------|
-| `compact` | Read-only entity state, history, diagnostics, templates, calendars, and home context | Config writes, device control, updates, screenshots, `hab`, and Zigbee administration |
+| `compact` | Read-only entity state, history, diagnostics, templates, calendars, home context, and bounded Supervisor operations evidence | Config writes, device control, updates, screenshots, `hab`, and Zigbee administration |
 | `configuration` | Everything in `compact`, plus current docs, syntax checks, validation, safe config writes, and decision notes | Device control, updates, screenshots, `hab`, and Zigbee administration |
 | `full` | Every currently available built-in MCP tool | Nothing beyond separately disabled features |
 

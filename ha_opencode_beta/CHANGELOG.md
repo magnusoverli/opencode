@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.2b3
+
+- **Supervisor operations diagnostics** — six new read-only tools provide bounded health, Resolution, backup posture, support-log, store-audit, and metrics evidence without exposing network addresses, backup locations, repository credentials, app options, or unredacted log secrets.
+
 ## 2.4.2b2
 
 - **Supervisor apps API compatibility ([issue #90](https://github.com/magnusoverli/opencode/issues/90))** — Home Assistant update checks, app changelogs, ESPHome discovery, and startup service discovery now prefer the feature-gated Supervisor V2 apps API while safely retaining V1 add-ons API support.

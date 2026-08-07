@@ -102,6 +102,19 @@ import {
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
 import { createSupervisorAppsClient } from "./lib/supervisor-apps.js";
 import {
+  DEFAULT_LIST_LIMIT as SUPERVISOR_DEFAULT_LIST_LIMIT,
+  DEFAULT_LOG_LINES as SUPERVISOR_DEFAULT_LOG_LINES,
+  MAX_LIST_LIMIT as SUPERVISOR_MAX_LIST_LIMIT,
+  MAX_LOG_LINES as SUPERVISOR_MAX_LOG_LINES,
+  formatSupportLog,
+  projectBackupPosture,
+  projectResolution,
+  projectStoreAudit,
+  projectSupervisorHealth,
+  projectSupervisorMetrics,
+  redactSensitiveText,
+} from "./lib/supervisor-operations.js";
+import {
   buildServiceCallPath,
   listResponseCapableServices,
   planServiceCall,
@@ -128,6 +141,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SUPERVISOR_API = "http://supervisor/core/api";
+const SUPERVISOR_BASE_URL = process.env.SUPERVISOR_BASE_URL || "http://supervisor";
 const HA_CONFIG_DIR = "/homeassistant";
 const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
 const HA_ACCESS_TOKEN = process.env.HA_ACCESS_TOKEN;   // Long-lived token for direct HA Core calls
@@ -226,6 +240,7 @@ const API_TIMEOUT_MS = 30000;
 const CHECK_CONFIG_TIMEOUT_MS = 120000;
 const UPDATE_TIMEOUT_MS = 600000;
 const NATIVE_MCP_PROBE_TIMEOUT_MS = 5000;
+const SUPERVISOR_METRICS_CACHE_TTL_MS = 10_000;
 
 /**
  * Call Home Assistant via Supervisor API proxy
@@ -251,8 +266,9 @@ async function callHA(endpoint, method = "GET", body = null, timeoutMs = API_TIM
   
   if (!response.ok) {
     const text = await response.text();
-    sendLog("error", "ha-api", { action: "error", endpoint, status: response.status, error: text });
-    throw Object.assign(new Error(`HA API error (${response.status}): ${text}`), { status: response.status });
+    const safeText = redactSensitiveText(text).text.slice(0, 2_000);
+    sendLog("error", "ha-api", { action: "error", endpoint, status: response.status, error: safeText });
+    throw Object.assign(new Error(`HA API error (${response.status}): ${safeText}`), { status: response.status });
   }
 
   const contentType = response.headers.get("content-type");
@@ -290,14 +306,15 @@ async function callSupervisor(
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(`http://supervisor${endpoint}`, options);
+  const response = await fetch(`${SUPERVISOR_BASE_URL}${endpoint}`, options);
   
   if (!response.ok) {
     const text = await response.text();
+    const safeText = redactSensitiveText(text).text.slice(0, 2_000);
     if (!(suppressNotFoundLog && response.status === 404)) {
-      sendLog("error", "supervisor-api", { action: "error", endpoint, status: response.status, error: text });
+      sendLog("error", "supervisor-api", { action: "error", endpoint, status: response.status, error: safeText });
     }
-    throw Object.assign(new Error(`Supervisor API error (${response.status}): ${text}`), { status: response.status });
+    throw Object.assign(new Error(`Supervisor API error (${response.status}): ${safeText}`), { status: response.status });
   }
 
   const contentType = response.headers.get("content-type");
@@ -321,6 +338,54 @@ const supervisorApps = createSupervisorAppsClient({
   onFallback: (details) => sendLog("notice", "supervisor-api", { action: "v2_apps_fallback", ...details }),
   onRecovered: (details) => sendLog("info", "supervisor-api", { action: "v2_apps_recovered", ...details }),
 });
+
+const supervisorMetricsCache = new Map();
+
+function clampSupervisorLimit(value, fallback, maximum) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, maximum);
+}
+
+function requireSupervisorAppSlug(value) {
+  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9_-]{0,127}$/i.test(value)) {
+    throw new Error("addon_slug must be a valid Supervisor app slug");
+  }
+  return value;
+}
+
+function supportLogEndpoint(source, addonSlug, lines) {
+  const suffix = `?lines=${lines}&no_colors`;
+  if (source === "addon") {
+    return `/addons/${encodeURIComponent(requireSupervisorAppSlug(addonSlug))}/logs${suffix}`;
+  }
+  return `/${source}/logs${suffix}`;
+}
+
+async function readSupervisorMetrics(component, addonSlug) {
+  const endpoint = component === "addon"
+    ? `/addons/${encodeURIComponent(requireSupervisorAppSlug(addonSlug))}/stats`
+    : `/${component}/stats`;
+  const cached = supervisorMetricsCache.get(endpoint);
+  const now = Date.now();
+  if (cached?.value && now - cached.fetchedAt < SUPERVISOR_METRICS_CACHE_TTL_MS) {
+    return { value: cached.value, cached: true };
+  }
+  if (cached?.inflight) return cached.inflight;
+
+  const inflight = callSupervisor(endpoint)
+    .then((stats) => ({ value: projectSupervisorMetrics(stats), cached: false }))
+    .then((result) => {
+      supervisorMetricsCache.set(endpoint, { value: result.value, fetchedAt: Date.now(), inflight: null });
+      return result;
+    })
+    .finally(() => {
+      const current = supervisorMetricsCache.get(endpoint);
+      if (current?.inflight === inflight) supervisorMetricsCache.set(endpoint, { ...current, inflight: null });
+    });
+  supervisorMetricsCache.set(endpoint, { value: cached?.value || null, fetchedAt: cached?.fetchedAt || 0, inflight });
+  return inflight;
+}
 
 /**
  * The slug of the add-on this server is running inside.
@@ -3142,6 +3207,135 @@ const TOOLS = [
       idempotent: true,
     },
   },
+  // === SUPERVISOR OPERATIONS ===
+  {
+    name: "get_supervisor_health",
+    title: "Get Supervisor Health",
+    description: "Return a privacy-preserving Home Assistant Supervisor, host, connectivity, Resolution, and job-health summary. Network addresses, hostnames, Wi-Fi data, and job error payloads are excluded.",
+    inputSchema: EMPTY_INPUT_SCHEMA,
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_supervisor_resolution",
+    title: "Get Supervisor Resolution",
+    description: "List bounded Supervisor Resolution issues, unhealthy/unsupported items, suggestions, and checks without applying any remediation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: SUPERVISOR_MAX_LIST_LIMIT,
+          description: `Maximum items per Resolution category (default ${SUPERVISOR_DEFAULT_LIST_LIMIT}).`,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_backup_posture",
+    title: "Get Backup Posture",
+    description: "Return a bounded backup age, size, protection, and content summary without exposing backup locations or modifying backups.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: SUPERVISOR_MAX_LIST_LIMIT,
+          description: `Maximum backups to return, newest first (default ${SUPERVISOR_DEFAULT_LIST_LIMIT}).`,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_support_logs",
+    title: "Get Bounded Support Logs",
+    description: "Read a bounded Core, Supervisor, host, or app journal window. Credential-like values are redacted before the log is returned.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: {
+          type: "string",
+          enum: ["core", "supervisor", "host", "addon"],
+          description: "Journal source (default 'core').",
+        },
+        addon_slug: {
+          type: "string",
+          description: "Required when source is 'addon'.",
+        },
+        lines: {
+          type: "integer",
+          minimum: 1,
+          maximum: SUPERVISOR_MAX_LOG_LINES,
+          description: `Maximum recent lines to return (default ${SUPERVISOR_DEFAULT_LOG_LINES}).`,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_store_audit",
+    title: "Get Store Audit",
+    description: "Return a bounded read-only audit of Supervisor store apps and repositories. Repository credentials, query strings, and fragments are removed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: SUPERVISOR_MAX_LIST_LIMIT,
+          description: `Maximum apps and repositories to return (default ${SUPERVISOR_DEFAULT_LIST_LIMIT}).`,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "get_supervisor_metrics",
+    title: "Get Supervisor Metrics",
+    description: "Return a low-frequency CPU, memory, network, and block-I/O snapshot for Core, Supervisor, or an app. Results are cached briefly to avoid polling the Supervisor.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        component: {
+          type: "string",
+          enum: ["core", "supervisor", "addon"],
+          description: "Component to inspect.",
+        },
+        addon_slug: {
+          type: "string",
+          description: "Required when component is 'addon'.",
+        },
+      },
+      required: ["component"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
   {
     name: "update_component",
     title: "Update Component",
@@ -5225,6 +5419,116 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // === UPDATE MANAGEMENT ===
+      case "get_supervisor_health": {
+        sendLog("debug", "supervisor-read", { action: "get_supervisor_health" });
+        const [supervisor, host, network, resolution, jobs] = await Promise.all([
+          callSupervisor("/supervisor/info"),
+          callSupervisor("/host/info"),
+          callSupervisor("/network/info"),
+          callSupervisor("/resolution/info"),
+          callSupervisor("/jobs/info"),
+        ]);
+        const data = projectSupervisorHealth({ supervisor, host, network, resolution, jobs });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            "Returned Home Assistant Supervisor health summary",
+            data,
+            { source: "supervisor", sensitive_fields_omitted: true },
+            { audience: ["assistant"], priority: 0.9 },
+          )],
+        });
+      }
+
+      case "get_supervisor_resolution": {
+        const limit = clampSupervisorLimit(args?.limit, SUPERVISOR_DEFAULT_LIST_LIMIT, SUPERVISOR_MAX_LIST_LIMIT);
+        sendLog("debug", "supervisor-read", { action: "get_supervisor_resolution", limit });
+        const data = projectResolution(await callSupervisor("/resolution/info"), { limit });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            "Returned bounded Supervisor Resolution evidence",
+            data,
+            { source: "supervisor", limit, sensitive_fields_omitted: true },
+            { audience: ["assistant"], priority: 0.9 },
+          )],
+        });
+      }
+
+      case "get_backup_posture": {
+        const limit = clampSupervisorLimit(args?.limit, SUPERVISOR_DEFAULT_LIST_LIMIT, SUPERVISOR_MAX_LIST_LIMIT);
+        sendLog("debug", "supervisor-read", { action: "get_backup_posture", limit });
+        const data = projectBackupPosture(await callSupervisor("/backups/info"), { limit });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            "Returned bounded Home Assistant backup posture",
+            data,
+            { source: "supervisor", limit, locations_omitted: true },
+            { audience: ["assistant"], priority: 0.8 },
+          )],
+        });
+      }
+
+      case "get_support_logs": {
+        const source = args?.source || "core";
+        if (!new Set(["core", "supervisor", "host", "addon"]).has(source)) {
+          throw new Error("source must be one of: core, supervisor, host, addon");
+        }
+        const lines = clampSupervisorLimit(args?.lines, SUPERVISOR_DEFAULT_LOG_LINES, SUPERVISOR_MAX_LOG_LINES);
+        const addonSlug = args?.addon_slug;
+        const endpoint = supportLogEndpoint(source, addonSlug, lines);
+        sendLog("debug", "supervisor-read", { action: "get_support_logs", source, lines });
+        const result = formatSupportLog(await callSupervisor(endpoint), { source, addonSlug, lines });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            result.summary,
+            result.data,
+            result.meta,
+            { audience: ["assistant"], priority: 0.8 },
+          )],
+        });
+      }
+
+      case "get_store_audit": {
+        const limit = clampSupervisorLimit(args?.limit, SUPERVISOR_DEFAULT_LIST_LIMIT, SUPERVISOR_MAX_LIST_LIMIT);
+        sendLog("debug", "supervisor-read", { action: "get_store_audit", limit });
+        const data = projectStoreAudit(await callSupervisor("/store"), { limit });
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            "Returned bounded Supervisor store and repository audit",
+            data,
+            { source: "supervisor", limit, repository_credentials_omitted: true },
+            { audience: ["assistant"], priority: 0.8 },
+          )],
+        });
+      }
+
+      case "get_supervisor_metrics": {
+        const component = args?.component;
+        if (!new Set(["core", "supervisor", "addon"]).has(component)) {
+          throw new Error("component must be one of: core, supervisor, addon");
+        }
+        if (component === "addon" && (typeof args?.addon_slug !== "string" || !args.addon_slug.trim())) {
+          throw new Error("addon_slug is required when component is 'addon'");
+        }
+        sendLog("debug", "supervisor-read", { action: "get_supervisor_metrics", component });
+        const result = await readSupervisorMetrics(component, args?.addon_slug);
+        return makeCompatibleResponse({
+          content: [createCompactJsonContent(
+            `Returned ${result.cached ? "cached " : ""}Supervisor metrics for ${component}`,
+            {
+              component,
+              ...(component === "addon" ? { addon_slug: args.addon_slug } : {}),
+              metrics: result.value,
+            },
+            {
+              source: "supervisor",
+              cached: result.cached,
+              cache_ttl_ms: SUPERVISOR_METRICS_CACHE_TTL_MS,
+            },
+            { audience: ["assistant"], priority: 0.7 },
+          )],
+        });
+      }
+
       case "get_available_updates": {
         const component = args?.component || "all";
         sendLog("info", "updates", { action: "check_updates", component });
