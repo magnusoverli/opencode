@@ -21,7 +21,6 @@ printf '%s\n' "${ADDON_CHANNEL}" > /data/.addon_channel
 # ==============================================================================
 
 CPU_MODE_CONFIG=$(bashio::config 'cpu_mode' || echo "auto")
-OPENCODE_UPDATE_POLICY=$(bashio::config 'opencode_update_policy' || echo "latest")
 INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
 MCP_ENABLED=$(bashio::config 'mcp_enabled')
 MCP_TOOL_PROFILE=$(bashio::config 'mcp_tool_profile' 2>/dev/null || echo "full")
@@ -53,15 +52,6 @@ case "${MCP_TOOL_PROFILE}" in
         ;;
 esac
 
-case "${OPENCODE_UPDATE_POLICY}" in
-    latest|bundled)
-        ;;
-    *)
-        bashio::log.warning "Unknown opencode_update_policy '${OPENCODE_UPDATE_POLICY}' - defaulting to latest"
-        OPENCODE_UPDATE_POLICY="latest"
-        ;;
-esac
-
 if [ "${FOCUS_MODE}" != "true" ]; then
     FOCUS_MODE="false"
 fi
@@ -83,27 +73,65 @@ if [ "${USER_HOOKS_ENABLED}" != "true" ]; then
     USER_HOOKS_ENABLED="false"
 fi
 
-bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} MCP_TOOL_PROFILE=${MCP_TOOL_PROFILE} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} OPENCODE_UPDATE_POLICY=${OPENCODE_UPDATE_POLICY} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED} USER_HOOKS=${USER_HOOKS_ENABLED}"
+bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} MCP_TOOL_PROFILE=${MCP_TOOL_PROFILE} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED} USER_HOOKS=${USER_HOOKS_ENABLED}"
 
-# Set up persistent HOME and npm global prefix for OpenCode runtime updates.
+# ==============================================================================
+# Runtime paths
+#
+# The add-on ships exactly one certified OpenCode build and runs only that one.
+# /data/.npm-global is deliberately NOT on PATH: an add-on that started before
+# this release may have installed a rolling OpenCode there, and a leftover copy
+# must never take precedence over the runtime this release was tested
+# against. The directory itself is left alone — it is the user's data,
+# not ours to delete, and NPM_CONFIG_PREFIX still points at it so anything the
+# user installs by hand keeps working across restarts.
+# ==============================================================================
+
 export HOME="/data"
 export XDG_DATA_HOME="/data/.local/share"
 export XDG_CONFIG_HOME="/data/.config"
 export NPM_CONFIG_PREFIX="/data/.npm-global"
 OPENCODE_TMPDIR="/data/.cache/opencode-tmp"
 
-if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
-    export PATH="${NPM_CONFIG_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-else
-    export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
-    export OPENCODE_DISABLE_AUTOUPDATE=true
-fi
+export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+export OPENCODE_DISABLE_AUTOUPDATE=true
 
 rm -rf "${OPENCODE_TMPDIR}"
 mkdir -p /data/.local/share/opencode /data/.config/opencode "${NPM_CONFIG_PREFIX}" "${OPENCODE_TMPDIR}"
 chmod 700 "${OPENCODE_TMPDIR}"
-printf '%s\n' "${OPENCODE_UPDATE_POLICY}" > /data/.opencode_update_policy
 printf '%s\n' "${INTERFACE_MODE}" > /data/.interface_mode
+
+# ==============================================================================
+# Legacy update-policy migration
+#
+# `opencode_update_policy` no longer exists. Say once, plainly, what changed —
+# otherwise a user who chose `latest` would quietly stop receiving runtime
+# updates with no explanation anywhere.
+#
+# The evidence is /data/.opencode_update_policy, which every previous version
+# wrote at every start. It is read rather than options.json because the
+# Supervisor validates a saved options file against the current schema and drops
+# keys the schema no longer declares, so by the time this runs the option may
+# already be gone from there. options.json is still checked as a fallback, for
+# whichever Supervisor versions keep it. Neither is read through bashio, which
+# reports a removed key as the literal string "null".
+#
+# /data/.npm-global is deliberately untouched: see "Runtime paths" above.
+# ==============================================================================
+
+LEGACY_UPDATE_POLICY=$(cat /data/.opencode_update_policy 2>/dev/null || echo "")
+if [ -z "${LEGACY_UPDATE_POLICY}" ]; then
+    LEGACY_UPDATE_POLICY=$(jq -r '.opencode_update_policy // empty' /data/options.json 2>/dev/null || echo "")
+fi
+rm -f /data/.opencode_update_policy
+
+if [ "${LEGACY_UPDATE_POLICY}" = "latest" ]; then
+    bashio::log.notice "The 'OpenCode update policy' option has been removed; this add-on now always runs its certified OpenCode build."
+    bashio::log.notice "Runtime upgrades ship with add-on releases, so they are tested before they reach you."
+    bashio::log.notice "Any OpenCode previously installed under /data/.npm-global is left in place but is no longer used; you can remove that option from the Configuration tab."
+elif [ -n "${LEGACY_UPDATE_POLICY}" ]; then
+    bashio::log.info "The 'OpenCode update policy' option has been removed; the certified OpenCode build in this image is always used."
+fi
 
 # ==============================================================================
 # Process user-defined environment variables
@@ -119,7 +147,7 @@ OPTIONS_FILE="/data/options.json"
 ENV_VARS_COUNT=$(jq -r '.env_vars // [] | length' "${OPTIONS_FILE}")
 
 # Reserved names that would break the add-on if overridden
-ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","OPENCODE_MCP_TOOL_PROFILE","OPENCODE_NATIVE_HA_MCP_ENABLED","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_UPDATE_POLICY","SHELL","USER","PWD"'
+ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","OPENCODE_MCP_TOOL_PROFILE","OPENCODE_NATIVE_HA_MCP_ENABLED","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_CONFIG","OPENCODE_CONFIG_CONTENT","OPENCODE_CONFIG_DIR","SHELL","USER","PWD"'
 
 if [ "${ENV_VARS_COUNT}" -gt 0 ]; then
     bashio::log.info "Processing ${ENV_VARS_COUNT} user-defined environment variable(s)..."
@@ -166,15 +194,11 @@ else
 fi
 
 # Export system-managed runtime paths for all services and shell sessions.
+# The bundled runtime is the only one on PATH — see "Runtime paths" above.
 printf 'export NPM_CONFIG_PREFIX=%q\n' "${NPM_CONFIG_PREFIX}" >> "${ENV_VARS_FILE}"
-printf 'export OPENCODE_UPDATE_POLICY=%q\n' "${OPENCODE_UPDATE_POLICY}" >> "${ENV_VARS_FILE}"
 printf 'export TMPDIR=%q\n' "${OPENCODE_TMPDIR}" >> "${ENV_VARS_FILE}"
-if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
-    printf 'export PATH="%s/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"\n' "${NPM_CONFIG_PREFIX}" >> "${ENV_VARS_FILE}"
-else
-    printf 'export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"\n' >> "${ENV_VARS_FILE}"
-    printf 'export OPENCODE_DISABLE_AUTOUPDATE=true\n' >> "${ENV_VARS_FILE}"
-fi
+printf 'export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"\n' >> "${ENV_VARS_FILE}"
+printf 'export OPENCODE_DISABLE_AUTOUPDATE=true\n' >> "${ENV_VARS_FILE}"
 chmod 600 "${ENV_VARS_FILE}"
 
 # ==============================================================================
@@ -463,71 +487,36 @@ detect_cpu_capabilities() {
 detect_cpu_capabilities
 
 # ==============================================================================
-# Install/verify OpenCode through the upstream opencode-ai package
+# Select and verify the certified OpenCode runtime
 #
-# The heavy `npm install -g opencode-ai@latest` no longer runs on the boot
-# critical path. This oneshot only guarantees a *working* opencode binary — the
-# bundled one, or a healthy persistent install — so the ingress health check can
-# come up immediately. When the user opts into rolling updates, the refresh is
-# handed to a detached background updater and skipped entirely on low-RAM hosts,
-# so a slow/failing npm install can never OOM the container or trip the
-# watchdog into a crash loop. Shared helpers live in one place (runtime.sh) so
-# the init and updater paths cannot drift.
+# One build ships in the image and it is the only one any session can run. This
+# oneshot picks the right native binary for the CPU, proves it executes, and
+# records what it found for the terminal banner. Nothing here touches the
+# network, so ingress is never gated behind an install. Shared helpers live in
+# runtime.sh so this and the smoke test cannot drift.
 # ==============================================================================
 
 opencode_log() { bashio::log.info "$*"; }
 # shellcheck source=/usr/local/lib/opencode/runtime.sh
 source /usr/local/lib/opencode/runtime.sh
 
-# Free memory (kB) below which the background "latest" update is skipped, so the
-# npm spike cannot tip a low-RAM device (e.g. a 4 GB HA Green already running
-# several add-ons) into swap-thrash and a watchdog crash loop.
-OPENCODE_UPDATE_MIN_AVAIL_KB=1572864  # 1.5 GiB
-
-available_memory_kb() {
-    awk '/^MemAvailable:/ { print $2; found = 1 }
-         END { if (!found) print 0 }' /proc/meminfo 2>/dev/null || echo 0
-}
-
 setup_opencode_runtime() {
-    local cpu_mode bundled_package runtime_package persistent_bin bundled_bin
-    local bundled_version runtime_version effective_bin effective_version
-    local use_persistent=false
+    local cpu_mode bundled_package bundled_bin
+    local certified_version effective_bin effective_version
+
     bundled_package="/usr/local/lib/node_modules/opencode-ai"
-    runtime_package="${NPM_CONFIG_PREFIX}/lib/node_modules/opencode-ai"
-    persistent_bin="${NPM_CONFIG_PREFIX}/bin/opencode"
     bundled_bin="/usr/local/bin/opencode"
 
     cpu_mode=$(cat /data/.cpu_mode 2>/dev/null || echo "regular")
-    bundled_version=$(opencode_package_version "${bundled_package}")
-    bashio::log.info "Bundled OpenCode version: ${bundled_version}"
+    certified_version=$(opencode_certified_version)
+    bashio::log.info "Certified OpenCode version: ${certified_version}"
 
-    # --- Synchronous: pick a binary that actually runs, without touching the
-    #     network, so ingress is never gated behind an install. ---
-    if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ] && [ -d "${runtime_package}" ]; then
-        runtime_version=$(opencode_package_version "${runtime_package}")
-        opencode_select_package_binary "${runtime_package}" "${cpu_mode}" || true
-        if opencode_bin_runs "${persistent_bin}"; then
-            use_persistent=true
-            bashio::log.info "Using persistent OpenCode runtime: ${runtime_version}"
+    opencode_select_package_binary "${bundled_package}" "${cpu_mode}" || true
+    if ! opencode_bin_runs "${bundled_bin}"; then
+        if [ -f "${CPU_UNSUPPORTED_MARKER}" ]; then
+            bashio::log.error "The certified OpenCode binary failed to execute because this CPU lacks SSE4.2 (see the CPU message above); the terminal will start but OpenCode will not run"
         else
-            # A boot-time install killed mid-way leaves the launcher on PATH
-            # with its native binary missing ("cannot execute: required file
-            # not found"). Drop it so PATH falls through to the bundled binary;
-            # the background updater will reinstall it cleanly.
-            bashio::log.warning "Persistent OpenCode runtime is broken; removing it and using the bundled binary"
-            rm -rf "${runtime_package}" "${persistent_bin}"
-        fi
-    fi
-
-    if [ "${use_persistent}" != "true" ]; then
-        opencode_select_package_binary "${bundled_package}" "${cpu_mode}" || true
-        if ! opencode_bin_runs "${bundled_bin}"; then
-            if [ -f "${CPU_UNSUPPORTED_MARKER}" ]; then
-                bashio::log.error "Bundled OpenCode binary failed to execute because this CPU lacks SSE4.2 (see the CPU message above); the terminal will start but OpenCode will not run"
-            else
-                bashio::log.error "Bundled OpenCode binary failed to execute; the terminal may not start correctly"
-            fi
+            bashio::log.error "The certified OpenCode binary failed to execute; the terminal may not start correctly"
         fi
     fi
 
@@ -538,17 +527,16 @@ setup_opencode_runtime() {
     bashio::log.info "Effective OpenCode binary: ${effective_bin}"
     bashio::log.info "Effective OpenCode version: ${effective_version}"
 
-    # --- Background: refresh to the newest OpenCode off the critical path, and
-    #     only when there is headroom to absorb the npm spike. ---
-    if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
-        local avail_kb
-        avail_kb=$(available_memory_kb)
-        if [ "${avail_kb}" -ge "${OPENCODE_UPDATE_MIN_AVAIL_KB}" ]; then
-            bashio::log.info "Scheduling background OpenCode update (MemAvailable ${avail_kb} kB); applies to the next session"
-            setsid /usr/local/bin/opencode-update.sh >/tmp/opencode-update.log 2>&1 </dev/null &
-        else
-            bashio::log.warning "Skipping OpenCode update: MemAvailable ${avail_kb} kB is below the ${OPENCODE_UPDATE_MIN_AVAIL_KB} kB needed; keeping the bundled runtime to protect low-memory systems"
-        fi
+    # A binary resolved from anywhere but the image means the pin is not what is
+    # actually running, which is the whole point of certifying a version.
+    case "${effective_bin}" in
+        /usr/local/bin/opencode|not-found) ;;
+        *)
+            bashio::log.warning "OpenCode resolved to ${effective_bin}, not the certified runtime in this image"
+            ;;
+    esac
+    if [ "${effective_version}" != "unknown" ] && [ "${effective_version}" != "${certified_version}" ]; then
+        bashio::log.warning "Running OpenCode ${effective_version} but this add-on certified ${certified_version}"
     fi
 }
 
@@ -818,6 +806,31 @@ if [ ! -f "/homeassistant/.prettierrc.yaml" ]; then
     cp /opt/ha-mcp-server/.prettierrc.yaml /homeassistant/.prettierrc.yaml
     bashio::log.info "Deployed default .prettierrc.yaml for HA YAML formatting"
 fi
+
+# ==============================================================================
+# Deploy the add-on's skills and agents
+#
+# OpenCode discovers skills and agents by convention under its global config
+# directory, so they have to physically exist there. They ship read-only in the
+# image and are copied into /data at every start; a copy the user has edited is
+# kept and the update is skipped, exactly as with AGENTS.md.
+#
+# Skills carry the detailed Home Assistant procedures and are loaded on demand,
+# so they cost nothing until a task needs them. AGENTS.md keeps only the rules
+# that must hold unconditionally, plus the map of which skill covers what.
+#
+# Runs synchronously — it is a handful of small file copies, and a session that
+# starts before its skills exist would silently be a session without them.
+# `|| true` because guidance files do not get a vote on whether the add-on boots.
+# ==============================================================================
+
+node /usr/local/bin/deploy-opencode-assets.mjs 2>&1 | while IFS= read -r line; do
+    case "${line}" in
+        "") ;;
+        "[warning] "*) bashio::log.warning "${line#\[warning\] }" ;;
+        *) bashio::log.info "${line}" ;;
+    esac
+done || true
 
 # ==============================================================================
 # Generate OpenCode configuration file

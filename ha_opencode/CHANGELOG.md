@@ -1,6 +1,11 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- **OpenCode V2 readiness tracking** — maintainers now have a root-level compatibility checklist covering the upstream beta's migration work, current blockers, and release gates.
+- **OpenCode V1 improvement roadmap** — maintainers now have a Home Assistant-focused plan for a certified runtime, on-demand skills, read-only diagnostics, and regression coverage.
+
 ## 2.4.2
 
 The 2.4.2 beta cycle, promoted: a current OpenChamber web UI, resilient service supervision, safer timestamps, and clearer Home Assistant operations diagnostics.

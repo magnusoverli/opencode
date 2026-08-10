@@ -1,8 +1,8 @@
 ---
-# NOTE: only OPENCHAMBER_VERSION below is actually read by CI
-# (.github/workflows/build-beta.yaml scrapes it with sed and passes it as a
-# build arg). It is a per-channel pin, which is what lets a new OpenChamber
-# soak in beta while stable stays put.
+# NOTE: only OPENCODE_VERSION and OPENCHAMBER_VERSION below are read by CI
+# (.github/workflows/build-beta.yaml scrapes them with sed and passes them as
+# build args). Both are per-channel pins, which is what lets a new runtime soak
+# in beta while stable stays put.
 #
 # Every other value here is inert — the image is built from
 # ha_opencode_beta/Dockerfile and the remaining pins resolve from its ARG
@@ -13,8 +13,11 @@ build_from:
   aarch64: ghcr.io/home-assistant/base-debian:trixie
   amd64: ghcr.io/home-assistant/base-debian:trixie
 args:
-  OPENCODE_VERSION: "latest"
-  # The one genuine per-channel pin: beta builds from dev, so this can lead
+  # The certified OpenCode runtime for this channel. Must be an exact version —
+  # never "latest" or a range — and must match the OPENCODE_VERSION ARG default
+  # in Dockerfile. test/runtime-contract.test.js asserts both.
+  OPENCODE_VERSION: "1.18.16"
+  # The other genuine per-channel pin: beta builds from dev, so this can lead
   # stable while a new OpenChamber soaks.
   OPENCHAMBER_VERSION: "1.18.1"
   PPQ_PROXY_VERSION: "0.1.0"

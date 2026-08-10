@@ -23,13 +23,11 @@ if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
     export HA_TOKEN="${SUPERVISOR_TOKEN}"
 fi
 
-OPENCODE_UPDATE_POLICY=$(cat /data/.opencode_update_policy 2>/dev/null || echo "latest")
-if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
-    export PATH="${NPM_CONFIG_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-else
-    export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
-    export OPENCODE_DISABLE_AUTOUPDATE=true
-fi
+# Only the certified runtime in this image is on PATH. /data/.npm-global is
+# left out on purpose so an OpenCode installed there by an older add-on version
+# cannot shadow the build this release was tested against.
+export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+export OPENCODE_DISABLE_AUTOUPDATE=true
 
 ENABLE_SERVER=$(bashio::config 'enable_server' 2>/dev/null || echo "false")
 SERVER_PORT=4096

@@ -113,11 +113,8 @@ options:
   addon_access_enabled: false
 
   # --- 4. OpenCode runtime -----------------------------------------------
-  # Update policy: bundled (use the OpenCode shipped in the add-on image;
-  # default, lowest resource use) or latest (keep OpenCode updated to the newest
-  # release in the background — the update is skipped automatically on low-memory
-  # systems and never blocks start-up)
-  opencode_update_policy: "bundled"
+  # The add-on always runs the certified OpenCode build shipped in its image.
+  # Runtime upgrades arrive with add-on releases, so there is no update policy.
   # CPU mode: auto (detect), baseline (for older CPUs), regular (force AVX2)
   cpu_mode: "auto"
 
@@ -190,7 +187,6 @@ schema:
   addon_access_enabled: bool
 
   # --- 4. OpenCode runtime -----------------------------------------------
-  opencode_update_policy: list(latest|bundled)
   cpu_mode: list(auto|baseline|regular)
 
   # --- 5. Network exposure -----------------------------------------------

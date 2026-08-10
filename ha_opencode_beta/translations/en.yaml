@@ -78,10 +78,6 @@ configuration:
     name: "Add-on folder guidance"
     description: "Shows guidance for working in the mounted /addons and /addon_configs folders. Both are mounted whatever this is set to, and /addon_configs may hold other add-ons' credentials — this is guidance, not a filesystem permission boundary."
 
-  opencode_update_policy:
-    name: "OpenCode update policy"
-    description: "How OpenCode itself is updated. 'bundled' uses the version shipped in the add-on image — the lowest-memory option, recommended on systems with 4 GB RAM or little free memory. 'latest' follows upstream releases in the background, so it never delays start-up and is skipped automatically when free memory is low."
-
   cpu_mode:
     name: "CPU mode"
     description: "Which OpenCode binary to run. 'auto' detects your CPU (recommended), 'baseline' selects the build meant for older CPUs without AVX2, and 'regular' forces the standard build. OpenCode requires a CPU with SSE4.2 (Intel Nehalem 2008+, AMD Bulldozer 2011+) in every mode. Note that upstream currently ships the same binary in both packages, so 'baseline' does not presently help a CPU without AVX2."

@@ -67,6 +67,23 @@ jobs:
           echo "openchamber_version=${OPENCHAMBER_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Using OpenChamber ${OPENCHAMBER_VERSION} for beta build"
 
+          OPENCODE_VERSION=$(sed -n 's/^[[:space:]]*OPENCODE_VERSION:[[:space:]]*"\([^"]*\)".*/\1/p' ha_opencode_beta/build.yaml)
+          if [ -z "${OPENCODE_VERSION}" ]; then
+            echo "::error::OPENCODE_VERSION not found in ha_opencode_beta/build.yaml"
+            exit 1
+          fi
+          # A dist-tag or range here would publish a runtime nobody certified,
+          # and the image would differ between two builds of the same tag.
+          case "${OPENCODE_VERSION}" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "::error::OPENCODE_VERSION must be an exact version, got '${OPENCODE_VERSION}'"
+              exit 1
+              ;;
+          esac
+          echo "opencode_version=${OPENCODE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Using OpenCode ${OPENCODE_VERSION} for beta build"
+
       - name: Assert this folder really is the beta add-on
         shell: bash
         run: |
@@ -110,6 +127,7 @@ jobs:
             BUILD_VERSION=${{ steps.version.outputs.version }}
             BUILD_ARCH=${{ matrix.ha_arch }}
             ADDON_CHANNEL=beta
+            OPENCODE_VERSION=${{ steps.beta_build_args.outputs.opencode_version }}
             OPENCHAMBER_VERSION=${{ steps.beta_build_args.outputs.openchamber_version }}
           cache-from: type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
           cache-to: type=gha,mode=max,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}

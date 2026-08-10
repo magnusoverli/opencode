@@ -28,7 +28,12 @@ ARG BUILD_ARCH
 # the two builds differ, and the workflows pass it explicitly.
 ARG ADDON_CHANNEL=stable
 ARG TTYD_VERSION=1.7.7
-ARG OPENCODE_VERSION=latest
+# Certified OpenCode runtime. This is a hard pin, never a range or a dist-tag:
+# the add-on ships exactly one OpenCode build, it is the only one any session
+# can run, and it changes only through a tested add-on release. build.yaml
+# carries the same value and is what CI reads; the two are asserted equal by
+# test/runtime-contract.test.js so a half-done bump cannot ship.
+ARG OPENCODE_VERSION=1.18.16
 ARG OPENCHAMBER_VERSION=1.18.1
 ARG PPQ_PROXY_VERSION=0.1.0
 ARG TSX_VERSION=4.20.6
@@ -97,7 +102,7 @@ RUN python3 -m venv /opt/zigporter-venv \
     && ln -s /opt/zigporter-venv/bin/zigporter /usr/local/bin/zigporter
 
 # Install OpenCode, OpenChamber, Prettier, and the PPQ private-mode proxy globally
-# - OpenCode: AI coding agent (pin version in build.yaml for reproducible builds)
+# - OpenCode: AI coding agent (certified pin; see OPENCODE_VERSION above)
 # - OpenChamber: browser UI for OpenCode (pinned; patched below for HA Ingress)
 # - Prettier: Code formatter for YAML files, configured for HA conventions
 # - ppq-private-mode: local OpenAI-compatible encryption proxy for PPQ TEE models
@@ -105,6 +110,12 @@ RUN python3 -m venv /opt/zigporter-venv \
 # Build tools are needed only while npm installs native dependencies. Peer
 # dependencies are omitted because ppq-private-mode is run as a standalone
 # proxy, not loaded as an OpenClaw plugin.
+#
+# The trailing assertion fails the build when the resolved OpenCode is not the
+# certified one. A dist-tag or range slipping into OPENCODE_VERSION would
+# otherwise publish an image whose runtime nobody tested, and the mismatch would
+# surface for the first time on a user's machine. The version is also recorded
+# on disk so runtime code can name the certified build without shelling out.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends g++ make \
     && npm install -g --omit=dev --omit=peer --no-audit --no-fund \
@@ -115,7 +126,13 @@ RUN apt-get update \
         tsx@${TSX_VERSION} \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get purge -y --auto-remove g++ make
+    && apt-get purge -y --auto-remove g++ make \
+    && INSTALLED=$(node -e "console.log(require('/usr/local/lib/node_modules/opencode-ai/package.json').version)") \
+    && if [ "${INSTALLED}" != "${OPENCODE_VERSION}" ]; then \
+        echo "OPENCODE_VERSION is ${OPENCODE_VERSION} but the installed runtime is ${INSTALLED}" >&2; \
+        exit 1; \
+    fi \
+    && printf '%s\n' "${OPENCODE_VERSION}" > /usr/local/share/opencode-certified-version
 
 # Copy package.json files first for better layer caching
 # Changes to server code won't invalidate npm install cache

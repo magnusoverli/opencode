@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# =============================================================================
+# ha-readonly - an OpenCode session that can look at Home Assistant but not
+#               touch it.
+#
+# Everything the normal session has is still configured — the same provider, the
+# same instructions, the same MCP server — but this session runs the
+# `home-assistant-read-only` agent under a final configuration overlay that
+# denies edits, shell, subagents and LSP, forces the Home Assistant MCP server
+# into its compact (read-only) tool profile, and switches off the native MCP
+# bridge, whose tools the compact profile does not filter.
+#
+# Why a launcher rather than an add-on option: nothing here changes the normal
+# session. Run `ha-readonly` to investigate, exit, and run `opencode` when you
+# want to act on what you found.
+# =============================================================================
+set -uo pipefail
+
+OVERLAY_FILE="${HA_READONLY_OVERLAY:-/opt/ha-mcp-server/opencode-readonly.json}"
+GENERATED_CONFIG="${HA_READONLY_CONFIG:-/data/.config/opencode/opencode.json}"
+AGENT_FILE="${HA_READONLY_AGENT:-/opt/ha-mcp-server/agents/home-assistant-read-only.md}"
+AGENT_NAME="home-assistant-read-only"
+
+export HOME="${HOME:-/data}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-/data/.local/share}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/data/.config}"
+
+# Same environment the normal session gets, so the provider, tokens and
+# discovered services all behave identically.
+if [ -f /data/.env_vars ]; then
+    # shellcheck disable=SC1091
+    source /data/.env_vars
+fi
+if [ -f /data/.env_vars_discovered ]; then
+    # shellcheck disable=SC1091
+    source /data/.env_vars_discovered
+fi
+if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    export HA_TOKEN="${SUPERVISOR_TOKEN}"
+fi
+
+export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+export OPENCODE_DISABLE_AUTOUPDATE=true
+export TMPDIR="${TMPDIR:-/data/.cache/opencode-tmp}"
+mkdir -p "${TMPDIR}" 2>/dev/null || true
+
+GRAY='\033[38;2;127;140;141m'
+YELLOW='\033[38;2;246;116;0m'
+CYAN='\033[38;2;26;188;156m'
+GREEN='\033[38;2;17;209;22m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+if [ ! -f "${OVERLAY_FILE}" ]; then
+    echo "ha-readonly: ${OVERLAY_FILE} is missing; refusing to start a session that is not actually read-only." >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Build the effective configuration
+#
+# OPENCODE_CONFIG_CONTENT is the last word in OpenCode's precedence order, so
+# what is built here wins over the global, custom and project configs. It is
+# assembled from the generated configuration rather than replacing it, because
+# the read-only session needs the same MCP command, LSP, formatter, provider and
+# instructions as a normal one — only the permissions and the MCP tool profile
+# differ.
+#
+# `permission` is REPLACED, never merged. The generated configuration allows
+# most bash and asks about a handful of mutating commands; a recursive merge
+# would leave those "ask" entries in place and a read-only session would be one
+# confirmation away from `yq -i`. Every bash pattern the generated config knows
+# about is therefore rewritten to deny as well, so the result denies regardless
+# of how the layers are combined downstream. `external_directory` is carried
+# over, because it is what lets the session read the configuration directory at
+# all, and reading is the entire point of this session.
+#
+# The MCP profile instruction file is swapped for the compact one to match the
+# profile actually in force; leaving the full-profile text in place would
+# describe tools this session does not have.
+# ---------------------------------------------------------------------------
+if [ -f "${GENERATED_CONFIG}" ]; then
+    CONFIG_CONTENT=$(jq -s '
+        .[0] as $generated | .[1] as $overlay |
+        ($generated.permission.bash // {}) as $bash |
+        (if ($bash | type) == "object" then ($bash | map_values("deny")) else {} end) as $inherited_bash |
+        (if ($generated.permission.external_directory | type) == "object"
+            then { external_directory: $generated.permission.external_directory }
+            else {} end) as $external |
+        ($generated * $overlay)
+        | .permission = ($overlay.permission
+            * { bash: ($inherited_bash * ($overlay.permission.bash // {})) }
+            * $external)
+        | .instructions = ((.instructions // [])
+            | map(if test("^/opt/ha-mcp-server/MCP_PROFILE_[A-Z]+[.]md$")
+                  then "/opt/ha-mcp-server/MCP_PROFILE_COMPACT.md" else . end)
+            | reduce .[] as $item ([]; if (. | index($item)) then . else . + [$item] end))
+    ' "${GENERATED_CONFIG}" "${OVERLAY_FILE}" 2>/dev/null)
+else
+    CONFIG_CONTENT=$(cat "${OVERLAY_FILE}")
+fi
+
+if [ -z "${CONFIG_CONTENT}" ] || ! printf '%s' "${CONFIG_CONTENT}" | jq -e . >/dev/null 2>&1; then
+    echo "ha-readonly: could not build the read-only configuration overlay; refusing to start." >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# The agent's system prompt
+#
+# It lives in a markdown file with OpenCode agent frontmatter — one readable,
+# reviewable source for what this session is told about itself — but the file is
+# deliberately NOT deployed into OpenCode's global agents directory. An agent
+# there is selectable in every session, including OpenChamber, where nothing
+# applies this overlay: its edit and shell denials would hold, but the Home
+# Assistant MCP server would still be in the user's configured profile, so a
+# session describing itself as unable to call a service could call one. The
+# agent therefore exists only here, and its prompt is injected from the file.
+# ---------------------------------------------------------------------------
+if [ -f "${AGENT_FILE}" ]; then
+    AGENT_PROMPT=$(awk 'BEGIN { fence = 0 }
+        /^---$/ && fence < 2 { fence += 1; next }
+        fence >= 2 { print }' "${AGENT_FILE}")
+    if [ -n "${AGENT_PROMPT}" ]; then
+        CONFIG_CONTENT=$(printf '%s' "${CONFIG_CONTENT}" \
+            | jq --arg name "${AGENT_NAME}" --arg prompt "${AGENT_PROMPT}" \
+                '.agent[$name].prompt = $prompt')
+    fi
+fi
+
+# Used by opencode-smoke-test, and by anyone who wants to see exactly what this
+# session runs under before trusting it with a live system.
+if [ "${1:-}" = "--print-config" ]; then
+    printf '%s\n' "${CONFIG_CONTENT}"
+    exit 0
+fi
+
+export OPENCODE_CONFIG_CONTENT="${CONFIG_CONTENT}"
+
+# ---------------------------------------------------------------------------
+# Tell the user what this session is, before it starts
+# ---------------------------------------------------------------------------
+MCP_ENABLED_IN_CONFIG=$(printf '%s' "${CONFIG_CONTENT}" | jq -r '.mcp.homeassistant.enabled // false')
+
+echo ""
+echo -e "${CYAN}${BOLD}Home Assistant read-only session${NC}"
+echo -e "${GRAY}Investigate and diagnose here. Nothing in this session can change your system.${NC}"
+echo ""
+echo -e "  ${GREEN}Available${NC}  state, entity details, history, logbook, calendars, areas,"
+echo -e "             devices, templates, error log, Supervisor evidence, diagnose_entity"
+echo -e "  ${YELLOW}Denied${NC}     file edits, shell commands, service calls, config writes,"
+echo -e "             updates, screenshots, hab, zigporter, subagents, native MCP"
+echo ""
+if [ "${MCP_ENABLED_IN_CONFIG}" != "true" ]; then
+    echo -e "${YELLOW}Note:${NC} ${GRAY}Home Assistant MCP is turned off in the add-on configuration, so this${NC}"
+    echo -e "      ${GRAY}session can read files but cannot query live Home Assistant state.${NC}"
+    echo ""
+fi
+echo -e "${GRAY}When you want to act on what you find: exit, then run ${NC}${GREEN}opencode${NC}${GRAY}.${NC}"
+echo ""
+
+cd /homeassistant || exit 1
+
+# The overlay's `default_agent` already selects it, so `--agent` is belt and
+# braces — worth passing when the runtime accepts it, not worth failing to start
+# over if a future certified version drops the flag.
+if opencode --help 2>&1 | grep -q -- '--agent'; then
+    exec opencode --agent "${AGENT_NAME}" "$@"
+fi
+exec opencode "$@"

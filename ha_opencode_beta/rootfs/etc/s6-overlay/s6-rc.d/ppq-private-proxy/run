@@ -34,8 +34,8 @@ bashio::log.info "The PPQ proxy is internal-only and is not exposed through Home
 
 # ppq-private-mode is installed into the image's global modules
 # (/usr/local/lib/node_modules). This script sources /data/.env_vars, which
-# exports NPM_CONFIG_PREFIX=/data/.npm-global for OpenCode's own runtime updates
-# — so a plain `npm root -g` would resolve there instead and miss the proxy
+# exports NPM_CONFIG_PREFIX=/data/.npm-global so anything the user installs by
+# hand persists — so a plain `npm root -g` would resolve there and miss the proxy
 # (ERR_MODULE_NOT_FOUND). Isolate the lookup from that override. Thanks to
 # @iBobik for diagnosing this in issue #34.
 PPQ_PROXY_ENTRYPOINT="$(unset NPM_CONFIG_PREFIX npm_config_prefix; npm root -g)/ppq-private-mode/bin/server.ts"

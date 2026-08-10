@@ -28,6 +28,33 @@ function responseFor(request) {
   if (user.includes("kitchen temperature sensor")) {
     return toolResults ? { role: "assistant", content: "The sensor has not checked in recently." } : toolCall("diagnose_entity", { entity_id: "sensor.kitchen_temperature" });
   }
+  if (user.includes("Which lights are currently on in the kitchen")) {
+    return toolResults ? { role: "assistant", content: "The ceiling light is on." } : toolCall("get_home_context", { area: "kitchen" });
+  }
+  if (user.includes("logged something about the MQTT integration")) {
+    return toolResults ? { role: "assistant", content: "MQTT could not connect." } : toolCall("get_error_log", { search: "mqtt" });
+  }
+  if (user.includes("'Evening lights' automation did not run")) {
+    return toolResults
+      ? { role: "assistant", content: "There is no logbook entry for that night; the trigger never fired." }
+      : toolCall("get_logbook", { entity_id: "automation.evening_lights", hours: 24 });
+  }
+  if (user.includes("Porch light at sunset")) {
+    return toolResults === 0
+      ? toolCall("read_file", { path: "automations.yaml" })
+      : toolResults === 1
+        ? toolCall("write_config_safe", {
+          file_path: "automations.yaml",
+          content: "- id: '1700000000000'\n  alias: Morning routine\n- id: '1700000000001'\n  alias: Porch light at sunset\n",
+          dry_run: true,
+        })
+        : { role: "assistant", content: "The proposed file validated; nothing was written." };
+  }
+  if (user.includes("finished editing automations.yaml")) {
+    return toolResults
+      ? { role: "assistant", content: "Reloaded the automations; no restart was needed." }
+      : toolCall("call_service", { domain: "automation", service: "reload" });
+  }
   return toolResults === 0
     ? toolCall("get_integration_docs", { integration: "template" })
     : toolResults === 1
@@ -72,9 +99,9 @@ describe("ha-agent-eval runner", () => {
 
       expect(result.code, result.stderr).toBe(0);
       expect(result.stderr).toBe("");
-      expect(result.stdout).toContain("3/3 scenarios passed");
+      expect(result.stdout).toContain("8/8 scenarios passed");
       const report = JSON.parse(await readFile(output, "utf8"));
-      expect(report.summary).toEqual({ total: 3, passed: 3, failed: 0 });
+      expect(report.summary).toEqual({ total: 8, passed: 8, failed: 0 });
     } finally {
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }

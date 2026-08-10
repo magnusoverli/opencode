@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.5.0b0
+
+The runtime this add-on runs is now a decision someone made, not whatever npm had that morning — and the knowledge it carries is loaded when a task needs it instead of on every request. Plus a session that can look at your Home Assistant installation without being able to touch it.
+
+- **A certified OpenCode runtime** — the add-on now ships one pinned OpenCode build (1.18.16) and runs only that one. The **OpenCode update policy** option is gone, and with it the background `npm install -g opencode-ai@latest` that could arrive with anything upstream had published that hour.
+
+  The choice it offered was not really a choice. `bundled` meant a tested runtime; `latest` meant an untested one landing on your Home Assistant instance without warning, and it is the OpenCode version that decides whether this add-on's MCP servers, YAML language server, Prettier formatting, OpenChamber build and PPQ provider still work. A new OpenCode now arrives the way every other change does: in an add-on release, after a beta soak. The terminal banner names the version it certified, `OPENCODE_DISABLE_AUTOUPDATE` is always set, and the image build fails outright if npm resolves anything other than the pinned version.
+
+  If you had `latest` set, nothing breaks. Any OpenCode previously installed under `/data/.npm-global` is left exactly where it is — it is your data — but it is no longer on `PATH` and is never used, and the add-on log says so once at start-up. You can delete the now-unknown `opencode_update_policy` line from the Configuration tab whenever you like.
+
+- **Home Assistant knowledge as skills, loaded when it is needed** — `AGENTS.md` had grown to carry the whole YAML style guide, the `yq` reference, the documentation-currency workflow, every `zigporter` caveat and the firmware-update procedure, and all of it was pushed into the context of every request, including "what's the temperature in the kitchen".
+
+  Those procedures now ship as five OpenCode skills — `home-assistant-configuration`, `home-assistant-troubleshooting`, `home-assistant-dashboard-ui`, `home-assistant-zigbee-esphome` and `home-assistant-development` — which OpenCode loads on demand, when the task actually calls for one. What stays in `AGENTS.md` is the part that has to be unconditional and is not a procedure at all: the consent and scope rules, the secret-handling rules, the off-limits internal directories, and a short map saying which skill covers what.
+
+  The skills are deployed to `/data/.config/opencode/skills/`, and they are yours to edit. The add-on refreshes one only while your copy is byte-for-byte what it last wrote; the moment you change it, the update is skipped, the log says which file was kept, and it stays kept on every later start. That last part is the bit that is easy to get wrong, so it has a test.
+
+- **`ha-readonly`: a session that cannot change anything** — investigating a problem and fixing it are different jobs, and only one of them should be able to write to your configuration. Run `ha-readonly` in the terminal for an OpenCode session that reads files, queries live state, history and logs, and ends with a recommendation.
+
+  It is not a prompt asking the model to behave. File edits, shell commands, subagents and the LSP tool are denied at the session and agent level; the Home Assistant MCP server is forced into its `compact` profile, so service calls, configuration writes, updates, firmware, screenshots, `hab` and `zigporter` are not present in the tool list and are rejected by the server even if something asks for one anyway; the native Home Assistant MCP bridge is switched off, because the profile does not filter its tools; and `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, `*.key` and `*.pem` are denied regardless of the **Restrict access to sensitive files** setting. `ha-readonly --print-config` prints exactly what the session runs under.
+
+  Everything else is the same session you already have — same provider, same model, same view of your configuration. And your normal `opencode` session is untouched: there is no new option, no new default, nothing to turn back on. Investigate in `ha-readonly`, exit, and use OpenCode to make the change you decided on.
+
+- **Checks that run before a release rather than during one** — the behavioural tests used to run only when a tag built an image, which is after the change is already on `main`. A pull-request workflow now runs the MCP server suite, the YAML language server suite, and a new set of contract tests covering the runtime pin, PATH precedence, the generated OpenCode configuration, skill and agent frontmatter, managed deployment, and the read-only overlay. `opencode-smoke-test` in the terminal verifies the same chain inside a real image — runtime version, MCP and LSP startup, the Ingress-patched OpenChamber bundle, deployed skills, and the read-only overlay — and a weekly workflow reports new upstream OpenCode releases without touching the pin. Bumping the certified runtime now has a checklist (`OPENCODE_UPGRADE_CHECKLIST.md`) rather than being a one-line edit.
+
+- **OpenCode V2 readiness tracking** — maintainers now have a root-level compatibility checklist covering the upstream beta's migration work, current blockers, and release gates.
+- **OpenCode V1 improvement roadmap** — maintainers now have a Home Assistant-focused plan for a certified runtime, on-demand skills, read-only diagnostics, and regression coverage.
+
 ## 2.4.2b5
 
 - **OpenChamber restarts no longer leave port-holding orphan processes** — the server and Home Assistant Ingress proxy are now independently supervised, so restarting either cannot strand the other on ports 3010 or 8099.

@@ -1,0 +1,115 @@
+---
+name: PR Checks
+
+# The behavioural checks used to run only when a tag or a manual dispatch built
+# an image, which is far too late: by then the change is already on main and a
+# broken runtime contract is discovered during a release rather than in review.
+# These run on every pull request instead, and are deliberately fast — the image
+# itself is built by the release workflows and smoke-tested on a real Home
+# Assistant instance with `opencode-smoke-test`.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Runtime, skill and read-only contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Beta add-on contract tests
+        run: node --test "ha_opencode_beta/test/*.test.js"
+
+      - name: Stable add-on contract tests
+        run: node --test "ha_opencode/test/*.test.js"
+
+      - name: Assert both channels declare every option their code reads
+        run: |
+          # promote-beta-to-stable.sh refuses to promote when beta's code reads
+          # an option stable's manifest does not declare. Running its read-only
+          # mode here surfaces that in review rather than at promotion time.
+          scripts/promote-beta-to-stable.sh --check
+
+  mcp-server:
+    name: Home Assistant MCP server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ha_opencode_beta/rootfs/opt/ha-mcp-server
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
+
+  lsp-server:
+    name: Home Assistant YAML language server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ha_opencode_beta/rootfs/opt/ha-lsp-server
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
+
+  shell:
+    name: Shell scripts and service definitions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Syntax-check every shipped shell script
+        run: |
+          status=0
+          while IFS= read -r file; do
+            head -n 1 "$file" | grep -qE '^#!.*(bash|sh|bashio)' || continue
+            if ! bash -n "$file"; then
+              echo "::error file=${file}::bash syntax error"
+              status=1
+            fi
+          done < <(find ha_opencode ha_opencode_beta -type f \
+              -not -path '*/node_modules/*' \
+              \( -name '*.sh' -o -path '*/s6-rc.d/*/run' -o -path '*/usr/local/bin/*' \))
+          exit "${status}"
+
+      - name: Parse-check every shipped Node script
+        run: |
+          status=0
+          while IFS= read -r file; do
+            if ! node --check "$file"; then
+              echo "::error file=${file}::JavaScript syntax error"
+              status=1
+            fi
+          done < <(find ha_opencode ha_opencode_beta/rootfs/usr ha_opencode_beta/rootfs/opt/openchamber \
+              -type f \( -name '*.js' -o -name '*.mjs' \) \
+              -not -path '*/node_modules/*' 2>/dev/null | sort -u)
+          exit "${status}"

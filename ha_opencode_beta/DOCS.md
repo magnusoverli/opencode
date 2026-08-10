@@ -36,7 +36,9 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **PPQ private TEE models**: Opt-in encrypted proxy for PPQ private models running in remote TEEs. The proxy is internal-only and binds to `127.0.0.1` inside the add-on container.
 - **Web terminal clipboard fixes**: Copying inside OpenCode now reaches the browser clipboard, plain `Ctrl+V` paste works, and macOS users can use `Option+drag` to select text while full-screen terminal apps capture the mouse.
 - **Touch scrolling**: One-finger vertical drag gestures inside the terminal now scroll full-screen apps such as OpenCode on phones and tablets.
-- **OpenCode update policy**: Use only the image-bundled OpenCode (`bundled`, default, lowest memory use) or keep OpenCode updated to the newest release in the background (`latest`, skipped automatically on low-memory systems).
+- **Certified OpenCode runtime**: The add-on ships one pinned, tested OpenCode build and always runs it. The `OpenCode update policy` option is gone, and no start-up path installs anything from npm. See [OpenCode Updates](#opencode-updates).
+- **Home Assistant skills**: The detailed procedures — YAML work, troubleshooting, dashboards, Zigbee/ESPHome, development — now ship as OpenCode skills that are loaded only when the task needs them, instead of being pushed into every request. `AGENTS.md` keeps the consent and safety rules, which are always in force. See [Home Assistant Skills](#home-assistant-skills).
+- **Read-only session**: Run `ha-readonly` in the terminal for a session that can inspect and diagnose your installation but cannot change it — no file edits, no shell, no service calls, no configuration writes. Your normal OpenCode session is unchanged. See [Read-Only Session](#read-only-session).
 - **Sensitive file protection**: New **Restrict access to sensitive files** option (default on) denies the AI read access to `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, and `*.key`/`*.pem` files so their contents can't reach the model. Set it to `false` to restore fully unrestricted file access. See [Sensitive File Protection](#sensitive-file-protection).
 - **Focus-friendly responses**: Optional action-first, concise, progress-aware response guidance for users who find long or unstructured responses difficult to act on. Disabled by default and available in both terminal and OpenChamber modes.
 - **Browser provider sign-in in OpenChamber**: Providers whose browser OAuth method redirects to a loopback address (for example **ChatGPT Pro/Plus (browser)**) can now be connected from the OpenChamber UI. See [Connecting a provider with browser sign-in](#connecting-a-provider-with-browser-sign-in).
@@ -86,6 +88,41 @@ By default (**Restrict access to sensitive files** = `true`), the add-on adds an
 
 OpenCode snapshots are disabled by default in this add-on to reduce memory and disk pressure on Home Assistant systems. File watching also ignores noisy internal paths such as `.storage/`, `.cloud/`, caches, logs, and the Home Assistant database. You can override these defaults with **Custom OpenCode configuration** if you need OpenCode's built-in snapshot/undo behavior.
 
+## Home Assistant Skills
+
+The add-on ships five skills that hold the detailed procedure for each kind of Home Assistant work. OpenCode loads a skill on demand, when the task calls for it, so none of them costs anything on a request that does not need it.
+
+| Skill | Covers |
+|-------|--------|
+| `home-assistant-configuration` | Writing and changing YAML: automations, scripts, scenes, templates, integrations, packages. Checking current integration docs first, the HA YAML style guide, `yq`, safe writes, validation, backups, and whether a change needs a reload or a restart |
+| `home-assistant-troubleshooting` | Diagnosing a problem without changing anything: bounded state, history, logbook and log queries, and ending with a recommendation |
+| `home-assistant-dashboard-ui` | Lovelace dashboards, views, cards, themes, and verifying the result with a screenshot |
+| `home-assistant-zigbee-esphome` | Zigbee/ZHA/Z2M inspection, cascade renames, stale-device cleanup, mesh maps, ESPHome, and firmware updates |
+| `home-assistant-development` | Custom integrations, add-ons, native `llm.py` tool providers, and MCP servers |
+
+What stays in `AGENTS.md` — and therefore loads in every session — is the part that has to be unconditional: the consent and scope rules, the secret-handling rules, the off-limits internal directories, and a short map of which skill covers what.
+
+The skills are deployed to `/data/.config/opencode/skills/`, where OpenCode discovers them. **You can edit them.** The add-on refreshes a skill at start-up only when your copy is byte-for-byte what it last wrote; once you change one, it is yours, the update is skipped, and the add-on log says so. Delete your edited copy if you later want the shipped version back.
+
+## Read-Only Session
+
+Sometimes you want to understand something, not change it. Run:
+
+```
+ha-readonly
+```
+
+This starts OpenCode with the `home-assistant-read-only` agent under a configuration overlay that:
+
+- denies file edits, shell commands, subagents, and the LSP tool
+- forces the Home Assistant MCP server into its `compact` profile, so service calls, configuration writes, updates, firmware, screenshots, `hab` and `zigporter` are not merely discouraged — they do not exist, and are rejected by the server even if something asks for one
+- switches off the native Home Assistant MCP bridge, whose tools the profile does not filter
+- denies reading `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, `*.key` and `*.pem` **regardless** of the **Restrict access to sensitive files** setting
+
+Everything else is unchanged: the same provider, the same model, the same instructions, the same view of your configuration directory. The session ends with findings and a recommendation; exit and run `opencode` when you want to act on it.
+
+There is no option to turn this on. It is a separate command, so your normal session keeps every capability it has today. `ha-readonly --print-config` prints the exact configuration the session runs under, if you would rather check than trust.
+
 ## MCP Tool Profiles
 
 The built-in `homeassistant` MCP server can expose a narrower capability set through **MCP tool profile**. This changes the tool definitions supplied to the model and rejects hidden MCP calls before they reach Home Assistant; it does not change OpenCode filesystem access, terminal commands, or permissions. Restart the add-on after changing it.
@@ -112,13 +149,19 @@ HA_AGENT_EVAL_API_KEY=optional-for-local-or-tokenless-providers
 
 Run `ha-agent-eval` to evaluate scenarios supported by the active MCP profile, or use `ha-agent-eval --profile compact` or `ha-agent-eval --scenario safe-configuration-validation`. Reports are written under `/data/evaluations/`, excluded from backups, and the command exits non-zero when any scenario fails. It evaluates model function-calling behavior, not OpenCode's full prompt or a live Home Assistant system.
 
-On low-memory hosts — for example a 4 GB Home Assistant Green running several other add-ons — keep **OpenCode update policy** on `bundled` (the default) so the add-on does no memory-heavy start-up install. 8 GB or more is recommended for comfortable use alongside other memory-heavy add-ons such as Matter Server, Music Assistant, and Whisper/Piper.
+The add-on does no memory-heavy start-up install, so it runs on low-memory hosts such as a 4 GB Home Assistant Green alongside several other add-ons. 8 GB or more is recommended for comfortable use alongside other memory-heavy add-ons such as Matter Server, Music Assistant, and Whisper/Piper.
 
 ## OpenCode Updates
 
-By default, **OpenCode update policy** is set to `bundled`: the add-on uses the OpenCode version shipped in its image and does no start-up install — the lowest-memory option, recommended for systems with 4 GB RAM or limited free memory.
+The add-on ships one **certified OpenCode runtime**: an exact upstream version pinned in the image, installed at build time, and verified during the build to be the version the pin names. That build is the only OpenCode any session can run — the terminal banner shows which one it is.
 
-Set the policy to `latest` to follow upstream OpenCode releases. The add-on starts immediately on the bundled (or an existing healthy persistent) binary, then refreshes `opencode-ai@latest` into `/data/.npm-global` **in the background**; the newer version becomes active for the next OpenCode session. The background update never blocks start-up and is skipped automatically when available memory is below ~1.5 GB. An interrupted or non-working update is discarded so the add-on keeps using the known-good bundled copy.
+There is no update policy to choose. OpenCode's own auto-updater is disabled (`OPENCODE_DISABLE_AUTOUPDATE=true`) and nothing in the add-on runs `npm install -g opencode-ai@latest`, so the runtime you get is the runtime that was tested against this add-on's MCP servers, YAML language server, Prettier formatting, OpenChamber build, and PPQ provider. **A new OpenCode arrives with an add-on update**, after it has been through the beta channel.
+
+If you used the old `latest` policy, an OpenCode may still exist under `/data/.npm-global`. It is left untouched but is no longer on `PATH` and is never used; the add-on logs a one-line notice about this at start-up. You can remove the now-unknown `opencode_update_policy` line from the Configuration tab at your convenience.
+
+### Checking the runtime yourself
+
+`opencode-smoke-test` in the terminal verifies the whole chain in one go: that the running OpenCode is the certified one and nothing is shadowing it, that the generated configuration still names the bundled MCP server, language server and formatter, that the MCP server and YAML language server actually start and answer, that the OpenChamber bundle carries its Ingress patch, and that the skills, read-only agent and read-only overlay are in place. It exits non-zero if anything fails, and it is worth attaching to a bug report.
 
 ### CPU requirements
 
