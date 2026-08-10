@@ -38,7 +38,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **Touch scrolling**: One-finger vertical drag gestures inside the terminal now scroll full-screen apps such as OpenCode on phones and tablets.
 - **Certified OpenCode runtime**: The add-on ships one pinned, tested OpenCode build and always runs it. The `OpenCode update policy` option is gone, and no start-up path installs anything from npm. See [OpenCode Updates](#opencode-updates).
 - **Home Assistant skills**: The detailed procedures — YAML work, troubleshooting, dashboards, Zigbee/ESPHome, development — now ship as OpenCode skills that are loaded only when the task needs them, instead of being pushed into every request. `AGENTS.md` keeps the consent and safety rules, which are always in force. See [Home Assistant Skills](#home-assistant-skills).
-- **Read-only session**: Run `ha-readonly` in the terminal for a session that can inspect and diagnose your installation but cannot change it — no file edits, no shell, no service calls, no configuration writes. Your normal OpenCode session is unchanged. See [Read-Only Session](#read-only-session).
+- **Read-only session**: Run `ha-readonly` for a session that can inspect and diagnose your installation but cannot change it — no file edits, no shell, no service calls, no configuration writes. Your normal OpenCode session is unchanged. Requires `interface_mode: terminal`. See [Read-Only Session](#read-only-session).
 - **Sensitive file protection**: New **Restrict access to sensitive files** option (default on) denies the AI read access to `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, and `*.key`/`*.pem` files so their contents can't reach the model. Set it to `false` to restore fully unrestricted file access. See [Sensitive File Protection](#sensitive-file-protection).
 - **Focus-friendly responses**: Optional action-first, concise, progress-aware response guidance for users who find long or unstructured responses difficult to act on. Disabled by default and available in both terminal and OpenChamber modes.
 - **Browser provider sign-in in OpenChamber**: Providers whose browser OAuth method redirects to a loopback address (for example **ChatGPT Pro/Plus (browser)**) can now be connected from the OpenChamber UI. See [Connecting a provider with browser sign-in](#connecting-a-provider-with-browser-sign-in).
@@ -106,7 +106,9 @@ The skills are deployed to `/data/.config/opencode/skills/`, where OpenCode disc
 
 ## Read-Only Session
 
-Sometimes you want to understand something, not change it. Run:
+> **Requires `interface_mode: terminal`.** `ha-readonly` is a terminal command, and in `openchamber` mode the add-on does not start a terminal — so in that mode it is not available. There is no OpenChamber equivalent: OpenChamber drives one managed OpenCode server with one configuration, and a read-only *option* on that server would change your normal session rather than sit beside it, which is exactly what this feature avoids.
+
+Sometimes you want to understand something, not change it. Run this in the terminal:
 
 ```
 ha-readonly
@@ -161,7 +163,7 @@ If you used the old `latest` policy, an OpenCode may still exist under `/data/.n
 
 ### Checking the runtime yourself
 
-`opencode-smoke-test` in the terminal verifies the whole chain in one go: that the running OpenCode is the certified one and nothing is shadowing it, that the generated configuration still names the bundled MCP server, language server and formatter, that the MCP server and YAML language server actually start and answer, that the OpenChamber bundle carries its Ingress patch, and that the skills, read-only agent and read-only overlay are in place. It exits non-zero if anything fails, and it is worth attaching to a bug report.
+`opencode-smoke-test` verifies the whole chain in one go. Run it in the terminal, or — in `openchamber` mode, where there is no terminal — ask the OpenCode session to run it with its shell tool. It checks that the running OpenCode is the certified one and nothing is shadowing it, that the generated configuration still names the bundled MCP server, language server and formatter, that the MCP server and YAML language server actually start and answer, that the OpenChamber bundle carries its Ingress patch, and that the skills and the read-only overlay are in place. It exits non-zero if anything fails, and it is worth attaching to a bug report.
 
 ### CPU requirements
 
@@ -217,6 +219,8 @@ Modes:
 
 - `terminal`: default. Uses the existing ttyd terminal and tmux session.
 - `openchamber`: starts OpenChamber behind Home Assistant Ingress on the same sidebar entry.
+
+The two are exclusive: in `openchamber` mode no terminal is started, so the terminal commands (`ha-readonly`, `ha-logs`, `ha-mcp`, `ha-context`, `ha-hooks`, `hab`, `zigporter`, `opencode-smoke-test`) have no shell to run in. Most of them the OpenCode session can still run with its shell tool if you ask it to; [`ha-readonly`](#read-only-session) is the exception, because it replaces the session rather than running inside one.
 
 To test OpenChamber:
 

@@ -33,7 +33,8 @@ decision, which this checklist does **not** cover. Do not use it to move to a
 
 ## 3. Automated in-image checks
 
-Run inside the add-on terminal:
+Run inside the add-on terminal — or, in `openchamber` mode where there is no
+terminal, ask the OpenCode session to run it with its shell tool:
 
 ```
 opencode-smoke-test
@@ -55,8 +56,9 @@ pass.**
       attach` from another machine connects and runs a prompt.
 - [ ] **OpenChamber LAN**: `enable_openchamber_lan: true` with `4097/tcp` mapped
       — the UI loads at the root path.
-- [ ] **Read-only** (`ha-readonly`): starts, banner shown, an entity can be
-      inspected, and an attempted edit / shell command / service call is refused.
+- [ ] **Read-only** (`ha-readonly`, terminal mode only): starts, banner shown, an
+      entity can be inspected, and an attempted edit / shell command / service
+      call is refused.
 
 ## 5. Provider sign-in
 
