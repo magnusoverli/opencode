@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.0b1
+
+Documentation only — the image is identical to 2.5.0b0.
+
+- **`ha-readonly` is documented as needing terminal mode** — it is a terminal command, and `interface_mode: openchamber` starts no terminal, so in that mode it cannot be reached. The 2.5.0b0 documentation presented it as unconditionally available. The Interface Mode section now also lists which other terminal commands (`ha-logs`, `ha-mcp`, `ha-context`, `opencode-smoke-test`, `hab`, `zigporter`) the OpenCode session can still run through its shell tool when there is no terminal, and why `ha-readonly` is the one that cannot: it replaces a session rather than running inside one, and a read-only *option* on OpenChamber's single managed server would change your normal session instead of sitting beside it.
+
 ## 2.5.0b0
 
 The runtime this add-on runs is now a decision someone made, not whatever npm had that morning — and the knowledge it carries is loaded when a task needs it instead of on every request. Plus a session that can look at your Home Assistant installation without being able to touch it.
