@@ -14,20 +14,75 @@
 
 **Transform your Home Assistant configuration with the power of AI**
 
-[Installation](#-installation) • [Features](#-features) • [Documentation][docs] • [Support](#-support)
+[Getting Started](#-getting-started) • [Features](#-features) • [Documentation][docs] • [Support](#-support)
 
 ---
 
 </div>
 
-## ✨ About
-
-**OpenCode** brings the revolutionary [OpenCode](https://opencode.ai) AI coding agent directly into your Home Assistant instance. Experience intelligent configuration editing through natural language, advanced YAML assistance, and deep integration via the Model Context Protocol (MCP).
-
 > **Upstream attribution:** This is an independent Home Assistant add-on that redistributes and integrates [OpenCode](https://github.com/anomalyco/opencode), © 2025 opencode, under the MIT License. It is not made by, affiliated with, or endorsed by the OpenCode team or Anomaly. See the [third-party notices](THIRD-PARTY-LICENSES.md).
 
+## 🚀 Getting Started
 
-### 🎯 Key Features
+> ⚙️ **Hardware requirement:** on x86-64, OpenCode needs a CPU with **SSE4.2** (Intel Nehalem/2008 or newer, AMD Bulldozer/2011 or Jaguar/2013 or newer). Older processors cannot run it at all — it exits with `Illegal instruction (core dumped)`. ARM64 is unaffected. See [CPU requirements][cpu-req] for details.
+
+### 1. Add This Repository
+
+[![Add Repository][repo-btn]][repo-add]
+
+<details>
+<summary>Or add manually</summary>
+
+Go to **Settings** → **Add-ons** → **Add-on Store** → **⋮** → **Repositories**
+
+Add: `https://github.com/magnusoverli/opencode`
+</details>
+
+### 2. Install the Add-on
+
+Find **"OpenCode"** in the add-on store and click **Install**.
+
+> 💡 Prefer the beta channel to try new features early? Install **"OpenCode Beta"** from the same repository instead — it installs side by side with the stable add-on. See [Release channels](#release-channels).
+
+### 3. Open OpenCode
+
+Start the add-on, then click **Open Web UI** (or use the sidebar entry). By default you'll land in a web **terminal**.
+
+> 💡 **Prefer a graphical interface?** Set **Interface Mode** to `openchamber` in the add-on **Configuration** tab and restart to swap the terminal for the [OpenChamber](https://github.com/openchamber/openchamber) web UI on the same sidebar entry. The default `terminal` mode is unchanged.
+
+### 4. Connect an AI Provider
+
+Run `opencode`, then `/connect` and follow the prompts to authenticate — Anthropic (Claude) is recommended, or pick OpenAI, Google, **OpenCode Zen** (curated coding models, no setup required), or any of the 70+ other supported providers.
+
+### 5. Try It
+
+Once connected, ask OpenCode things like:
+
+```bash
+# Create a new automation
+"Create an automation that turns on lights when motion is detected"
+
+# Review your configuration
+"Check my configuration.yaml for any issues"
+
+# Add sensors
+"Add a template sensor to track my total energy usage"
+
+# Get entity information
+"What's the current state of all my lights?"
+
+# Troubleshoot
+"Why isn't my bedroom motion sensor triggering automations?"
+
+# Analyze history
+"Show me temperature trends for the past 24 hours"
+```
+
+---
+
+## 🎯 Features
+
+**OpenCode** brings the [OpenCode](https://opencode.ai) AI coding agent directly into your Home Assistant instance. Experience intelligent configuration editing through natural language, advanced YAML assistance, and deep integration via the Model Context Protocol (MCP) — with a growing set of features that help it understand *your* installation, not just configuration syntax in general.
 
 <table>
 <tr>
@@ -37,31 +92,40 @@
 Use natural language to modify your Home Assistant configuration. No more searching documentation - just ask!
 
 #### 🎨 **Two Interface Modes**
-Choose your experience from the sidebar: a beautiful web **terminal** with 10 themes, or the graphical **OpenChamber** web UI — both served through Home Assistant Ingress.
+Choose your experience from the sidebar: a beautiful web **terminal** with 10 themes, or the graphical **OpenChamber** web UI — both served through Home Assistant Ingress. Either can also be opted into a mappable LAN port for reverse proxies and remote clients.
 
 #### 🔌 **Provider Agnostic**
-Works with **75+ AI providers**: Anthropic, OpenAI, Google, Groq, Ollama, and many more.
+Works with **Anthropic, OpenAI, Google, and 70+ other AI providers**.
+
+#### 🔐 **Private TEE Models (Beta)**
+Optional PPQ private-mode proxy routes requests to models running in remote trusted execution environments — encrypted end to end, with nothing exposed on the network.
+
+#### 🎚️ **Scoped MCP Tool Profiles**
+Choose a `compact`, `configuration`, or `full` tool profile to control how much of the Home Assistant tool surface the model sees — smaller profiles mean a cheaper prompt and a narrower blast radius.
 
 </td>
 <td width="50%">
 
 #### 🔧 **Deep MCP Integration**
-41 tools, 14 resources, and 6 guided prompts for comprehensive Home Assistant interaction.
+47 tools, 14 resources, and 6 guided prompts spanning state and service calls, history, config validation, calendars, decision notes, update and firmware management, ESPHome, Supervisor diagnostics, and CLI gateways.
 
 #### 🧠 **Home Context**
-Sessions start knowing your installation instead of rediscovering it. A generated briefing describes your setup, `AGENTS.local.md` holds your own standing instructions, and approved decision notes carry the reasoning behind your configuration between sessions.
+Sessions start knowing your installation instead of rediscovering it. A generated briefing describes your setup, `AGENTS.local.md` holds your own standing instructions that survive updates, and decision notes — recorded only with your approval — carry the reasoning behind your configuration between sessions. Inspect it all with `ha-context`.
 
 #### 💡 **Intelligent LSP Support**
 Smart YAML editing with entity autocomplete, live hover information, deprecation warnings, and go-to-definition support.
 
 #### 🛡️ **Safe Config Writing**
-Validated config pipeline with automatic backup/restore. Multi-layered checks are designed to prevent AI-written config from breaking your HA instance.
+Validated config pipeline with automatic backup/restore and guardrails against accidental data loss. Direct file edits and in-place shell writes now ask for approval before touching disk, too.
 
 #### 🏗️ **hab CLI Integration**
 Includes the [Home Assistant Builder CLI](https://github.com/balloob/home-assistant-build-cli) by [@balloob](https://github.com/balloob) — a CLI purpose-built for AI agents to manage Home Assistant via REST and WebSocket APIs. Enables dashboard CRUD, area/floor management, helper creation, backup/restore, and bulk admin operations that would otherwise require direct API calls or UI interaction.
 
+#### 🧩 **Startup Hooks**
+An opt-in, persistent place for your own scripts to run at add-on startup — everything else in the container is rebuilt from the image on every restart, so this is the supported way to make your own customizations stick.
+
 #### 🧭 **HA Native LLM Ready**
-Tracks Home Assistant's emerging native `llm` integration and native MCP endpoints such as `/api/mcp/<API ID>`, reports readiness through MCP, and targets beta-channel bridge testing first.
+Home Assistant's native `llm` platform ships in **2026.8**. OpenCode's opt-in native MCP bridge already targets it (with fallback for older versions), while its own MCP tools remain the complete, supported working surface either way.
 
 </td>
 </tr>
@@ -84,67 +148,36 @@ Think of it as your personal expert developer who:
 
 ## 🎭 Supported AI Providers
 
-OpenCode works with **75+ AI providers**. Choose the one that fits your needs:
+OpenCode works with **Anthropic, OpenAI, Google, and 70+ other AI providers**. Choose the one that fits your needs:
 
 <details>
 <summary><b>🔥 Popular Providers (Click to expand)</b></summary>
 
-| Provider | Available Models |
+| Provider | Notes |
 |----------|------------------|
-| 🧠 **Anthropic** | Claude 4 Opus, Claude 4 Sonnet, Claude 3.5 Sonnet, Claude 3.5 Haiku |
-| 💎 **OpenAI** | GPT-4o, GPT-4 Turbo, o1, o1-mini, o3-mini |
-| 🌈 **Google** | Gemini 2.0 Flash, Gemini 1.5 Pro, Gemini 1.5 Flash |
-| ☁️ **AWS Bedrock** | Claude, Llama, Mistral (via AWS) |
-| 🔷 **Azure OpenAI** | GPT-4, GPT-4 Turbo (Azure hosted) |
-| ⚡ **Groq** | Llama 3, Mixtral (ultra-fast inference) |
-| 🎯 **Mistral** | Mistral Large, Mistral Medium, Codestral |
+| 🧠 **Anthropic** | Claude models — recommended for configuration work |
+| 💎 **OpenAI** | GPT and o-series reasoning models |
+| 🌈 **Google** | Gemini models |
+| ☁️ **AWS Bedrock** | Claude, Llama, Mistral, and others via AWS |
+| 🔷 **Azure OpenAI** | Azure-hosted OpenAI models |
+| ⚡ **Groq** | Ultra-fast inference for open models |
+| 🎯 **Mistral** | Mistral and Codestral models |
 | 🦙 **Ollama** | Local models — see the [local model notes](./ha_opencode/DOCS.md#local-models-ollama-and-similar) before choosing hardware |
-| 🌐 **OpenRouter** | 100+ models through single API |
-| 🤝 **Together AI** | Llama, Mixtral, and open models |
+| 🌐 **OpenRouter** | 100+ models through a single API |
+| 🤝 **Together AI** | Llama, Mixtral, and other open models |
 | 🔥 **Fireworks AI** | Fast inference for open models |
 | 🚀 **xAI** | Grok models |
-| 💫 **Deepseek** | Deepseek Coder, Deepseek Chat |
+| 💫 **Deepseek** | Deepseek Coder and Deepseek Chat |
 
 </details>
 
-> **Running models locally?** The add-on sends a large tools-and-instructions prompt on every request. Read the [local model notes](./ha_opencode/DOCS.md#local-models-ollama-and-similar) first — a small model on modest hardware can take minutes per reply.
+> **Running models locally?** The add-on sends a large tools-and-instructions prompt on every request. Read the [local model notes](./ha_opencode/DOCS.md#local-models-ollama-and-similar) first — a small model on modest hardware can take minutes per reply. A smaller MCP tool profile (see [Features](#-features)) is one of the easiest ways to cut that cost.
 
 ### 🎁 **Free Tier - OpenCode Zen**
 
 Start immediately with **OpenCode Zen** - no API keys or subscriptions required! Get access to curated models optimized for coding tasks, perfect for trying OpenCode or for users who prefer not to manage their own API keys.
 
 Simply run `/connect` and select **OpenCode Zen** to get started for free.
-
----
-
-## 📦 Installation
-
-> ⚙️ **Hardware requirement:** on x86-64, OpenCode needs a CPU with **SSE4.2** (Intel Nehalem/2008 or newer, AMD Bulldozer/2011 or Jaguar/2013 or newer). Older processors cannot run it at all — it exits with `Illegal instruction (core dumped)`. ARM64 is unaffected. See [CPU requirements][cpu-req] for details.
-
-### Quick Install
-
-1. **Add this repository to Home Assistant:**
-
-   [![Add Repository][repo-btn]][repo-add]
-
-   <details>
-   <summary>Or add manually</summary>
-   
-   Go to **Settings** → **Add-ons** → **Add-on Store** → **⋮** → **Repositories**
-   
-   Add: `https://github.com/magnusoverli/opencode`
-   </details>
-
-2. **Install the add-on:**
-   - Find **"OpenCode"** in the add-on store
-   - Click **Install**
-
-3. **Start using it:**
-   - Start the add-on
-   - Click **Open Web UI** (or use the sidebar)
-   - Run `opencode` and use `/connect` to configure your AI provider
-
-   > 💡 **Prefer a graphical interface?** Set **Interface Mode** to `openchamber` in the add-on **Configuration** tab and restart to swap the terminal for the [OpenChamber](https://github.com/openchamber/openchamber) web UI on the same sidebar entry. The default `terminal` mode is unchanged.
 
 ---
 
@@ -159,9 +192,12 @@ OpenCode includes a multi-layered validation pipeline designed to prevent AI-wri
 - 🔍 **Automatic config validation** — every config write is validated through HA Core's own check before committing
 - ↩️ **Automatic backup/restore** — if validation fails, the original file is instantly restored
 - 🧪 **Jinja2 template pre-validation** — templates are tested through HA's engine before writing to disk
-- 📋 **Deprecation scanning** — 20+ patterns catch outdated syntax, auto-updated from GitHub
+- 📋 **Deprecation scanning** — 20+ patterns catch outdated syntax, auto-updated from GitHub and cross-checked against your own instance's live HA Repairs warnings
+- ✂️ **Guardrails against accidental data loss** — large deletions (missing list entries, removed top-level keys, or a file shrinking by more than half) are blocked unless explicitly confirmed
 - 🏥 **HA Repairs integration** — surfaces your installation's active deprecation warnings
 - ⚠️ **Structural checks** — catches missing triggers, actions, and other required fields
+- ✅ **Approval before direct edits** — editing a file outright, in-place shell edits (`yq -i`, `sed -i`, `tee`), and deleting or renaming files now ask for confirmation first. Only the validated safe-write path skips the prompt, because it already checks itself.
+- 🔒 **Sensitive files stay out of the model's context by default** — `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, and key/cert files are read-protected unless you turn that off.
 
 **Additional best practices:**
 
@@ -173,9 +209,11 @@ OpenCode includes a multi-layered validation pipeline designed to prevent AI-wri
 
 ## 🧭 Home Assistant Native LLM Roadmap
 
-Home Assistant is developing a native `llm` integration so Core integrations and custom integrations can expose curated tools to Assist through `<integration>/llm.py` and registered LLM APIs over `/api/mcp/<API ID>`. OpenCode will follow this work closely and aims to be a premium consumer of the agent capabilities Home Assistant makes available.
+Home Assistant is building native `llm` platform support directly into Core: the `llm` integration, per-domain tool platforms, and keyed `/api/mcp/<API ID>` endpoints all ship for the first time in **Home Assistant 2026.8**. OpenCode is tracking this closely and aims to be a premium consumer of the agent capabilities Home Assistant makes available.
 
-Today, the add-on keeps MCP as the complete working tool surface, adds readiness reporting through `get_agent_capabilities` / `ha://agent/capabilities`, provides compact `get_home_context` discovery, and includes a native LLM provider guide for custom integration authors. The beta channel can opt into a configurable native MCP bridge targeting `/api/mcp/<API ID>` with `assist` as the default. As HA-native LLM capabilities become stable and accessible to add-ons, OpenCode will prefer native HA tools where they fit while keeping MCP for safe config writing, validation, admin/dev workflows, screenshots, firmware updates, and troubleshooting.
+OpenCode already ships an opt-in **Native Home Assistant MCP bridge** (beta) that targets these endpoints, falling back to the older configured `/api/mcp` endpoint on earlier Home Assistant versions and retrying periodically — so an already-running add-on picks up a Home Assistant upgrade on its own. Turning it on takes two one-time steps: add the **Model Context Protocol Server** integration in Home Assistant, then enable the bridge and restart the add-on. `get_agent_capabilities` reports whether the bridge is enabled and actually reachable, rather than leaving a stalled bridge to look like a broken configuration.
+
+OpenCode's own MCP tools remain the complete, supported working surface regardless of bridge status — this roadmap is about *adding* native capabilities where they fit well, not replacing safe config writing, validation, admin/dev workflows, screenshots, firmware updates, or troubleshooting.
 
 See the [full documentation][docs] for the current support status and long-term integration plan.
 
@@ -187,32 +225,6 @@ Comprehensive documentation is available covering all features:
 
 - 📖 [**Full Add-on Documentation**][docs] - Complete guide to all features
 - 📝 [**Changelog**][changelog] - Version history and updates
-
----
-
-## 🎯 Quick Start Examples
-
-Once installed and connected to an AI provider, try these commands:
-
-```bash
-# Create a new automation
-"Create an automation that turns on lights when motion is detected"
-
-# Review your configuration
-"Check my configuration.yaml for any issues"
-
-# Add sensors
-"Add a template sensor to track my total energy usage"
-
-# Get entity information
-"What's the current state of all my lights?"
-
-# Troubleshoot
-"Why isn't my bedroom motion sensor triggering automations?"
-
-# Analyze history
-"Show me temperature trends for the past 24 hours"
-```
 
 ---
 
@@ -333,7 +345,7 @@ This distribution also includes third-party software, including OpenCode. Its co
 
 **Made with ❤️ for the Home Assistant community**
 
-[Installation](#-installation) • [Features](#-features) • [Documentation][docs] • [Support](#-support)
+[Getting Started](#-getting-started) • [Features](#-features) • [Documentation][docs] • [Support](#-support)
 
 </div>
 

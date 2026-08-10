@@ -121,7 +121,7 @@ Everything else stays fully readable, and this doesn't change how the agent edit
 | Option | Default | Description |
 |--------|---------|-------------|
 | **OpenCode update policy** | `bundled` | Controls how OpenCode itself is updated. `bundled` (default) uses the OpenCode version shipped in the add-on image — the lowest-memory option. `latest` follows upstream OpenCode releases, refreshed in the background so it never delays start-up and skipped automatically on low-memory systems. See [OpenCode Updates](#opencode-updates). |
-| **CPU mode** | `auto` | Controls which OpenCode binary is used. `auto` detects your CPU capabilities automatically (recommended). `baseline` forces the baseline binary for older CPUs without AVX2 support. `regular` forces the standard binary. |
+| **CPU mode** | `auto` | Controls which OpenCode binary is used. `auto` detects your CPU capabilities automatically (recommended). `baseline` selects the build intended for older CPUs without AVX2; `regular` forces the standard build. See [CPU requirements](#cpu-requirements) — OpenCode needs SSE4.2 in every mode, and upstream currently ships the same binary in both packages, so `baseline` does not presently rescue a CPU without AVX2. |
 
 ### Network Exposure
 
@@ -195,6 +195,17 @@ By default, **OpenCode update policy** is set to `bundled`: the add-on uses the 
 Set **OpenCode update policy** to `latest` to follow upstream OpenCode releases independently of add-on releases. The add-on starts immediately on the bundled (or an existing healthy persistent) binary, then refreshes `opencode-ai@latest` into `/data/.npm-global` **in the background**; the newer version becomes active for the next OpenCode session. The background update never blocks start-up, and it is skipped automatically when available memory is below ~1.5 GB so the install cannot push a low-memory host into swap-thrash. If an update is interrupted or produces a binary that will not run, the add-on discards it and keeps using the known-good bundled copy.
 
 For x64 systems without visible AVX2 support, OpenCode selects its baseline binary. If this add-on runs in a VM on an AVX2-capable host, enable host CPU passthrough; generic QEMU/KVM CPU models can hide AVX2 and force the baseline binary unnecessarily. There is a known upstream baseline OOM issue tracked at `anomalyco/opencode#20988`.
+
+#### CPU requirements
+
+OpenCode is distributed as a Bun-compiled binary, so Bun's CPU floor is OpenCode's: an x64 processor must support **SSE4.2** — the x86-64-v2 level, meaning Intel Nehalem (2008) or newer, or AMD Bulldozer (2011) / Jaguar (2013) or newer. Below that line every published OpenCode binary exits immediately with `Illegal instruction (core dumped)`, and no add-on setting changes it. The add-on checks for SSE4.2 at start-up and states the reason in its log rather than leaving you with a bare crash. ARM64 (aarch64) is unaffected.
+
+Above that floor there are two x64 builds. The regular build additionally requires **AVX2** (Intel Haswell, 2013, or newer); when AVX2 is not visible the add-on automatically selects OpenCode's *baseline* build. Two things to know about that fallback:
+
+- **Upstream currently publishes the regular AVX2 binary inside the baseline package** ([anomalyco/opencode#33595](https://github.com/anomalyco/opencode/issues/33595)). For the OpenCode versions currently shipped, `opencode-linux-x64-baseline` and `opencode-linux-x64` are byte-identical, so baseline mode does not currently help a CPU that lacks AVX2. This is an upstream packaging problem the add-on cannot work around; the **CPU mode** option is kept because it starts working again the moment upstream publishes a genuine baseline build.
+- If the add-on runs in a VM on an AVX2-capable host, enable host CPU passthrough — generic QEMU/KVM CPU models hide AVX2 and force baseline mode unnecessarily.
+
+There is also a known upstream baseline OOM issue tracked at [anomalyco/opencode#20988](https://github.com/anomalyco/opencode/issues/20988).
 
 #### Environment Variables Example
 
