@@ -41,7 +41,10 @@ jobs:
           # promote-beta-to-stable.sh refuses to promote when beta's code reads
           # an option stable's manifest does not declare. Running its read-only
           # mode here surfaces that in review rather than at promotion time.
-          scripts/promote-beta-to-stable.sh --check
+          #
+          # Invoked through bash: the file is not marked executable in the index,
+          # and a checkout on a runner honours that.
+          bash scripts/promote-beta-to-stable.sh --check
 
   mcp-server:
     name: Home Assistant MCP server
