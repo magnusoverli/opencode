@@ -79,6 +79,10 @@ function transformLocationHeader(value, ingressPath) {
   return `${ingressPath}${value}`;
 }
 
+function canWriteResponse(res) {
+  return !res.destroyed && !res.writableEnded && (!res.socket || !res.socket.destroyed);
+}
+
 function escapeHtmlAttribute(value) {
   return value.replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;")
@@ -543,6 +547,7 @@ function relayOauthAuthorizeResponse(upstreamRes, res, responseHeaders, provider
   const chunks = [];
   upstreamRes.on("data", (chunk) => chunks.push(chunk));
   upstreamRes.on("end", () => {
+    if (!canWriteResponse(res)) return;
     const raw = Buffer.concat(chunks);
     const statusCode = upstreamRes.statusCode || 200;
     let rewritten = null;
@@ -656,6 +661,7 @@ function proxyRequest(req, res) {
 }
 
 function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oauthAuthorizeProviderID = "" }) {
+  if (!canWriteResponse(res)) return;
   const remoteAddress = normalizeRemoteAddress(req.socket.remoteAddress || "");
   const headers = { ...req.headers };
   headers.host = `${UPSTREAM_HOST}:${UPSTREAM_PORT}`;
@@ -666,17 +672,30 @@ function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oaut
     ? `${req.headers["x-forwarded-for"]}, ${remoteAddress}`
     : remoteAddress;
 
+  let upstreamRes = null;
+  let clientClosed = false;
   const upstreamReq = http.request({
     host: UPSTREAM_HOST,
     port: UPSTREAM_PORT,
     method: req.method,
     path: upstreamPath,
     headers,
-  }, (upstreamRes) => {
+  }, (response) => {
+    upstreamRes = response;
     const responseHeaders = { ...upstreamRes.headers };
     if (responseHeaders.location) {
       responseHeaders.location = transformLocationHeader(responseHeaders.location, ingressPath);
     }
+
+    upstreamRes.on("error", (error) => {
+      if (clientClosed) return;
+      if (res.headersSent || !canWriteResponse(res)) {
+        res.destroy();
+        return;
+      }
+      res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+      res.end(`OpenChamber upstream unavailable: ${error.message}\n`);
+    });
 
     const contentType = String(upstreamRes.headers["content-type"] || "");
     if (oauthAuthorizeProviderID && contentType.includes("application/json")) {
@@ -688,14 +707,21 @@ function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oaut
     const isJavaScript = /(?:application|text)\/javascript|\bmodule\b/.test(contentType);
     const isCss = contentType.includes("text/css");
     if (!isHtml && !isJavaScript && !isCss) {
+      if (clientClosed || !canWriteResponse(res)) {
+        upstreamRes.destroy();
+        return;
+      }
       res.writeHead(upstreamRes.statusCode || 502, responseHeaders);
       upstreamRes.pipe(res);
       return;
     }
 
     const chunks = [];
-    upstreamRes.on("data", (chunk) => chunks.push(chunk));
+    upstreamRes.on("data", (chunk) => {
+      if (!clientClosed) chunks.push(chunk);
+    });
     upstreamRes.on("end", () => {
+      if (clientClosed || !canWriteResponse(res)) return;
       const decoded = decodeBody(Buffer.concat(chunks), responseHeaders["content-encoding"]);
       const text = decoded.toString("utf8");
       const body = isHtml
@@ -710,10 +736,32 @@ function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oaut
       res.writeHead(upstreamRes.statusCode || 200, responseHeaders);
       res.end(body);
     });
+
   });
 
+  const abortUpstream = () => {
+    clientClosed = true;
+    if (upstreamRes && !upstreamRes.destroyed) upstreamRes.destroy();
+    if (!upstreamReq.destroyed) upstreamReq.destroy();
+  };
+  const detachClientHandlers = () => {
+    req.socket.removeListener("error", abortUpstream);
+    res.removeListener("close", clientClosedHandler);
+  };
+  const clientClosedHandler = () => {
+    abortUpstream();
+    detachClientHandlers();
+  };
+
+  req.once("aborted", abortUpstream);
+  req.once("error", abortUpstream);
+  req.socket.once("error", abortUpstream);
+  res.once("close", clientClosedHandler);
+  res.once("finish", detachClientHandlers);
+
   upstreamReq.on("error", (error) => {
-    if (res.headersSent) {
+    if (clientClosed) return;
+    if (res.headersSent || !canWriteResponse(res)) {
       res.destroy();
       return;
     }
@@ -762,12 +810,17 @@ function proxyUpgrade(req, socket, head) {
   });
 
   upstreamSocket.on("error", () => {
-    socket.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
     socket.destroy();
   });
+  upstreamSocket.on("close", () => socket.destroy());
+  socket.on("error", () => upstreamSocket.destroy());
+  socket.on("close", () => upstreamSocket.destroy());
 }
 
 const server = http.createServer(proxyRequest);
+// Client disconnects can surface as EPIPE on the underlying socket rather than
+// the ServerResponse. Keep every inbound connection from taking down the proxy.
+server.on("connection", (socket) => socket.on("error", () => {}));
 server.on("upgrade", proxyUpgrade);
 server.listen(LISTEN_PORT, LISTEN_HOST, () => {
   console.log(`OpenChamber ingress proxy listening on ${LISTEN_HOST}:${LISTEN_PORT}`);

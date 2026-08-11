@@ -8,14 +8,16 @@
 // This directory is outside rootfs/, so it is not copied into the add-on image.
 
 const assert = require("node:assert/strict");
-const { after, before, beforeEach, describe, it } = require("node:test");
+const { after, afterEach, before, beforeEach, describe, it } = require("node:test");
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 
 const PROXY_SCRIPT = path.join(__dirname, "..", "rootfs", "usr", "local", "bin", "openchamber-ingress-proxy.js");
+const STABLE_PROXY_SCRIPT = path.join(__dirname, "..", "..", "ha_opencode", "rootfs", "usr", "local", "bin", "openchamber-ingress-proxy.js");
 const INGRESS_PATH = "/api/hassio_ingress/abc123";
 
 function freePort() {
@@ -69,6 +71,39 @@ function request(port, options, body) {
     });
     req.on("error", reject);
     req.end(body);
+  });
+}
+
+function waitFor(condition, message, timeout = 2000) {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeout;
+    const check = () => {
+      if (condition()) {
+        resolve();
+        return;
+      }
+      if (Date.now() >= deadline) {
+        reject(new Error(message));
+        return;
+      }
+      setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
+function requestThenAbort(port, requestText) {
+  return new Promise((resolve, reject) => {
+    let received = false;
+    const client = net.connect(port, "127.0.0.1", () => client.write(requestText));
+    client.once("data", () => {
+      received = true;
+      client.destroy();
+      resolve();
+    });
+    client.on("error", (error) => {
+      if (!received) reject(error);
+    });
   });
 }
 
@@ -478,5 +513,128 @@ describe("openchamber ingress proxy: remote allowlist", () => {
 
     assert.equal(response.statusCode, 200);
     assert.equal(response.body, "ok");
+  });
+});
+
+describe("openchamber ingress proxy: disconnected clients", () => {
+  let proxy;
+  let proxyExit;
+  let proxyPort;
+  let upstream;
+  let upstreamPort;
+  let handleRequest;
+  let handleUpgrade;
+
+  beforeEach(async () => {
+    handleRequest = (req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end(`ok:${req.url}`);
+    };
+    handleUpgrade = (req, socket) => socket.destroy();
+    upstream = http.createServer((req, res) => handleRequest(req, res));
+    upstream.on("upgrade", (req, socket, head) => handleUpgrade(req, socket, head));
+    upstreamPort = await freePort();
+    await listen(upstream, upstreamPort);
+
+    proxyPort = await freePort();
+    const startedProxy = spawn(process.execPath, [PROXY_SCRIPT], {
+      env: {
+        ...process.env,
+        OPENCHAMBER_INGRESS_HOST: "127.0.0.1",
+        OPENCHAMBER_INGRESS_PORT: String(proxyPort),
+        OPENCHAMBER_UPSTREAM_HOST: "127.0.0.1",
+        OPENCHAMBER_UPSTREAM_PORT: String(upstreamPort),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    proxy = startedProxy;
+    proxyExit = null;
+    startedProxy.once("exit", (code, signal) => {
+      if (proxy === startedProxy) proxyExit = { code, signal };
+    });
+    proxy.stderr.resume();
+
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("proxy did not start")), 10000);
+      proxy.stdout.on("data", (chunk) => {
+        if (String(chunk).includes("listening")) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      proxy.once("error", reject);
+    });
+    proxy.stdout.resume();
+  });
+
+  afterEach(async () => {
+    if (proxy && proxy.exitCode === null) proxy.kill();
+    await close(upstream);
+  });
+
+  const assertProxySurvived = async () => {
+    const response = await request(proxyPort, {
+      method: "GET",
+      path: `${INGRESS_PATH}/still-alive`,
+      headers: { "x-ingress-path": INGRESS_PATH },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body, "ok:/still-alive");
+    assert.equal(proxyExit, null, `proxy exited after a client disconnect: ${JSON.stringify(proxyExit)}`);
+  };
+
+  it("cancels a streaming HTTP response when the client disconnects", async () => {
+    let upstreamClosed = false;
+    handleRequest = (req, res) => {
+      if (req.url !== "/stream") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end(`ok:${req.url}`);
+        return;
+      }
+
+      const chunk = Buffer.alloc(64 * 1024, "x");
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      const interval = setInterval(() => res.write(chunk), 1);
+      res.on("close", () => {
+        clearInterval(interval);
+        upstreamClosed = true;
+      });
+    };
+
+    await requestThenAbort(
+      proxyPort,
+      `GET ${INGRESS_PATH}/stream HTTP/1.1\r\nHost: test\r\nx-ingress-path: ${INGRESS_PATH}\r\n\r\n`,
+    );
+
+    await waitFor(() => upstreamClosed, "proxy did not close the abandoned HTTP upstream response");
+    await assertProxySurvived();
+  });
+
+  it("cancels a WebSocket tunnel when the client disconnects", async () => {
+    let upstreamClosed = false;
+    handleUpgrade = (req, socket) => {
+      const chunk = Buffer.alloc(64 * 1024, "x");
+      socket.on("error", () => {});
+      socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+      const interval = setInterval(() => socket.write(chunk), 1);
+      socket.on("close", () => {
+        clearInterval(interval);
+        upstreamClosed = true;
+      });
+    };
+
+    await requestThenAbort(
+      proxyPort,
+      `GET ${INGRESS_PATH}/socket HTTP/1.1\r\nHost: test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nx-ingress-path: ${INGRESS_PATH}\r\n\r\n`,
+    );
+
+    await waitFor(() => upstreamClosed, "proxy did not close the abandoned WebSocket upstream socket");
+    await assertProxySurvived();
+  });
+});
+
+describe("openchamber ingress proxy: release parity", () => {
+  it("ships the tested proxy implementation in both channels", () => {
+    assert.equal(fs.readFileSync(PROXY_SCRIPT, "utf8"), fs.readFileSync(STABLE_PROXY_SCRIPT, "utf8"));
   });
 });

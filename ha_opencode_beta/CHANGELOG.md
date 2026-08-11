@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.0b2
+
+- **OpenChamber ingress survives abandoned browser streams ([issue #98](https://github.com/magnusoverli/opencode/issues/98))** — disconnecting during an HTTP or WebSocket response now tears down that request instead of crashing the ingress proxy and restarting the add-on.
+
 ## 2.5.0b1
 
 Documentation only — the image is identical to 2.5.0b0.

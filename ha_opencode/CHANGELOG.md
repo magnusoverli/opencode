@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **OpenChamber ingress survives abandoned browser streams ([issue #98](https://github.com/magnusoverli/opencode/issues/98))** — disconnecting during an HTTP or WebSocket response now tears down that request instead of crashing the ingress proxy and restarting the add-on.
 - **OpenCode V2 readiness tracking** — maintainers now have a root-level compatibility checklist covering the upstream beta's migration work, current blockers, and release gates.
 - **OpenCode V1 improvement roadmap** — maintainers now have a Home Assistant-focused plan for a certified runtime, on-demand skills, read-only diagnostics, and regression coverage.
 
