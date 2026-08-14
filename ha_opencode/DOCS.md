@@ -20,6 +20,9 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **Ingress Support**: Access directly from the Home Assistant sidebar
 - **Provider Agnostic**: Works with Anthropic, OpenAI, Google, and 70+ other AI providers
 - **MCP Integration**: Deep Home Assistant integration with Tools, Resources, Prompts, and Intelligence
+- **Certified Runtime**: Runs the pinned OpenCode build tested with this add-on; runtime upgrades arrive through add-on releases
+- **On-Demand Skills**: Loads detailed Home Assistant procedures only when a task needs them
+- **Read-Only Session**: Offers a separate terminal session for investigation without write or control capabilities
 - **Home Context**: Sessions start knowing your installation — a generated briefing of your setup, your own instructions in `AGENTS.local.md`, and lasting decisions you have approved
 - **Home Assistant Native LLM Readiness**: Detects HA's emerging native `llm` component and documents how OpenCode will adopt HA-native agent capabilities as they become available
 - **Focus-friendly responses (Beta)**: Optional action-first, concise, progress-aware response guidance
@@ -64,6 +67,8 @@ Security and networking notes:
 - LAN access remains the separate opt-in **OpenCode LAN server** feature on port `4096`.
 
 If OpenChamber misbehaves (for example after an update), switch **Interface mode** back to `terminal`, restart the add-on, and include logs when reporting the issue.
+
+The two modes are exclusive: `openchamber` starts no terminal. OpenCode can still run most helper commands through its shell tool, but `ha-readonly` requires terminal mode because it starts a separate session.
 
 OpenChamber's own built-in update check is disabled in this add-on. OpenChamber is pinned and patched for Home Assistant Ingress when the add-on image is built, so an in-app self-update cannot persist or stay patched and would only hang the UI. OpenChamber is updated by updating the add-on — no "update available" prompt appears inside OpenChamber, and the Update button in **Settings → OpenChamber → About** reports no update.
 
@@ -120,7 +125,6 @@ Everything else stays fully readable, and this doesn't change how the agent edit
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| **OpenCode update policy** | `bundled` | Controls how OpenCode itself is updated. `bundled` (default) uses the OpenCode version shipped in the add-on image — the lowest-memory option. `latest` follows upstream OpenCode releases, refreshed in the background so it never delays start-up and skipped automatically on low-memory systems. See [OpenCode Updates](#opencode-updates). |
 | **CPU mode** | `auto` | Controls which OpenCode binary is used. `auto` detects your CPU capabilities automatically (recommended). `baseline` selects the build intended for older CPUs without AVX2; `regular` forces the standard build. See [CPU requirements](#cpu-requirements) — OpenCode needs SSE4.2 in every mode, and upstream currently ships the same binary in both packages, so `baseline` does not presently rescue a CPU without AVX2. |
 
 ### Network Exposure
@@ -158,7 +162,27 @@ Everything else stays fully readable, and this doesn't change how the agent edit
 
 OpenCode snapshots are disabled by default in this add-on to reduce memory and disk pressure on Home Assistant systems. File watching also ignores noisy internal paths such as `.storage/`, `.cloud/`, caches, logs, and the Home Assistant database. You can override these defaults with **Custom OpenCode configuration** if you need OpenCode's built-in snapshot/undo behavior.
 
-On low-memory hosts — for example a 4 GB Home Assistant Green running several other add-ons — keep **OpenCode update policy** on `bundled` (the default) so the add-on does no memory-heavy start-up install, and expect the agent itself to be memory-hungry during large tasks. 8 GB or more is recommended for comfortable use alongside other memory-heavy add-ons such as Matter Server, Music Assistant, and Whisper/Piper.
+The add-on performs no memory-heavy runtime install at start-up. On low-memory hosts such as a 4 GB Home Assistant Green, expect the agent itself to remain memory-intensive during large tasks. 8 GB or more is recommended alongside other memory-heavy add-ons such as Matter Server, Music Assistant, and Whisper/Piper.
+
+### Home Assistant Skills
+
+Detailed procedures now ship as five skills that OpenCode loads only when a task needs them:
+
+| Skill | Covers |
+|-------|--------|
+| `home-assistant-configuration` | YAML, automations, scripts, templates, documentation, safe writes, and validation |
+| `home-assistant-troubleshooting` | State, history, logs, diagnosis, and read-only recommendations |
+| `home-assistant-dashboard-ui` | Dashboards, cards, themes, and screenshot verification |
+| `home-assistant-zigbee-esphome` | ZHA/Z2M, cascade renames, mesh inspection, ESPHome, and firmware |
+| `home-assistant-development` | Custom integrations, add-ons, native `llm.py` tools, and MCP servers |
+
+The always-loaded `AGENTS.md` keeps only unconditional consent, safety, and secret-handling rules plus a map to these skills. Skills are deployed to `/data/.config/opencode/skills/`. If you edit a deployed skill, the add-on preserves your copy and logs that it skipped the update; delete your edited copy to restore the shipped version.
+
+### Read-Only Session
+
+> Requires `interface_mode: terminal`.
+
+Run `ha-readonly` for an investigation session that can read configuration and query live state, history, and logs, but cannot edit files, run shell commands, call services, write configuration, or access sensitive paths. It forces the compact MCP profile and disables the native MCP bridge. Your normal OpenCode session is unchanged; `ha-readonly --print-config` prints the exact overlay.
 
 ### Local Models (Ollama and similar)
 
@@ -169,31 +193,34 @@ Every request carries roughly:
 | Included on every request | Approximate size |
 |---------------------------|------------------|
 | OpenCode's agent prompt and built-in tools | varies by version |
-| Home Assistant MCP tool definitions (41 tools) | ~25 KB |
-| `AGENTS.md` from your configuration folder | ~35 KB |
+| Home Assistant MCP tool definitions | depends on the selected profile |
+| Core `AGENTS.md` safety and skill-selection rules | compact and always loaded |
+| Task-specific Home Assistant skill | loaded only when needed |
 | MCP core/profile guidance | compact and profile-specific |
 | Install briefing | capped at ~500 tokens |
 | `AGENTS.local.md`, if you use one | your own content |
 
-In practice that is on the order of **25,000 tokens before you type anything**. A hosted provider absorbs this in a second or two. A local model on a Raspberry Pi or similar has to evaluate all of it on CPU first, so a one-word prompt can take minutes. This is prompt evaluation, not add-on overhead — comparing against a bare `curl` to your model will not reproduce it, because that request is a few hundred bytes.
+The full prompt can still reach tens of thousands of tokens. A hosted provider absorbs this quickly; a local model has to evaluate all of it before generating a response. Comparing against a small standalone `curl` request does not reproduce that workload.
 
 To make local models usable:
 
 - **Set the context window to fit.** Ollama defaults `num_ctx` to 4096. A 25,000-token prompt is silently truncated at that size, so the model loses most of its tools and instructions before it sees your message. Configure an effective context of at least 64K (`OLLAMA_CONTEXT_LENGTH`, or `num_ctx` in the model's parameters), restart or reload the model, and expect higher memory use.
-- **Turn off MCP integration** to remove the 41 tool definitions. This is the single largest saving, but OpenCode then loses the ability to query entities and call services — it becomes a file editor for your YAML rather than a Home Assistant agent.
+- **Turn off MCP integration** to remove Home Assistant tool definitions. This is the largest saving, but OpenCode then loses the ability to query entities and call services.
 - **Turn off Install briefing** for a smaller saving.
 - **Choose a smaller MCP tool profile.** `compact` is a read-only diagnostic surface; `configuration` adds the safe configuration workflow without device control or admin commands. The default `full` profile preserves every existing capability. Profile changes take effect after restarting the add-on.
-- **Use a model that supports tool calling**, and a large one. Small models (roughly under 7B) generally cannot drive a 41-tool agent loop reliably regardless of how fast they run — a common symptom is the model replying with a raw JSON envelope instead of normal text.
+- **Use a model that supports tool calling**, and a large one. Small models generally cannot drive a broad agent toolset reliably regardless of speed.
 - **Verify the server's real tool list with `ha-mcp tools`.** Asking a model which tools it has tests its recall, not what OpenCode supplied. If `ha-mcp tools` lists a missing tool but the local model will not call it, check the model server for prompt truncation and tool-parser errors.
 - **Do not run the model on the Home Assistant host** if you can avoid it. Inference competing with Home Assistant for CPU and RAM makes both worse.
 
-If you want to shrink the prompt further, you can edit `/homeassistant/AGENTS.md` directly — the add-on keeps a file you have modified rather than overwriting it. The trade-off is that you stop receiving updates to those instructions. See [Resetting AGENTS.md to default](#resetting-agentsmd-to-default).
+If you edit `/homeassistant/AGENTS.md`, the add-on preserves your copy rather than overwriting it. The trade-off is that you stop receiving updates to those core instructions. See [Resetting AGENTS.md to default](#resetting-agentsmd-to-default).
 
 ### OpenCode Updates
 
-By default, **OpenCode update policy** is set to `bundled`: the add-on uses the OpenCode version shipped in its image and does no start-up install. This is the lowest-memory option and is recommended for systems with 4 GB RAM or limited free memory.
+The add-on ships one certified OpenCode runtime: an exact version pinned in the image and verified during the build. OpenCode's auto-updater is disabled, and runtime upgrades arrive through add-on releases after beta validation.
 
-Set **OpenCode update policy** to `latest` to follow upstream OpenCode releases independently of add-on releases. The add-on starts immediately on the bundled (or an existing healthy persistent) binary, then refreshes `opencode-ai@latest` into `/data/.npm-global` **in the background**; the newer version becomes active for the next OpenCode session. The background update never blocks start-up, and it is skipped automatically when available memory is below ~1.5 GB so the install cannot push a low-memory host into swap-thrash. If an update is interrupted or produces a binary that will not run, the add-on discards it and keeps using the known-good bundled copy.
+If you previously used the old `latest` policy, an OpenCode installation may remain under `/data/.npm-global`. It is left untouched but is no longer on `PATH` or used. You can remove the now-unknown `opencode_update_policy` line from the Configuration tab.
+
+Run `opencode-smoke-test` to verify the certified runtime, generated configuration, MCP and language servers, OpenChamber Ingress patch, deployed skills, and read-only overlay. In OpenChamber mode, ask OpenCode to run it through the shell tool.
 
 For x64 systems without visible AVX2 support, OpenCode selects its baseline binary. If this add-on runs in a VM on an AVX2-capable host, enable host CPU passthrough; generic QEMU/KVM CPU models can hide AVX2 and force the baseline binary unnecessarily. There is a known upstream baseline OOM issue tracked at `anomalyco/opencode#20988`.
 
@@ -475,6 +502,8 @@ The app includes helper commands:
 | `ha-mcp status` | Check MCP integration status |
 | `ha-mcp test` | Test MCP server connection |
 | `ha-mcp tools` | List the tools the MCP server actually advertises, without involving the model |
+| `ha-readonly` | Start a separate terminal-only investigation session that cannot make changes |
+| `opencode-smoke-test` | Verify the bundled runtime and integration chain |
 | `ha-context status` | Show which context files OpenCode is given and what they cost |
 | `ha-context show` | Print every context file OpenCode receives, with a note on what each may contain |
 | `ha-context briefing` | Print the generated install briefing only |
@@ -1557,7 +1586,7 @@ Check if you have enough memory. If the terminal shows `Killed`, check host logs
 ha-logs host 300 | grep -i "out of memory\|oom\|opencode"
 ```
 
-OpenCode can use significant memory on larger Home Assistant installations. This add-on disables OpenCode snapshots by default and ignores noisy internal paths to reduce memory pressure, but systems with limited RAM or full swap may still need more available memory. On 4 GB systems, make sure **OpenCode update policy** is set to `bundled` (the default) so the add-on does not run a memory-heavy update at start-up.
+OpenCode can use significant memory on larger Home Assistant installations. This add-on disables snapshots, ignores noisy internal paths, and performs no runtime installation at start-up, but systems with limited RAM or full swap may still need more available memory.
 
 ### Can't connect to AI provider
 

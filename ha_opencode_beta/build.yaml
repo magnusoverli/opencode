@@ -19,7 +19,7 @@ args:
   OPENCODE_VERSION: "1.18.16"
   # The other genuine per-channel pin: beta builds from dev, so this can lead
   # stable while a new OpenChamber soaks.
-  OPENCHAMBER_VERSION: "1.18.1"
+  OPENCHAMBER_VERSION: "1.18.3"
   PPQ_PROXY_VERSION: "0.1.0"
   TSX_VERSION: "4.20.6"
   TTYD_VERSION: "1.7.7"

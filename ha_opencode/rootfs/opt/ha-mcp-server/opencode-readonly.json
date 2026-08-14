@@ -1,0 +1,61 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "home-assistant-read-only",
+  "agent": {
+    "home-assistant-read-only": {
+      "description": "Investigate and diagnose Home Assistant with no ability to change anything.",
+      "mode": "primary",
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny"
+        },
+        "task": "deny",
+        "lsp": "deny",
+        "read": {
+          "*": "allow",
+          "*secrets.yaml": "deny",
+          "*.storage/*": "deny",
+          "*.cloud/*": "deny",
+          "*ssl/*": "deny",
+          "*.key": "deny",
+          "*.pem": "deny"
+        }
+      },
+      "tools": {
+        "bash": false,
+        "edit": false,
+        "write": false,
+        "patch": false,
+        "task": false
+      }
+    }
+  },
+  "mcp": {
+    "homeassistant": {
+      "environment": {
+        "OPENCODE_MCP_TOOL_PROFILE": "compact"
+      }
+    },
+    "homeassistant_native": {
+      "enabled": false
+    }
+  },
+  "permission": {
+    "edit": "deny",
+    "bash": {
+      "*": "deny"
+    },
+    "task": "deny",
+    "lsp": "deny",
+    "read": {
+      "*": "allow",
+      "*secrets.yaml": "deny",
+      "*.storage/*": "deny",
+      "*.cloud/*": "deny",
+      "*ssl/*": "deny",
+      "*.key": "deny",
+      "*.pem": "deny"
+    }
+  }
+}

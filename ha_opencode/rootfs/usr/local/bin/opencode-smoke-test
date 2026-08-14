@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+# =============================================================================
+# opencode-smoke-test - prove this image's runtime paths actually work
+#
+# Run it inside a running add-on (the terminal, or `docker exec`) after
+# installing a new build, before promoting a beta, and after bumping the
+# certified OpenCode version. It answers one question: does everything this
+# add-on wires together still start?
+#
+#   opencode-smoke-test          run every check
+#   opencode-smoke-test --quiet  only print failures and the summary
+#
+# Exits non-zero if any check fails, so it works as a gate in a script.
+# =============================================================================
+set -uo pipefail
+
+QUIET=false
+case "${1:-}" in
+    --quiet|-q) QUIET=true ;;
+    "") ;;
+    *)
+        echo "usage: opencode-smoke-test [--quiet]" >&2
+        exit 2
+        ;;
+esac
+
+GREEN='\033[38;2;17;209;22m'
+RED='\033[38;2;237;21;21m'
+YELLOW='\033[38;2;246;116;0m'
+GRAY='\033[38;2;127;140;141m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+PASSED=0
+FAILED=0
+SKIPPED=0
+
+pass() {
+    PASSED=$((PASSED + 1))
+    [ "${QUIET}" = "true" ] || echo -e "  ${GREEN}ok${NC}    $1"
+}
+fail() {
+    FAILED=$((FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}  $1"
+    [ -n "${2:-}" ] && echo -e "        ${GRAY}$2${NC}"
+}
+skip() {
+    SKIPPED=$((SKIPPED + 1))
+    [ "${QUIET}" = "true" ] || echo -e "  ${YELLOW}skip${NC}  $1 ${GRAY}($2)${NC}"
+}
+section() { [ "${QUIET}" = "true" ] || echo -e "\n${BOLD}$1${NC}"; }
+
+export HOME="${HOME:-/data}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-/data/.local/share}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/data/.config}"
+export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+
+# shellcheck source=/usr/local/lib/opencode/runtime.sh
+source /usr/local/lib/opencode/runtime.sh
+
+GENERATED_CONFIG="/data/.config/opencode/opencode.json"
+
+# ---------------------------------------------------------------------------
+section "Certified OpenCode runtime"
+# ---------------------------------------------------------------------------
+CERTIFIED=$(opencode_certified_version)
+RESOLVED_BIN=$(command -v opencode 2>/dev/null || echo "")
+
+if [ -z "${RESOLVED_BIN}" ]; then
+    fail "opencode is on PATH"
+elif [ "${RESOLVED_BIN}" != "/usr/local/bin/opencode" ]; then
+    fail "opencode resolves to the image runtime" "found ${RESOLVED_BIN}"
+else
+    pass "opencode resolves to ${RESOLVED_BIN}"
+fi
+
+RUNNING=$(opencode --version 2>/dev/null | tr -d '[:space:]')
+if [ -z "${RUNNING}" ]; then
+    fail "opencode --version runs"
+elif [ "${RUNNING}" != "${CERTIFIED}" ]; then
+    fail "opencode --version matches the certified pin" "running ${RUNNING}, certified ${CERTIFIED}"
+else
+    pass "opencode --version is ${RUNNING} (certified)"
+fi
+
+if [ -e "${NPM_CONFIG_PREFIX:-/data/.npm-global}/bin/opencode" ]; then
+    case ":${PATH}:" in
+        *":${NPM_CONFIG_PREFIX:-/data/.npm-global}/bin:"*)
+            fail "a leftover persistent runtime cannot shadow the image one" \
+                 "${NPM_CONFIG_PREFIX:-/data/.npm-global}/bin is on PATH"
+            ;;
+        *) pass "leftover persistent runtime is present but not on PATH" ;;
+    esac
+else
+    pass "no persistent runtime shadowing the image one"
+fi
+
+if [ "${OPENCODE_DISABLE_AUTOUPDATE:-}" = "true" ]; then
+    pass "OPENCODE_DISABLE_AUTOUPDATE is set"
+else
+    fail "OPENCODE_DISABLE_AUTOUPDATE is set" "value: '${OPENCODE_DISABLE_AUTOUPDATE:-unset}'"
+fi
+
+# ---------------------------------------------------------------------------
+section "Generated OpenCode configuration"
+# ---------------------------------------------------------------------------
+if [ ! -f "${GENERATED_CONFIG}" ]; then
+    fail "${GENERATED_CONFIG} exists" "the init service did not generate it"
+elif ! jq -e . "${GENERATED_CONFIG}" >/dev/null 2>&1; then
+    fail "${GENERATED_CONFIG} is valid JSON"
+else
+    pass "${GENERATED_CONFIG} is valid JSON"
+    check_config() {
+        if [ "$(jq -r "$2" "${GENERATED_CONFIG}")" = "$3" ]; then
+            pass "$1"
+        else
+            fail "$1" "$2 = $(jq -c "$2" "${GENERATED_CONFIG}")"
+        fi
+    }
+    check_config "MCP server command is the bundled one" \
+        '.mcp.homeassistant.command | join(" ")' "node /opt/ha-mcp-server/index.js"
+    check_config "HA YAML LSP is configured" \
+        '.lsp["ha-yaml"].command | join(" ")' "node /opt/ha-lsp-server/server.js --stdio"
+    check_config "Prettier formatter is configured" \
+        '.formatter.prettier.command | join(" ")' "prettier --write \$FILE"
+    if [ "$(jq -r '.instructions | length' "${GENERATED_CONFIG}")" -gt 0 ]; then
+        pass "instruction files are configured"
+    else
+        fail "instruction files are configured"
+    fi
+    for instruction in $(jq -r '.instructions[]' "${GENERATED_CONFIG}"); do
+        case "${instruction}" in
+            /data/context/*|/homeassistant/AGENTS.local.md)
+                # Generated in the background or owned by the user; absence is normal.
+                ;;
+            *)
+                if [ -f "${instruction}" ]; then
+                    pass "instruction file exists: ${instruction}"
+                else
+                    fail "instruction file exists: ${instruction}"
+                fi
+                ;;
+        esac
+    done
+fi
+
+# ---------------------------------------------------------------------------
+section "Home Assistant MCP server"
+# ---------------------------------------------------------------------------
+MCP_TOOLS=$(SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-smoke-test}" \
+    node /usr/local/bin/opencode-smoke-probe.mjs mcp 2>/dev/null)
+if [ -n "${MCP_TOOLS}" ] && [ "${MCP_TOOLS}" -gt 0 ] 2>/dev/null; then
+    pass "MCP server starts and advertises ${MCP_TOOLS} tools"
+else
+    fail "MCP server starts over stdio" "no tools/list response"
+fi
+
+MCP_REJECT=$(SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-smoke-test}" \
+    node /usr/local/bin/opencode-smoke-probe.mjs mcp-compact-reject 2>/dev/null)
+if [ "${MCP_REJECT}" = "rejected" ]; then
+    pass "compact profile rejects call_service before dispatch"
+else
+    fail "compact profile rejects call_service before dispatch" "got '${MCP_REJECT}'"
+fi
+
+# ---------------------------------------------------------------------------
+section "Home Assistant YAML language server"
+# ---------------------------------------------------------------------------
+LSP_RESULT=$(node /usr/local/bin/opencode-smoke-probe.mjs lsp 2>/dev/null)
+if [ "${LSP_RESULT}" = "ok" ]; then
+    pass "HA YAML LSP starts and answers initialize"
+else
+    fail "HA YAML LSP starts and answers initialize" "got '${LSP_RESULT}'"
+fi
+
+# ---------------------------------------------------------------------------
+section "OpenChamber (Ingress-patched)"
+# ---------------------------------------------------------------------------
+OPENCHAMBER_DIST="$(unset NPM_CONFIG_PREFIX npm_config_prefix; npm root -g 2>/dev/null)/@openchamber/web/dist"
+if [ ! -f "${OPENCHAMBER_DIST}/index.html" ]; then
+    fail "OpenChamber bundle is installed" "no index.html under ${OPENCHAMBER_DIST}"
+else
+    pass "OpenChamber bundle is installed"
+    if grep -q "data-ha-ingress-runtime" "${OPENCHAMBER_DIST}/index.html"; then
+        pass "OpenChamber index.html carries the Ingress runtime patch"
+    else
+        fail "OpenChamber index.html carries the Ingress runtime patch" \
+             "the build-time patch did not apply"
+    fi
+    if [ -f "${OPENCHAMBER_DIST}/__openchamber_ingress_runtime.js" ]; then
+        pass "OpenChamber Ingress runtime shim is present"
+    else
+        fail "OpenChamber Ingress runtime shim is present"
+    fi
+fi
+
+if [ -x /usr/local/bin/openchamber ]; then
+    if timeout 30 /usr/local/bin/openchamber serve --help >/dev/null 2>&1; then
+        pass "openchamber serve launches"
+    else
+        fail "openchamber serve launches" "'openchamber serve --help' failed"
+    fi
+else
+    fail "openchamber launcher is executable"
+fi
+
+if [ -f /usr/local/bin/openchamber-ingress-proxy.js ]; then
+    if node --check /usr/local/bin/openchamber-ingress-proxy.js >/dev/null 2>&1; then
+        pass "Ingress proxy parses"
+    else
+        fail "Ingress proxy parses"
+    fi
+else
+    fail "Ingress proxy is present"
+fi
+
+# ---------------------------------------------------------------------------
+section "Skills, agents and the read-only session"
+# ---------------------------------------------------------------------------
+SKILL_COUNT=$(find /data/.config/opencode/skills -name SKILL.md 2>/dev/null | wc -l)
+if [ "${SKILL_COUNT}" -ge 5 ]; then
+    pass "${SKILL_COUNT} skills deployed to /data/.config/opencode/skills"
+else
+    fail "skills deployed to /data/.config/opencode/skills" "found ${SKILL_COUNT}"
+fi
+
+# The read-only agent must NOT be here: an agent in the global directory is
+# selectable in sessions that never apply the read-only overlay.
+if [ -e /data/.config/opencode/agents/home-assistant-read-only.md ]; then
+    fail "the read-only agent stays out of the global agent directory" \
+         "a deployed copy would be selectable without the overlay that makes it read-only"
+else
+    pass "the read-only agent stays out of the global agent directory"
+fi
+
+if [ -x /usr/local/bin/ha-readonly ]; then
+    READONLY_JSON=$(/usr/local/bin/ha-readonly --print-config 2>/dev/null)
+    if [ -z "${READONLY_JSON}" ] || ! printf '%s' "${READONLY_JSON}" | jq -e . >/dev/null 2>&1; then
+        fail "ha-readonly builds a valid configuration overlay"
+    else
+        pass "ha-readonly builds a valid configuration overlay"
+        check_readonly() {
+            if [ "$(printf '%s' "${READONLY_JSON}" | jq -r "$2")" = "$3" ]; then
+                pass "$1"
+            else
+                fail "$1" "$2 = $(printf '%s' "${READONLY_JSON}" | jq -c "$2")"
+            fi
+        }
+        check_readonly "read-only forces the compact MCP profile" \
+            '.mcp.homeassistant.environment.OPENCODE_MCP_TOOL_PROFILE' "compact"
+        check_readonly "read-only disables the native MCP bridge" \
+            '.mcp.homeassistant_native.enabled' "false"
+        check_readonly "read-only denies edits" '.permission.edit' "deny"
+        check_readonly "read-only denies subagents" '.permission.task' "deny"
+        check_readonly "read-only denies the LSP tool" '.permission.lsp' "deny"
+        check_readonly "read-only denies every bash pattern" \
+            '[.permission.bash | to_entries[] | select(.value != "deny")] | length' "0"
+        check_readonly "read-only denies reading secrets.yaml" \
+            '.permission.read["*secrets.yaml"]' "deny"
+        check_readonly "read-only starts the read-only agent" \
+            '.default_agent' "home-assistant-read-only"
+        check_readonly "read-only carries the agent prompt, frontmatter stripped" \
+            '(.agent["home-assistant-read-only"].prompt // "") | startswith("# Home Assistant read-only session")' "true"
+    fi
+else
+    fail "ha-readonly launcher is executable"
+fi
+
+# ---------------------------------------------------------------------------
+echo ""
+if [ "${FAILED}" -eq 0 ]; then
+    echo -e "${GREEN}${BOLD}${PASSED} checks passed${NC}${GRAY}${SKIPPED:+, ${SKIPPED} skipped}${NC}"
+    exit 0
+fi
+echo -e "${RED}${BOLD}${FAILED} check(s) failed${NC}${GRAY}, ${PASSED} passed${SKIPPED:+, ${SKIPPED} skipped}${NC}"
+exit 1

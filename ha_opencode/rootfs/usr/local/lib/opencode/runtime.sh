@@ -2,9 +2,10 @@
 # =============================================================================
 # OpenCode runtime helpers
 #
-# Shared by the init oneshot (init-opencode/run) and the background updater
-# (opencode-update.sh) so the "pick the right native binary / verify it runs"
-# logic lives in exactly one place and the two paths can never drift.
+# Shared by the init oneshot (init-opencode/run) and the in-image smoke test
+# (opencode-smoke-test) so the "which runtime is certified / pick the right
+# native binary / verify it runs" logic lives in exactly one place and the
+# paths can never drift.
 #
 # Sourced, not executed. Callers may define opencode_log() before sourcing to
 # route messages (e.g. through bashio); it defaults to plain stdout, which is
@@ -14,6 +15,26 @@
 if ! declare -F opencode_log >/dev/null 2>&1; then
     opencode_log() { printf '%s\n' "$*"; }
 fi
+
+# Where the image records the OpenCode version it was built and certified
+# against. Written by the Dockerfile after it has verified that the resolved
+# npm install really is that version, so reading it never needs the network and
+# never depends on the package tree still being intact.
+OPENCODE_CERTIFIED_VERSION_FILE="${OPENCODE_CERTIFIED_VERSION_FILE:-/usr/local/share/opencode-certified-version}"
+
+# The certified version, falling back to the installed package's own metadata
+# so an image built before the marker existed still reports something useful.
+opencode_certified_version() {
+    if [ -r "${OPENCODE_CERTIFIED_VERSION_FILE}" ]; then
+        local recorded
+        recorded=$(cat "${OPENCODE_CERTIFIED_VERSION_FILE}" 2>/dev/null)
+        if [ -n "${recorded}" ]; then
+            printf '%s\n' "${recorded}"
+            return 0
+        fi
+    fi
+    opencode_package_version "/usr/local/lib/node_modules/opencode-ai"
+}
 
 # Print the version recorded in a package's package.json, or a sentinel
 # ("not-installed" / "unknown") when it cannot be read.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.0b5
+
+- **OpenChamber 1.18.3** — updates the web UI through the latest upstream release, including the security-related archive extraction update from 1.18.2, lower startup cost, and session/MCP fixes.
+
 ## 2.5.0b4
 
 - **Local-model MCP diagnostics ([issue #99](https://github.com/magnusoverli/opencode/issues/99))** — `ha-mcp tools` now lists the server's objective tool surface, and the Ollama guidance explains the 64K context needed to avoid silently truncating tool definitions.

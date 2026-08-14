@@ -59,7 +59,6 @@ CPU_MODE=$(cat /data/.cpu_mode 2>/dev/null || echo "unknown")
 ADDON_VERSION=$(cat /data/.addon_version 2>/dev/null || echo "unknown")
 ADDON_ACCESS_ENABLED=$(cat /data/.addon_access_enabled 2>/dev/null || echo "false")
 USER_HOOKS_ENABLED=$(cat /data/.user_hooks_enabled 2>/dev/null || echo "false")
-OPENCODE_UPDATE_POLICY=$(cat /data/.opencode_update_policy 2>/dev/null || echo "latest")
 OPENCODE_VERSION=$(cat /data/.opencode_version 2>/dev/null || opencode --version 2>/dev/null || echo "unknown")
 CPU_INFO=""
 if [ "${CPU_MODE}" = "baseline" ]; then
@@ -83,14 +82,12 @@ fi
 # Change to Home Assistant config directory
 cd /homeassistant
 
-# Set up PATH - prefer the persistent OpenCode install when enabled.
+# Set up PATH. Only the certified runtime shipped in this image is on it:
+# /data/.npm-global may still hold an OpenCode installed by an older version of
+# the add-on, and it must never shadow the build this release was tested with.
 export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-/data/.npm-global}"
-if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
-    export PATH="${NPM_CONFIG_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-else
-    export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
-    export OPENCODE_DISABLE_AUTOUPDATE=true
-fi
+export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+export OPENCODE_DISABLE_AUTOUPDATE=true
 
 # Configure git if not already configured
 if [ ! -f "${HOME}/.gitconfig" ]; then
@@ -103,7 +100,7 @@ show_banner() {
     clear
     echo ""
     echo -e "${BLUE}${BOLD}${ADDON_CHANNEL_LABEL}${NC} ${GRAY}v${ADDON_VERSION}${NC}${CPU_INFO}"
-    echo -e "${GRAY}Runtime: OpenCode ${OPENCODE_VERSION} (${OPENCODE_UPDATE_POLICY})${NC}"
+    echo -e "${GRAY}Runtime: OpenCode ${OPENCODE_VERSION} (certified with this add-on release)${NC}"
     echo -e "${GRAY}AI-powered coding agent for Home Assistant${NC}"
     echo ""
     echo -e "${GRAY}────────────────────────────────────────────────────────────${NC}"
@@ -119,6 +116,7 @@ show_shell_help() {
     echo ""
     echo -e "${BOLD}Commands${NC}"
     echo -e "  ${GREEN}opencode${NC}          Restart the AI coding agent"
+    echo -e "  ${GREEN}ha-readonly${NC}       Investigate without changing anything (read-only session)"
     echo -e "  ${GREEN}ha-logs${NC} ${GRAY}<type>${NC}    View logs (core, error, supervisor, host)"
     echo -e "  ${GREEN}ha-mcp${NC} ${GRAY}<cmd>${NC}     MCP integration (enable, disable, status)"
     echo -e "  ${GREEN}ha-agent-eval${NC} ${GRAY}[args]${NC}  Run synthetic model tool-selection checks"
@@ -139,6 +137,7 @@ if [ "${ADDON_ACCESS_ENABLED}" = "true" ]; then
     echo -e "${WHITE}Add-on development:${NC} ${CYAN}/addons${NC} ${GRAY}and${NC} ${CYAN}/addon_configs${NC} ${YELLOW}(sensitive)${NC}"
 fi
 echo -e "${GRAY}First time? Use ${NC}${GREEN}/connect${NC} ${GRAY}inside OpenCode to add your AI provider${NC}"
+echo -e "${GRAY}Only want to look? Exit and run ${NC}${GREEN}ha-readonly${NC} ${GRAY}— it cannot change anything${NC}"
 echo -e "${GRAY}Add your own instructions in ${NC}${GREEN}AGENTS.local.md${NC} ${GRAY}— add-on updates never overwrite it${NC}"
 if [ "${USER_HOOKS_ENABLED}" = "true" ]; then
     echo -e "${GRAY}Startup hooks are on — ${NC}${GREEN}ha-hooks list${NC} ${GRAY}shows what runs at start${NC}"

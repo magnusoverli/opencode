@@ -1,11 +1,9 @@
 ---
-# NOTE: OPENCHAMBER_VERSION below IS read by CI (.github/workflows/build.yaml
-# scrapes it with sed and passes it as a build arg), so editing it changes what
-# gets built. It is a per-channel pin: the two channels build from identical
-# Dockerfiles, so anything allowed to differ between them has to arrive as a
-# build arg rather than an ARG default.
+# NOTE: OPENCODE_VERSION and OPENCHAMBER_VERSION below are read by CI
+# (.github/workflows/build.yaml scrapes them and passes them as build args).
+# Both are per-channel pins, which lets a runtime soak in beta before stable.
 #
-# Every other pin below is still inert and resolves from the ARG defaults in
+# Every other pin below is inert and resolves from the ARG defaults in
 # ha_opencode/Dockerfile — to change one of those for real, edit the Dockerfile.
 # Home Assistant does not read this file at all, because config.yaml sets
 # `image:`. See RELEASING.md.
@@ -17,9 +15,9 @@ build_from:
   aarch64: ghcr.io/home-assistant/base-debian:trixie
   amd64: ghcr.io/home-assistant/base-debian:trixie
 args:
-  # Mirrors ha_opencode/Dockerfile — see the note above.
-  OPENCODE_VERSION: "latest"
-  OPENCHAMBER_VERSION: "1.18.1"
+  # Must match the exact certified version in the Dockerfile.
+  OPENCODE_VERSION: "1.18.16"
+  OPENCHAMBER_VERSION: "1.18.3"
   PPQ_PROXY_VERSION: "0.1.0"
   TSX_VERSION: "4.20.6"
   TTYD_VERSION: "1.7.7"

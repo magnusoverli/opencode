@@ -1,13 +1,12 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## 2.5.0
 
-- **Local-model MCP diagnostics ([issue #99](https://github.com/magnusoverli/opencode/issues/99))** — `ha-mcp tools` now lists the server's objective tool surface, and the Ollama guidance explains the 64K context needed to avoid silently truncating tool definitions.
-- **OpenChamber voice model downloads work ([issue #100](https://github.com/magnusoverli/opencode/issues/100))** — the image now includes bzip2 support so local dictation and TTS model archives can be extracted instead of failing with `tar exited with code 2`.
-- **OpenChamber ingress survives abandoned browser streams ([issue #98](https://github.com/magnusoverli/opencode/issues/98))** — disconnecting during an HTTP or WebSocket response now tears down that request instead of crashing the ingress proxy and restarting the add-on.
-- **OpenCode V2 readiness tracking** — maintainers now have a root-level compatibility checklist covering the upstream beta's migration work, current blockers, and release gates.
-- **OpenCode V1 improvement roadmap** — maintainers now have a Home Assistant-focused plan for a certified runtime, on-demand skills, read-only diagnostics, and regression coverage.
+- **Certified OpenCode runtime** — the add-on now runs the tested OpenCode 1.18.16 build shipped in its image. The rolling update policy and background npm installer are removed; runtime upgrades now arrive through add-on releases after beta validation.
+- **Home Assistant guidance on demand** — detailed configuration, troubleshooting, dashboard, Zigbee/ESPHome, and development procedures now load as five task-specific skills instead of occupying every request. User-edited skill copies are preserved across updates.
+- **Safer investigations and clearer diagnostics** — `ha-readonly` starts a terminal-only session that cannot change files or Home Assistant; `opencode-smoke-test` checks the bundled integration chain; and `ha-mcp tools` diagnoses local-model tool visibility ([issue #99](https://github.com/magnusoverli/opencode/issues/99)).
+- **OpenChamber 1.18.3 and reliability fixes** — updates the web UI through the latest release, abandoned streams no longer restart ingress ([issue #98](https://github.com/magnusoverli/opencode/issues/98)), and voice-model archives now extract correctly ([issue #100](https://github.com/magnusoverli/opencode/issues/100)).
 
 ## 2.4.2
 

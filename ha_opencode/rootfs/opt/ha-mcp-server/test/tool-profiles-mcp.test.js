@@ -64,6 +64,25 @@ function request(profile, request) {
   });
 }
 
+// Every tool the compact profile must omit. This is the list the read-only
+// session (`ha-readonly`) leans on: the profile is what makes that session
+// read-only on the Home Assistant side, so a tool slipping back into compact is
+// a real capability leak, not a cosmetic regression.
+const MUTATING_TOOLS = [
+  { name: "call_service", arguments: { domain: "light", service: "turn_on" } },
+  { name: "fire_event", arguments: { event_type: "test_event" } },
+  { name: "write_config_safe", arguments: { file_path: "automations.yaml", content: "[]" } },
+  { name: "check_config_syntax", arguments: { content: "{}" } },
+  { name: "validate_config", arguments: {} },
+  { name: "update_component", arguments: { component: "core" } },
+  { name: "watch_firmware_update", arguments: { entity_id: "update.device" } },
+  { name: "esphome_upload", arguments: { device: "sensor" } },
+  { name: "hab_run", arguments: { args: ["entity", "list"] } },
+  { name: "zigporter_run", arguments: { args: ["list-devices"] } },
+  { name: "screenshot_url", arguments: { url: "http://homeassistant.local:8123/" } },
+  { name: "remember_decision", arguments: { decision: "x", user_approved: true } },
+];
+
 describe("MCP tool-profile enforcement", () => {
   it("advertises only scoped tools and rejects a hidden tool before dispatch", async () => {
     const compact = await request("compact", { method: "tools/list", params: {} });
@@ -86,4 +105,30 @@ describe("MCP tool-profile enforcement", () => {
     expect(configurationNames).not.toContain("call_service");
     expect(configurationNames).not.toContain("hab_run");
   }, TIMEOUT_MS + 5000);
+
+  it("hides every mutating tool from the compact profile's tool list", async () => {
+    const compact = await request("compact", { method: "tools/list", params: {} });
+    const compactNames = new Set(compact.tools.map((tool) => tool.name));
+    for (const { name } of MUTATING_TOOLS) {
+      expect(compactNames.has(name), `${name} is advertised in the compact profile`).toBe(false);
+    }
+    // The read-only work still has to be possible.
+    for (const name of ["get_states", "get_history", "get_logbook", "diagnose_entity", "get_error_log"]) {
+      expect(compactNames.has(name), `${name} is missing from the compact profile`).toBe(true);
+    }
+  }, TIMEOUT_MS + 5000);
+
+  it.each(MUTATING_TOOLS)(
+    "rejects $name at dispatch in the compact profile",
+    async ({ name, arguments: args }) => {
+      const rejected = await request("compact", {
+        method: "tools/call",
+        params: { name, arguments: args },
+      });
+      expect(rejected.isError, `${name} was not rejected`).toBe(true);
+      // A client with a stale tool list gets an explanation, not a side effect.
+      expect(rejected.content[0].text).toMatch(/not available in this add-on configuration|compact MCP tool profile/);
+    },
+    TIMEOUT_MS + 5000,
+  );
 });

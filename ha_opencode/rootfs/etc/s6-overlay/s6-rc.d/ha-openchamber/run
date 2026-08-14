@@ -23,13 +23,11 @@ if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
     export HA_TOKEN="${SUPERVISOR_TOKEN}"
 fi
 
-OPENCODE_UPDATE_POLICY=$(cat /data/.opencode_update_policy 2>/dev/null || echo "latest")
-if [ "${OPENCODE_UPDATE_POLICY}" = "latest" ]; then
-    export PATH="${NPM_CONFIG_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-else
-    export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
-    export OPENCODE_DISABLE_AUTOUPDATE=true
-fi
+# Only the certified runtime in this image is on PATH. /data/.npm-global is
+# left out on purpose so an OpenCode installed there by an older add-on version
+# cannot shadow the build this release was tested against.
+export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+export OPENCODE_DISABLE_AUTOUPDATE=true
 
 INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
 if [ "${INTERFACE_MODE}" != "openchamber" ]; then
@@ -61,8 +59,7 @@ bashio::log.info "=============================================="
 bashio::log.info "Starting OpenChamber on 127.0.0.1:${OPENCHAMBER_INTERNAL_PORT}"
 
 # Always launch the bundled OpenChamber package patched during image build.
-# Keep PATH unchanged so OpenChamber can still find the persistent latest
-# OpenCode binary when OPENCODE_UPDATE_POLICY=latest.
+# It resolves `opencode` from PATH, which carries only the certified runtime.
 OPENCHAMBER_BIN="/usr/local/bin/openchamber"
 
 cd /homeassistant
