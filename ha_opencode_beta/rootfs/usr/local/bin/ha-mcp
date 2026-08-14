@@ -19,6 +19,7 @@ usage() {
     echo "  disable    Disable the Home Assistant MCP server"
     echo "  status     Show current MCP server status"
     echo "  test       Test the MCP server connection"
+    echo "  tools      List tools advertised by the MCP server"
     echo "  help       Show this help message"
     echo ""
     echo "When enabled, you can ask OpenCode to interact with Home Assistant:"
@@ -134,6 +135,31 @@ test_mcp() {
     fi
 }
 
+list_tools() {
+    local mcp_response
+    if ! mcp_response=$(printf '%s\n%s\n%s\n' \
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ha-mcp","version":"1.0"}}}' \
+        '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | \
+        timeout 10s node /opt/ha-mcp-server/index.js); then
+        echo "Error: MCP server failed while listing tools."
+        exit 1
+    fi
+
+    local tools_response
+    tools_response=$(printf '%s\n' "$mcp_response" | jq -c 'select(.id == 2 and .result.tools)' 2>/dev/null || true)
+    if [ -z "$tools_response" ]; then
+        echo "Error: MCP server returned no tools/list result."
+        exit 1
+    fi
+
+    local tool_count
+    tool_count=$(printf '%s\n' "$tools_response" | jq -r '.result.tools | length')
+    echo "MCP tool profile: ${OPENCODE_MCP_TOOL_PROFILE:-full}"
+    echo "Advertised tools: $tool_count"
+    printf '%s\n' "$tools_response" | jq -r '.result.tools[].name' | sed 's/^/  /'
+}
+
 case "${1:-}" in
     enable)
         enable_mcp
@@ -146,6 +172,9 @@ case "${1:-}" in
         ;;
     test)
         test_mcp
+        ;;
+    tools)
+        list_tools
         ;;
     help|--help|-h)
         usage

@@ -179,11 +179,12 @@ In practice that is on the order of **25,000 tokens before you type anything**. 
 
 To make local models usable:
 
-- **Set the context window to fit.** Ollama defaults `num_ctx` to 4096. A 25,000-token prompt is silently truncated at that size, so the model loses most of its tools and instructions before it sees your message. Raise it (`OLLAMA_CONTEXT_LENGTH`, or `num_ctx` in the model's parameters) and expect higher memory use.
+- **Set the context window to fit.** Ollama defaults `num_ctx` to 4096. A 25,000-token prompt is silently truncated at that size, so the model loses most of its tools and instructions before it sees your message. Configure an effective context of at least 64K (`OLLAMA_CONTEXT_LENGTH`, or `num_ctx` in the model's parameters), restart or reload the model, and expect higher memory use.
 - **Turn off MCP integration** to remove the 41 tool definitions. This is the single largest saving, but OpenCode then loses the ability to query entities and call services — it becomes a file editor for your YAML rather than a Home Assistant agent.
 - **Turn off Install briefing** for a smaller saving.
 - **Choose a smaller MCP tool profile.** `compact` is a read-only diagnostic surface; `configuration` adds the safe configuration workflow without device control or admin commands. The default `full` profile preserves every existing capability. Profile changes take effect after restarting the add-on.
 - **Use a model that supports tool calling**, and a large one. Small models (roughly under 7B) generally cannot drive a 41-tool agent loop reliably regardless of how fast they run — a common symptom is the model replying with a raw JSON envelope instead of normal text.
+- **Verify the server's real tool list with `ha-mcp tools`.** Asking a model which tools it has tests its recall, not what OpenCode supplied. If `ha-mcp tools` lists a missing tool but the local model will not call it, check the model server for prompt truncation and tool-parser errors.
 - **Do not run the model on the Home Assistant host** if you can avoid it. Inference competing with Home Assistant for CPU and RAM makes both worse.
 
 If you want to shrink the prompt further, you can edit `/homeassistant/AGENTS.md` directly — the add-on keeps a file you have modified rather than overwriting it. The trade-off is that you stop receiving updates to those instructions. See [Resetting AGENTS.md to default](#resetting-agentsmd-to-default).
@@ -473,6 +474,7 @@ The app includes helper commands:
 | `ha-mcp disable` | Disable Home Assistant MCP integration |
 | `ha-mcp status` | Check MCP integration status |
 | `ha-mcp test` | Test MCP server connection |
+| `ha-mcp tools` | List the tools the MCP server actually advertises, without involving the model |
 | `ha-context status` | Show which context files OpenCode is given and what they cost |
 | `ha-context show` | Print every context file OpenCode receives, with a note on what each may contain |
 | `ha-context briefing` | Print the generated install briefing only |
@@ -1581,7 +1583,8 @@ OpenCode can use significant memory on larger Home Assistant installations. This
 1. Make sure MCP is enabled: `ha-mcp status`
 2. Restart OpenCode after enabling MCP
 3. Test the connection: `ha-mcp test`
-4. Check that the app has API access (it should by default)
+4. Inspect the server's objective tool list: `ha-mcp tools`
+5. Check that the app has API access (it should by default)
 
 ### Entity not found in MCP queries
 

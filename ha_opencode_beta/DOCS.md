@@ -137,6 +137,8 @@ The built-in `homeassistant` MCP server can expose a narrower capability set thr
 
 `full` is the default and preserves current behavior. `get_agent_capabilities` reports the active profile, exposed tool count, and omitted count.
 
+For local Ollama and other OpenAI-compatible models, configure an effective context window of at least 64K and restart or reload the model. The complete OpenCode prompt includes built-in tools, Home Assistant tools, instructions, and conversation history; a smaller context can silently truncate tool definitions even when a small standalone `curl` tool-call test succeeds. Use `ha-mcp tools` from the terminal, or ask OpenCode to run it with its shell tool in OpenChamber mode, to list what the MCP server objectively advertises. Asking the model which tools it has only tests model recall. If the command lists a tool that the model will not call, check the model server for prompt truncation and tool-parser errors.
+
 ## Model Tool Evaluation
 
 `ha-agent-eval` is an opt-in developer command that calls a real OpenAI-compatible chat-completions endpoint against fixed synthetic Home Assistant scenarios. It supplies mocked tool results and never contacts Home Assistant or executes a real tool.

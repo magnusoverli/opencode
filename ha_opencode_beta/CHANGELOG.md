@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- **Local-model MCP diagnostics ([issue #99](https://github.com/magnusoverli/opencode/issues/99))** — `ha-mcp tools` now lists the server's objective tool surface, and the Ollama guidance explains the 64K context needed to avoid silently truncating tool definitions.
+
 ## 2.5.0b3
 
 - **OpenChamber voice model downloads work ([issue #100](https://github.com/magnusoverli/opencode/issues/100))** — the image now includes bzip2 support so local dictation and TTS model archives can be extracted instead of failing with `tar exited with code 2`.

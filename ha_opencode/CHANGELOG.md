@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Local-model MCP diagnostics ([issue #99](https://github.com/magnusoverli/opencode/issues/99))** — `ha-mcp tools` now lists the server's objective tool surface, and the Ollama guidance explains the 64K context needed to avoid silently truncating tool definitions.
 - **OpenChamber voice model downloads work ([issue #100](https://github.com/magnusoverli/opencode/issues/100))** — the image now includes bzip2 support so local dictation and TTS model archives can be extracted instead of failing with `tar exited with code 2`.
 - **OpenChamber ingress survives abandoned browser streams ([issue #98](https://github.com/magnusoverli/opencode/issues/98))** — disconnecting during an HTTP or WebSocket response now tears down that request instead of crashing the ingress proxy and restarting the add-on.
 - **OpenCode V2 readiness tracking** — maintainers now have a root-level compatibility checklist covering the upstream beta's migration work, current blockers, and release gates.
