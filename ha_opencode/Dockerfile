@@ -48,12 +48,14 @@ ENV ADDON_CHANNEL=${ADDON_CHANNEL}
 # - git: Required by OpenCode for version control operations
 # - jq: JSON processing for helper scripts
 # - curl/ca-certificates: For downloading ttyd
+# - bzip2: Required by system tar to extract OpenChamber voice models
 # - procps: Provides pgrep for health check
 # - tmux: Session persistence to prevent multiple OpenCode instances
 # - chromium: Headless browser for screenshot_url MCP tool (visual verification)
 # - g++/make: native fallback builds for OpenChamber dependencies on all arches
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        bzip2 \
         ca-certificates \
         chromium \
         curl \

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.0b3
+
+- **OpenChamber voice model downloads work ([issue #100](https://github.com/magnusoverli/opencode/issues/100))** — the image now includes bzip2 support so local dictation and TTS model archives can be extracted instead of failing with `tar exited with code 2`.
+
 ## 2.5.0b2
 
 - **OpenChamber ingress survives abandoned browser streams ([issue #98](https://github.com/magnusoverli/opencode/issues/98))** — disconnecting during an HTTP or WebSocket response now tears down that request instead of crashing the ingress proxy and restarting the add-on.
