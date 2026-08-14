@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## 2.5.0b4
 
 - **Local-model MCP diagnostics ([issue #99](https://github.com/magnusoverli/opencode/issues/99))** — `ha-mcp tools` now lists the server's objective tool surface, and the Ollama guidance explains the 64K context needed to avoid silently truncating tool definitions.
 
