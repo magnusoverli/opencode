@@ -89,9 +89,26 @@ migrate, walk them through running it themselves.
 ## ESPHome
 
 ESPHome device configuration lives in the ESPHome add-on, not in
-`/homeassistant`. The `hab` ESPHome integration reaches it through Ingress and
-needs the long-lived access token configured in the add-on settings; without
-that token the ESPHome tools report a setup error rather than failing silently.
+`/homeassistant`. Use the native MCP source tools, which reach Device Builder's
+`/ws` API through Home Assistant Ingress. They need the long-lived access token
+configured in the add-on settings; without it they report a setup error rather
+than failing silently.
+
+For an existing device, always follow this sequence:
+
+1. `esphome_list_devices` to get the exact `configuration` filename.
+2. `esphome_config_read` to read the complete YAML and its SHA-256.
+3. `esphome_config_validate` or `esphome_config_update` with the default
+   `apply: false` to validate the complete candidate.
+4. Show the user the intended change and wait for approval.
+5. Call `esphome_config_update` with the same `expected_sha256` and
+   `apply: true`.
+
+Use `esphome_config_create` with its default preview before applying a new
+configuration. Never use these tools for `secrets.yaml`; they reject it by
+design. Do not use the broken HAB legacy source commands (`config-read`,
+`config-write`, `config-patch`, `create`, or `info`) against Device Builder
+2026.6 and newer.
 
 For an ESPHome device that has gone unavailable, check the Wi-Fi signal entity
 and the device's uptime entity before assuming a firmware problem — a device

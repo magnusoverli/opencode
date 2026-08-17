@@ -77,6 +77,8 @@ const MUTATING_TOOLS = [
   { name: "update_component", arguments: { component: "core" } },
   { name: "watch_firmware_update", arguments: { entity_id: "update.device" } },
   { name: "esphome_upload", arguments: { device: "sensor" } },
+  { name: "esphome_config_update", arguments: { configuration: "sensor.yaml", content: "esphome:\n  name: sensor\n", expected_sha256: "0".repeat(64), apply: true } },
+  { name: "esphome_config_create", arguments: { name: "sensor", apply: true } },
   { name: "hab_run", arguments: { args: ["entity", "list"] } },
   { name: "zigporter_run", arguments: { args: ["list-devices"] } },
   { name: "screenshot_url", arguments: { url: "http://homeassistant.local:8123/" } },
@@ -102,6 +104,11 @@ describe("MCP tool-profile enforcement", () => {
     const configuration = await request("configuration", { method: "tools/list", params: {} });
     const configurationNames = configuration.tools.map((tool) => tool.name);
     expect(configurationNames).toContain("write_config_safe");
+    expect(configurationNames).toContain("esphome_list_devices");
+    expect(configurationNames).toContain("esphome_config_read");
+    expect(configurationNames).toContain("esphome_config_validate");
+    expect(configurationNames).toContain("esphome_config_update");
+    expect(configurationNames).toContain("esphome_config_create");
     expect(configurationNames).not.toContain("call_service");
     expect(configurationNames).not.toContain("hab_run");
   }, TIMEOUT_MS + 5000);

@@ -11,6 +11,8 @@ const tools = [
   { name: "get_home_context" },
   { name: "get_integration_docs" },
   { name: "write_config_safe" },
+  { name: "esphome_config_read" },
+  { name: "esphome_config_update" },
   { name: "call_service" },
   { name: "hab_run" },
 ];
@@ -34,6 +36,8 @@ describe("MCP tool profiles", () => {
       "get_home_context",
       "get_integration_docs",
       "write_config_safe",
+      "esphome_config_read",
+      "esphome_config_update",
     ]);
     expect(isToolAllowedInProfile("hab_run", "configuration")).toBe(false);
   });

@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- ESPHome agents can now read, validate, create, and safely update Device Builder YAML through its native WebSocket API, with preview-first writes, stale-source checks, and post-write verification.
+
 ## 2.5.0
 
 - **Certified OpenCode runtime** — the add-on now runs the tested OpenCode 1.18.16 build shipped in its image. The rolling update policy and background npm installer are removed; runtime upgrades now arrive through add-on releases after beta validation.

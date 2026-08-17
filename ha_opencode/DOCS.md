@@ -808,7 +808,11 @@ Then restart OpenCode (exit and run `opencode` again).
 
 | Tool | Description |
 |------|-------------|
-| `esphome_list_devices` | List all ESPHome devices with their status |
+| `esphome_list_devices` | List all ESPHome devices with their status and exact configuration filename |
+| `esphome_config_read` | Read complete device YAML with a SHA-256 for stale-write protection |
+| `esphome_config_validate` | Validate a complete in-memory YAML candidate without writing |
+| `esphome_config_update` | Preview or apply a validated hash-guarded update with post-write verification |
+| `esphome_config_create` | Preview or create a new Device Builder configuration without overwrite |
 | `esphome_compile` | Compile an ESPHome device configuration |
 | `esphome_upload` | Upload compiled firmware to an ESPHome device |
 

@@ -101,6 +101,14 @@ import {
 } from "./lib/ha-native-mcp.js";
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
 import { createSupervisorAppsClient } from "./lib/supervisor-apps.js";
+import {
+  ESPHomeDeviceBuilderClient,
+  createESPHomeConfig,
+  readESPHomeConfig,
+  redactESPHomeToolArgs,
+  updateESPHomeConfig,
+  validateESPHomeConfig,
+} from "./lib/esphome-device-builder.js";
 import { requireTimezoneAwareTimestamp } from "./lib/timestamps.js";
 import {
   DEFAULT_LIST_LIMIT as SUPERVISOR_DEFAULT_LIST_LIMIT,
@@ -1063,6 +1071,34 @@ async function getESPHomeConnection() {
 
 function invalidateESPHomeCache() {
   esphomeCache = { result: null, fetchedAt: 0 };
+}
+
+async function withESPHomeDeviceBuilder(operation) {
+  if (!HA_ACCESS_TOKEN) throw new Error(ESPHOME_TOKEN_ERROR);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const esphome = await getESPHomeConnection();
+    if (!esphome.ok) throw new Error(`ESPHome discovery failed: ${esphome.error}`);
+    if (esphome.state !== "started") {
+      throw new Error(`ESPHome add-on is not running (current state: ${esphome.state}). Please start the ESPHome add-on first.`);
+    }
+
+    const client = new ESPHomeDeviceBuilderClient({
+      baseUrl: esphome.url,
+      ingressSession: esphome.ingressSession,
+      token: HA_ACCESS_TOKEN,
+    });
+    try {
+      return await operation(client, esphome);
+    } catch (error) {
+      const authFailure = error?.statusCode === 401
+        || error?.statusCode === 403
+        || /did not accept.*ingress session/i.test(error?.message || "");
+      if (!authFailure || attempt > 0) throw error;
+      invalidateESPHomeCache();
+    }
+  }
+  throw new Error("ESPHome Device Builder authentication failed");
 }
 
 /**
@@ -3402,11 +3438,133 @@ const TOOLS = [
   {
     name: "esphome_list_devices",
     title: "List ESPHome Devices",
-    description: "List all configured ESPHome devices with current and deployed firmware versions. Requires ESPHome add-on to be installed and running.",
+    description: "List all configured ESPHome devices, including the exact configuration filename needed by the ESPHome source tools. Requires ESPHome add-on to be installed and running.",
     inputSchema: EMPTY_INPUT_SCHEMA,
     annotations: {
       readOnly: true,
       idempotent: true,
+    },
+  },
+  {
+    name: "esphome_config_read",
+    title: "Read ESPHome Configuration",
+    description: "Read the complete YAML source for one active ESPHome device and return its SHA-256 for guarded updates. Use the exact configuration filename from esphome_list_devices. secrets.yaml and paths are intentionally rejected.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        configuration: {
+          type: "string",
+          description: "Exact active configuration filename, for example garage-obd-collector.yaml",
+        },
+      },
+      required: ["configuration"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "esphome_config_validate",
+    title: "Validate ESPHome Configuration",
+    description: "Validate a complete in-memory ESPHome YAML candidate through Device Builder without writing it. Read the existing source first and preserve the complete document.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        configuration: {
+          type: "string",
+          description: "Exact active configuration filename",
+        },
+        content: {
+          type: "string",
+          description: "Complete candidate YAML document",
+        },
+      },
+      required: ["configuration", "content"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
+    name: "esphome_config_update",
+    title: "Update ESPHome Configuration",
+    description: "Validate and safely replace one active ESPHome device YAML. Defaults to preview only. Pass apply=true only after the user approves. expected_sha256 rejects stale edits; applied writes are read back and revalidated without overwriting newer concurrent edits.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        configuration: {
+          type: "string",
+          description: "Exact active configuration filename",
+        },
+        content: {
+          type: "string",
+          description: "Complete replacement YAML document",
+        },
+        expected_sha256: {
+          type: "string",
+          pattern: "^[A-Fa-f0-9]{64}$",
+          description: "Source SHA-256 returned by esphome_config_read",
+        },
+        apply: {
+          type: "boolean",
+          description: "Persist the validated replacement. Defaults to false for a non-mutating preview.",
+        },
+      },
+      required: ["configuration", "content", "expected_sha256"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: true,
+    },
+  },
+  {
+    name: "esphome_config_create",
+    title: "Create ESPHome Configuration",
+    description: "Create an ESPHome device through Device Builder's native API. Defaults to preview only; pass apply=true only after user approval. Supply either board_id, complete YAML content, or neither for Device Builder's minimal empty configuration. Existing files are never overwritten.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          pattern: "^[a-z0-9_](?:[a-z0-9_-]{0,29}[a-z0-9_])?$",
+          description: "Lowercase ESPHome hostname, at most 31 characters",
+        },
+        friendly_name: {
+          type: "string",
+          description: "Optional display name",
+        },
+        board_id: {
+          type: "string",
+          description: "Optional Device Builder board catalog ID",
+        },
+        content: {
+          type: "string",
+          description: "Optional complete YAML source. Mutually exclusive with board_id and Wi-Fi credential arguments.",
+        },
+        ssid: {
+          type: "string",
+          description: "Optional Wi-Fi SSID for generated configurations. Device Builder stores it in secrets.yaml; it is never logged by this MCP server.",
+        },
+        psk: {
+          type: "string",
+          description: "Optional Wi-Fi password for generated configurations. It is never logged by this MCP server.",
+        },
+        apply: {
+          type: "boolean",
+          description: "Create the configuration. Defaults to false for a non-mutating preview.",
+        },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: false,
+      idempotent: false,
     },
   },
   {
@@ -3910,7 +4068,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 // --- Call Tool ---
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-  sendLog("info", "mcp-server", { action: "call_tool", tool: name, args });
+  sendLog("info", "mcp-server", { action: "call_tool", tool: name, args: redactESPHomeToolArgs(name, args) });
 
   // Helper to strip unsupported MCP features from response for OpenCode compatibility
   const makeCompatibleResponse = (result) => {
@@ -5871,37 +6029,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // === ESPHOME INTEGRATION ===
       case "esphome_list_devices": {
         sendLog("info", "esphome", { action: "list_devices" });
-        
-        if (!HA_ACCESS_TOKEN) {
-          throw new Error(ESPHOME_TOKEN_ERROR);
-        }
-        
-        // Discover ESPHome add-on
-        const esphome = await getESPHomeConnection();
-        if (!esphome.ok) {
-          const d = esphome.diagnostics;
-          let msg = `ESPHome discovery failed: ${esphome.error}\n\n`;
-          msg += `## Discovery Steps\n`;
-          for (const s of d.steps) {
-            msg += `- **${s.name}**: ${s.status}${s.detail ? ` â€” ${typeof s.detail === "object" ? JSON.stringify(s.detail) : s.detail}` : ""}\n`;
-          }
-          if (d.esphomeSlugs) msg += `\nESPHome-matching slugs: ${JSON.stringify(d.esphomeSlugs)}`;
-          if (d.networkFallback) msg += `\nNetwork fallback data: ${JSON.stringify(d.networkFallback, null, 2)}`;
-          throw new Error(msg);
-        }
-        
-        if (esphome.state !== "started") {
-          throw new Error(`ESPHome add-on is not running (current state: ${esphome.state}). Please start the ESPHome add-on first.`);
-        }
-        
-        try {
-          const devices = await getESPHomeDevices(esphome.url, esphome.ingressSession);
+        return await withESPHomeDeviceBuilder(async (client, esphome) => {
+          const devices = await client.command("devices/list");
           
           let responseText = `# ESPHome Devices\n\n`;
           responseText += `**ESPHome Version:** ${esphome.version}\n`;
           responseText += `**Add-on:** ${esphome.name} (${esphome.slug})\n`;
-          responseText += `**Ingress URL:** ${esphome.url}\n`;
-          responseText += `**URL Source:** ${esphome.diagnostics?.urlSource || "unknown"}\n\n`;
+          responseText += `**API:** Device Builder /ws\n\n`;
           
           const configured = devices.configured || [];
           const importable = devices.importable || [];
@@ -5912,13 +6046,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           } else {
             if (configured.length > 0) {
               responseText += `## Configured Devices (${configured.length})\n\n`;
-              responseText += `| Device | Platform | Current | Deployed | Status |\n`;
-              responseText += `|--------|----------|---------|----------|--------|\n`;
+              responseText += `| Device | Configuration | Platform | Current | Deployed | State |\n`;
+              responseText += `|--------|---------------|----------|---------|----------|-------|\n`;
               
               for (const device of configured) {
-                const needsUpdate = device.current_version !== device.deployed_version;
-                const status = needsUpdate ? "â¬†ï¸ Update available" : "âœ“ Current";
-                responseText += `| ${device.name} | ${device.target_platform} | ${device.current_version || '-'} | ${device.deployed_version || '-'} | ${status} |\n`;
+                const runtime = device.runtime_state || device;
+                responseText += `| ${device.friendly_name || device.name} | ${device.configuration} | ${device.target_platform || '-'} | ${device.current_version || '-'} | ${runtime.deployed_version || '-'} | ${runtime.state || 'unknown'} |\n`;
               }
               responseText += `\n`;
             }
@@ -5935,23 +6068,77 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return makeCompatibleResponse({
             content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.8 })],
           });
-        } catch (e) {
-          const d = esphome.diagnostics;
-          let msg = `${e.message}\n\n## Discovery was OK\n`;
-          msg += `**URL:** ${esphome.url}\n`;
-          msg += `**URL Source:** ${d?.urlSource || "unknown"}\n`;
-          msg += `**HA Core URL:** ${d?.haCoreUrl || "unknown"}\n`;
-          msg += `**Ingress Entry:** ${d?.ingressEntry || "unknown"}\n`;
-          msg += `**Addon Slug:** ${d?.addonSlug || "unknown"}\n`;
-          if (d?.steps) {
-            msg += `\n## Discovery Steps\n`;
-            for (const s of d.steps) {
-              msg += `- **${s.name}**: ${s.status}${s.detail ? ` â€” ${typeof s.detail === "object" ? JSON.stringify(s.detail) : s.detail}` : ""}\n`;
-            }
-          }
-          if (d?.networkFallback) msg += `\nNetwork fallback: ${JSON.stringify(d.networkFallback, null, 2)}`;
-          throw new Error(msg);
-        }
+        });
+      }
+
+      case "esphome_config_read": {
+        const { configuration } = args;
+        sendLog("info", "esphome", { action: "config_read", configuration });
+        const result = await withESPHomeDeviceBuilder((client) => readESPHomeConfig(client, configuration));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent({
+            configuration: result.configuration,
+            content: result.content,
+            bytes: result.bytes,
+            sha256: result.sha256,
+          }, { audience: ["assistant"], priority: 0.9 })],
+        });
+      }
+
+      case "esphome_config_validate": {
+        const { configuration, content } = args;
+        sendLog("info", "esphome", { action: "config_validate", configuration, content_chars: content?.length });
+        const result = await withESPHomeDeviceBuilder((client) => validateESPHomeConfig(client, configuration, content));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(result, { audience: ["user", "assistant"], priority: 0.9 })],
+        });
+      }
+
+      case "esphome_config_update": {
+        const { configuration, content, expected_sha256, apply = false } = args;
+        sendLog("notice", "esphome", { action: "config_update", configuration, apply, content_chars: content?.length });
+        const result = await withESPHomeDeviceBuilder((client) => updateESPHomeConfig(client, {
+          configuration,
+          content,
+          expectedSha256: expected_sha256,
+          apply,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(result, { audience: ["user", "assistant"], priority: 1 })],
+        });
+      }
+
+      case "esphome_config_create": {
+        const {
+          name: deviceName,
+          friendly_name,
+          board_id,
+          content,
+          ssid,
+          psk,
+          apply = false,
+        } = args;
+        sendLog("notice", "esphome", {
+          action: "config_create",
+          name: deviceName,
+          board_id,
+          apply,
+          content_chars: content?.length,
+          has_ssid: Boolean(ssid),
+          has_psk: Boolean(psk),
+        });
+        const result = await withESPHomeDeviceBuilder((client) => createESPHomeConfig(client, {
+          name: deviceName,
+          friendlyName: friendly_name,
+          boardId: board_id,
+          content,
+          ssid,
+          psk,
+          apply,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(result, { audience: ["user", "assistant"], priority: 1 })],
+        });
       }
 
       case "esphome_compile": {

@@ -128,6 +128,24 @@ services per domain under `returns_response`.
 | `get_devices` | List Devices | `readOnly`, `idempotent` |
 | `validate_config` | Validate Configuration | `readOnly`, `idempotent` |
 
+### ESPHome
+| Tool | Title | Annotations |
+|------|-------|-------------|
+| `esphome_list_devices` | List ESPHome Devices | `readOnly`, `idempotent` |
+| `esphome_config_read` | Read ESPHome Configuration | `readOnly`, `idempotent` |
+| `esphome_config_validate` | Validate ESPHome Configuration | `readOnly`, `idempotent` |
+| `esphome_config_update` | Update ESPHome Configuration | `idempotent` |
+| `esphome_config_create` | Create ESPHome Configuration | mutating |
+| `esphome_compile` | Compile ESPHome Firmware | `idempotent` |
+| `esphome_upload` | Upload ESPHome Firmware | mutating |
+
+ESPHome source writes use Device Builder's native multiplexed `/ws` API. Update
+and create default to preview-only; an apply requires an explicit flag. Updates
+also require the SHA-256 returned by the read tool, validate before writing,
+and read back after writing. A post-write failure is reported for manual
+recovery rather than risking an overwrite of a newer dashboard edit. Device
+YAML and Wi-Fi credentials are excluded from server logs.
+
 ### Events & Templates
 | Tool | Title | Annotations |
 |------|-------|-------------|
