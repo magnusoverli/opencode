@@ -813,6 +813,18 @@ Then restart OpenCode (exit and run `opencode` again).
 | `esphome_config_validate` | Validate a complete in-memory YAML candidate without writing |
 | `esphome_config_update` | Preview or apply a validated hash-guarded update with post-write verification |
 | `esphome_config_create` | Preview or create a new Device Builder configuration without overwrite |
+| `esphome_device_lifecycle` | Adopt, ignore, clone, rename, archive, restore, or permanently delete a device with preview and confirmation guards |
+| `esphome_boards` | Search Device Builder's board catalog and valid board IDs |
+| `esphome_device_metadata` | Read or update friendly name, comment, board ID, and labels |
+| `esphome_yaml_search` | Search top-level device YAML with credential-redacted context |
+| `esphome_file` | Read or safely update contained `!include` companion YAML |
+| `esphome_secrets` | List/fingerprint secrets or perform write-only per-key and whole-file updates |
+| `esphome_api_key` | Inspect redacted API-key status or rotate a guarded shared encryption secret |
+| `esphome_history` | Inspect, diff, and restore Device Builder version history |
+| `esphome_logs` | Stream a bounded credential-redacted OTA or serial log window |
+| `esphome_firmware` | Queue and monitor compile/install, cancel, clean, and online-rename jobs |
+| `esphome_serial` | List host serial ports, detect chips, and queue forced-local serial installs |
+| `esphome_pairing` | Manage bounded remote-build pairing workflows between Device Builder instances |
 | `esphome_compile` | Compile an ESPHome device configuration |
 | `esphome_upload` | Upload compiled firmware to an ESPHome device |
 

@@ -1,19 +1,22 @@
-import { createHash } from "crypto";
+import { createHash, createHmac, randomBytes } from "crypto";
 import WebSocket from "ws";
 
 export const MAX_ESPHOME_CONFIG_BYTES = 1024 * 1024;
 
-const SOURCE_TOOL_NAMES = new Set([
-  "esphome_config_read",
-  "esphome_config_validate",
-  "esphome_config_update",
-  "esphome_config_create",
+const SECRET_ARGUMENT_FIELDS = new Set([
+  "api_key",
+  "encryption",
+  "key",
+  "pairing_key",
+  "password",
+  "psk",
+  "token",
+  "value",
 ]);
 
 export class DeviceBuilderCommandError extends Error {
   constructor(command, code, details = "") {
-    const suffix = details ? `: ${String(details).replace(/\s+/g, " ").slice(0, 500)}` : "";
-    super(`ESPHome Device Builder rejected ${command} (${code})${suffix}`);
+    super(`ESPHome Device Builder rejected ${command} (${code})`);
     this.name = "DeviceBuilderCommandError";
     this.command = command;
     this.code = code;
@@ -110,28 +113,333 @@ export class ESPHomeDeviceBuilderClient {
       });
     });
   }
+
+  stream(command, args = {}, {
+    timeoutMs = this.timeoutMs,
+    maxEvents = 500,
+    maxChars = 50000,
+    stopCommand = "",
+    stopGraceMs = 2000,
+  } = {}) {
+    const messageId = String(this.nextMessageId++);
+    const stopMessageId = `${messageId}-stop`;
+    const headers = {};
+    if (this.ingressSession) headers.Cookie = `ingress_session=${this.ingressSession}`;
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+
+    return new Promise((resolve, reject) => {
+      const ws = new this.WebSocketImpl(this.url, { headers });
+      const events = [];
+      let settled = false;
+      let commandSent = false;
+      let stopRequested = false;
+      let stopReason = "";
+      let eventChars = 0;
+      let stopTimer = null;
+
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        if (stopTimer) clearTimeout(stopTimer);
+        if (ws.readyState === this.WebSocketImpl.OPEN) {
+          ws.close();
+        } else if (ws.readyState !== this.WebSocketImpl.CLOSED && typeof ws.terminate === "function") {
+          ws.terminate();
+        }
+        callback(value);
+      };
+
+      const finishStream = (result = null, truncated = false) => finish(resolve, {
+        result,
+        events,
+        truncated,
+        stopReason,
+      });
+
+      const requestStop = (reason) => {
+        if (settled || stopRequested) return;
+        stopRequested = true;
+        stopReason = reason;
+        if (!stopCommand || !commandSent || ws.readyState !== this.WebSocketImpl.OPEN) {
+          finishStream(null, true);
+          return;
+        }
+        ws.send(JSON.stringify({
+          command: stopCommand,
+          message_id: stopMessageId,
+          args: { stream_id: messageId },
+        }));
+        stopTimer = setTimeout(() => finishStream(null, true), stopGraceMs);
+      };
+
+      const timeout = setTimeout(() => requestStop("timeout"), timeoutMs);
+
+      ws.on("unexpected-response", (_request, response) => {
+        response.resume();
+        const error = new Error(`ESPHome Device Builder WebSocket handshake failed with HTTP ${response.statusCode}`);
+        error.statusCode = response.statusCode;
+        finish(reject, error);
+      });
+
+      ws.on("message", (raw) => {
+        let message;
+        try {
+          message = JSON.parse(raw.toString());
+        } catch {
+          finish(reject, new Error("ESPHome Device Builder returned invalid JSON"));
+          return;
+        }
+
+        if (!commandSent && Object.hasOwn(message, "server_version")) {
+          if (message.requires_auth) {
+            finish(reject, new Error("ESPHome Device Builder did not accept the Home Assistant ingress session"));
+            return;
+          }
+          commandSent = true;
+          ws.send(JSON.stringify({ command, message_id: messageId, args }));
+          return;
+        }
+
+        if (message.message_id === stopMessageId) {
+          if (message.error_code) {
+            finish(reject, new DeviceBuilderCommandError(stopCommand, message.error_code, message.details));
+          } else if (Object.hasOwn(message, "result")) {
+            finishStream(null, true);
+          }
+          return;
+        }
+
+        if (message.message_id !== messageId) return;
+        if (message.error_code) {
+          finish(reject, new DeviceBuilderCommandError(command, message.error_code, message.details));
+          return;
+        }
+        if (Object.hasOwn(message, "event")) {
+          const serialized = typeof message.data === "string" ? message.data : JSON.stringify(message.data ?? null);
+          if (events.length >= maxEvents || eventChars + serialized.length > maxChars) {
+            requestStop(events.length >= maxEvents ? "event_limit" : "character_limit");
+            return;
+          }
+          events.push({ event: message.event, data: message.data });
+          eventChars += serialized.length;
+          return;
+        }
+        if (Object.hasOwn(message, "result")) finishStream(message.result, stopRequested);
+      });
+
+      ws.on("error", (error) => finish(reject, new Error(`ESPHome Device Builder WebSocket error: ${error.message}`)));
+      ws.on("close", () => {
+        if (!settled) finish(reject, new Error(`ESPHome Device Builder closed before ${command} completed`));
+      });
+    });
+  }
+
 }
 
 export function redactESPHomeToolArgs(name, args) {
-  if (!SOURCE_TOOL_NAMES.has(name) || !args || typeof args !== "object") return args;
-  const safe = { ...args };
-  if (Object.hasOwn(safe, "content")) {
-    safe.content_chars = typeof safe.content === "string" ? safe.content.length : null;
-    delete safe.content;
-  }
-  if (Object.hasOwn(safe, "ssid")) {
-    safe.has_ssid = Boolean(safe.ssid);
-    delete safe.ssid;
-  }
-  if (Object.hasOwn(safe, "psk")) {
-    safe.has_psk = Boolean(safe.psk);
-    delete safe.psk;
-  }
-  return safe;
+  if (!name?.startsWith("esphome_") || !args || typeof args !== "object") return args;
+
+  const redact = (value) => {
+    if (Array.isArray(value)) return value.map(redact);
+    if (!value || typeof value !== "object") return value;
+    const safe = {};
+    for (const [field, fieldValue] of Object.entries(value)) {
+      if (field === "content" || field === "file_content") {
+        safe[`${field}_chars`] = typeof fieldValue === "string" ? fieldValue.length : null;
+      } else if (field === "ssid") {
+        safe.has_ssid = Boolean(fieldValue);
+      } else if (field === "query") {
+        safe.query_chars = typeof fieldValue === "string" ? fieldValue.length : null;
+      } else if (SECRET_ARGUMENT_FIELDS.has(field)) {
+        safe[`has_${field}`] = Boolean(fieldValue);
+      } else {
+        safe[field] = redact(fieldValue);
+      }
+    }
+    return safe;
+  };
+
+  return redact(args);
 }
 
 export function sha256Text(content) {
   return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+const SENSITIVE_PLACEHOLDER_RE = /__OPENCODE_SECRET_[a-f0-9]{12}_\d+__/g;
+const SENSITIVE_PLACEHOLDER_LINE_RE = /__OPENCODE_SECRET_[a-f0-9]{12}_\d+__/;
+const CANONICAL_32_BYTE_BASE64_RE = /(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{43}=(?![A-Za-z0-9+/=])/g;
+const SENSITIVE_FIELD_NAME = "(?:password|psk|token|api_key|client_secret|encryption_key|[\\w.-]+_(?:password|token|secret))";
+const SENSITIVE_YAML_FIELD_RE = new RegExp(`^(\\s*${SENSITIVE_FIELD_NAME}\\s*:\\s*)(.*)$`, "i");
+const FLOW_SENSITIVE_KEY = `(?:\"${SENSITIVE_FIELD_NAME}\"|'${SENSITIVE_FIELD_NAME}'|${SENSITIVE_FIELD_NAME})`;
+const FLOW_SENSITIVE_FIELD_RE = new RegExp(`(${FLOW_SENSITIVE_KEY}\\s*:\\s*)(\"(?:\\\\.|[^\"])*\"|'(?:''|[^'])*'|[^,}\\]]+)`, "gi");
+const PLACEHOLDER_HMAC_KEY = randomBytes(32);
+
+export function maskESPHomeSensitiveText(content) {
+  if (typeof content !== "string") return { content, replacements: new Map() };
+  const replacements = new Map();
+  const sensitiveSubstitutions = new Set();
+  const substitutionDefinitions = new Map();
+  const collectReferences = (value) => {
+    for (const match of value.matchAll(/\$(?:\{([^}]+)\}|([A-Za-z_]\w*))/g)) {
+      sensitiveSubstitutions.add(match[1] || match[2]);
+    }
+  };
+  for (const line of content.split(/\r?\n/)) {
+    const definition = line.match(/^\s*([^\s:#][^:]*)\s*:\s*(.*)$/);
+    if (definition) substitutionDefinitions.set(definition[1].trim(), definition[2]);
+    const direct = line.match(SENSITIVE_YAML_FIELD_RE);
+    if (direct) collectReferences(direct[2]);
+    for (const flow of line.matchAll(FLOW_SENSITIVE_FIELD_RE)) {
+      collectReferences(flow[2]);
+    }
+  }
+  let previousSize = -1;
+  while (previousSize !== sensitiveSubstitutions.size) {
+    previousSize = sensitiveSubstitutions.size;
+    for (const name of [...sensitiveSubstitutions]) {
+      const definition = substitutionDefinitions.get(name);
+      if (definition) collectReferences(definition);
+    }
+  }
+  let occurrence = 0;
+  const placeholderFor = (value) => {
+    const index = occurrence++;
+    const id = createHmac("sha256", PLACEHOLDER_HMAC_KEY).update(String(index)).digest("hex").slice(0, 12);
+    const placeholder = `__OPENCODE_SECRET_${id}_${index}__`;
+    replacements.set(placeholder, value);
+    return placeholder;
+  };
+
+  const lines = content.match(/[^\r\n]*(?:\r\n|\n|$)/g)?.filter((line) => line.length > 0) ?? [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const newline = lines[index].endsWith("\r\n") ? "\r\n" : lines[index].endsWith("\n") ? "\n" : "";
+    const body = newline ? lines[index].slice(0, -newline.length) : lines[index];
+    const substitutionField = body.match(/^(\s*([^\s:#][^:]*)\s*:\s*)(.*)$/);
+    const sensitiveField = substitutionField && sensitiveSubstitutions.has(substitutionField[2].trim())
+      ? [substitutionField[0], substitutionField[1], substitutionField[3]]
+      : body.match(SENSITIVE_YAML_FIELD_RE);
+    if (sensitiveField) {
+      const value = sensitiveField[2].trim();
+      if (value && !value.startsWith("!secret") && !value.startsWith("${")) {
+        lines[index] = `${sensitiveField[1]}${placeholderFor(sensitiveField[2])}${newline}`;
+        const baseIndent = sensitiveField[1].match(/^\s*/)[0].length;
+        for (let child = index + 1; child < lines.length; child += 1) {
+          const childNewline = lines[child].endsWith("\r\n") ? "\r\n" : lines[child].endsWith("\n") ? "\n" : "";
+          const childBody = childNewline ? lines[child].slice(0, -childNewline.length) : lines[child];
+          if (!childBody.trim()) continue;
+          const childIndent = childBody.match(/^\s*/)[0].length;
+          if (childIndent <= baseIndent) break;
+          const indentation = childBody.slice(0, childIndent);
+          lines[child] = `${indentation}${placeholderFor(childBody.slice(childIndent))}${childNewline}`;
+        }
+        continue;
+      }
+    }
+    const flowMasked = body.replace(FLOW_SENSITIVE_FIELD_RE, (match, prefix, value) => {
+      const trimmed = value.trim();
+      if (!trimmed || trimmed.startsWith("!secret") || trimmed.startsWith("${")) return match;
+      return `${prefix}${placeholderFor(value)}`;
+    });
+    lines[index] = flowMasked.replace(CANONICAL_32_BYTE_BASE64_RE, (value) => placeholderFor(value)) + newline;
+  }
+  const masked = lines.join("");
+  return { content: masked, replacements };
+}
+
+function hasSensitivePlaceholderInFlowCollection(content) {
+  let depth = 0;
+  for (const line of String(content).split(/\r?\n/)) {
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+      if (char === "[" || char === "{") depth += 1;
+      if (SENSITIVE_PLACEHOLDER_LINE_RE.test(line.slice(index)) && depth > 0) return true;
+      if (char === "]" || char === "}") depth = Math.max(0, depth - 1);
+    }
+  }
+  return false;
+}
+
+function sensitivePlaceholderLocations(content) {
+  const locations = new Map();
+  const stack = [];
+  const sequenceCounters = new Map();
+  for (const line of String(content).split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const indentation = line.match(/^\s*/)[0].length;
+    while (stack.length && stack.at(-1).indent >= indentation) stack.pop();
+    const sequenceMatch = line.match(/^\s*-\s*(.*)$/);
+    let keySource = line;
+    if (sequenceMatch) {
+      const parentPath = stack.map((item) => item.key).join(".");
+      const counterKey = `${parentPath}:${indentation}`;
+      const sequenceIndex = sequenceCounters.get(counterKey) ?? 0;
+      sequenceCounters.set(counterKey, sequenceIndex + 1);
+      stack.push({ indent: indentation, key: `[${sequenceIndex}]` });
+      keySource = `${" ".repeat(indentation + 2)}${sequenceMatch[1]}`;
+    }
+    const keyMatch = keySource.match(/^\s*([^\s#][^:]*):(?:\s|$)/);
+    const currentPath = keyMatch ? [...stack.map((item) => item.key), keyMatch[1].trim()] : stack.map((item) => item.key);
+    for (const placeholder of line.match(SENSITIVE_PLACEHOLDER_RE) ?? []) {
+      locations.set(placeholder, currentPath.join("."));
+    }
+    if (keyMatch) stack.push({ indent: indentation + (sequenceMatch ? 2 : 0), key: keyMatch[1].trim() });
+  }
+  return locations;
+}
+
+export function restoreESPHomeSensitivePlaceholders(candidate, original) {
+  const masked = maskESPHomeSensitiveText(original);
+  if (hasSensitivePlaceholderInFlowCollection(masked.content)) {
+    throw new Error("Sensitive values inside flow-style YAML collections cannot be edited safely; convert them to block YAML first");
+  }
+  const expectedOrder = [...masked.replacements.keys()];
+  const actualOrder = candidate.match(SENSITIVE_PLACEHOLDER_RE) ?? [];
+  if (actualOrder.length !== expectedOrder.length || actualOrder.some((item, index) => item !== expectedOrder[index])) {
+    throw new Error("Sensitive placeholders must remain present and in their original order");
+  }
+  const expectedLocations = sensitivePlaceholderLocations(masked.content);
+  const actualLocations = sensitivePlaceholderLocations(candidate);
+  for (const placeholder of expectedOrder) {
+    if (expectedLocations.get(placeholder) !== actualLocations.get(placeholder)) {
+      throw new Error(`Sensitive placeholder ${placeholder} must remain at ${expectedLocations.get(placeholder) || "its original YAML location"}`);
+    }
+  }
+  let restored = candidate;
+  for (const [placeholder, value] of masked.replacements) {
+    const matches = restored.split(placeholder).length - 1;
+    if (matches !== 1) {
+      throw new Error(`Sensitive placeholder ${placeholder} must be preserved exactly once`);
+    }
+    restored = restored.replace(placeholder, value);
+  }
+  const unknown = restored.match(SENSITIVE_PLACEHOLDER_RE);
+  if (unknown) throw new Error(`Unknown sensitive placeholder: ${unknown[0]}`);
+  return restored;
+}
+
+export function redactESPHomeSensitiveText(content) {
+  const masked = maskESPHomeSensitiveText(String(content ?? ""));
+  let redacted = masked.content;
+  for (const placeholder of masked.replacements.keys()) redacted = redacted.replace(placeholder, "<redacted>");
+  return redacted;
+}
+
+export function sanitizeESPHomeResult(value, knownSecretValues = []) {
+  if (typeof value === "string") {
+    let result = redactESPHomeSensitiveText(value);
+    for (const secret of [...knownSecretValues].sort((a, b) => b.length - a.length)) {
+      if (secret) result = result.split(secret).join("<redacted>");
+    }
+    return result;
+  }
+  if (Array.isArray(value)) return value.map((item) => sanitizeESPHomeResult(item, knownSecretValues));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+    if (SECRET_ARGUMENT_FIELDS.has(key) && item) return [key, "<redacted>"];
+    return [key, sanitizeESPHomeResult(item, knownSecretValues)];
+  }));
 }
 
 export function validateConfigurationFilename(configuration) {
@@ -141,8 +449,8 @@ export function validateConfigurationFilename(configuration) {
   if (configuration.includes("/") || configuration.includes("\\") || configuration.includes("\0")) {
     throw new Error("configuration must be a filename, not a path");
   }
-  if (!configuration.toLowerCase().endsWith(".yaml")) {
-    throw new Error("configuration must end with .yaml");
+  if (!/\.ya?ml$/i.test(configuration)) {
+    throw new Error("configuration must end with .yaml or .yml");
   }
   if (configuration.toLowerCase() === "secrets.yaml") {
     throw new Error("secrets.yaml is intentionally unavailable through ESPHome source tools");
@@ -186,7 +494,15 @@ export async function readESPHomeConfig(client, configuration) {
   configuration = validateConfigurationFilename(configuration);
   const device = await requireConfiguredDevice(client, configuration);
   const source = await readSource(client, configuration);
-  return { configuration, device, ...source };
+  const masked = maskESPHomeSensitiveText(source.content);
+  return {
+    configuration,
+    device,
+    content: masked.content,
+    bytes: source.bytes,
+    sha256: source.sha256,
+    sensitive_values_masked: masked.replacements.size,
+  };
 }
 
 export function normalizeESPHomeValidation(result) {
@@ -202,7 +518,11 @@ export function normalizeESPHomeValidation(result) {
 export async function validateESPHomeConfig(client, configuration, content, { requireConfigured = true } = {}) {
   configuration = validateConfigurationFilename(configuration);
   const bytes = validateSourceContent(content);
-  if (requireConfigured) await requireConfiguredDevice(client, configuration);
+  if (requireConfigured) {
+    await requireConfiguredDevice(client, configuration);
+    const original = await readSource(client, configuration);
+    content = restoreESPHomeSensitivePlaceholders(content, original.content);
+  }
   const result = await client.command("editor/validate_yaml", { configuration, content });
   return {
     configuration,
@@ -226,6 +546,8 @@ export async function updateESPHomeConfig(client, {
     throw new Error(`ESPHome configuration ${configuration} changed since it was read; read it again before updating`);
   }
 
+  const rawOriginal = await readSource(client, configuration);
+  content = restoreESPHomeSensitivePlaceholders(content, rawOriginal.content);
   const validation = await validateESPHomeConfig(client, configuration, content, { requireConfigured: false });
   const noChanges = validation.sha256 === original.sha256;
   if (!validation.valid || !apply || noChanges) {

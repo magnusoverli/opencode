@@ -79,6 +79,15 @@ const MUTATING_TOOLS = [
   { name: "esphome_upload", arguments: { device: "sensor" } },
   { name: "esphome_config_update", arguments: { configuration: "sensor.yaml", content: "esphome:\n  name: sensor\n", expected_sha256: "0".repeat(64), apply: true } },
   { name: "esphome_config_create", arguments: { name: "sensor", apply: true } },
+  { name: "esphome_device_lifecycle", arguments: { action: "archive", configuration: "sensor.yaml", expected_sha256: "0".repeat(64), apply: true } },
+  { name: "esphome_device_metadata", arguments: { action: "set_labels", configuration: "sensor.yaml", label_ids: [], apply: true } },
+  { name: "esphome_file", arguments: { action: "update", path: "packages/common.yaml", content: "sensor: []\n", expected_sha256: "0".repeat(64), apply: true } },
+  { name: "esphome_secrets", arguments: { action: "set", key: "wifi_ssid", value: "secret", apply: true } },
+  { name: "esphome_api_key", arguments: { action: "set_secret", secret_key: "api_key", key: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=", apply: true } },
+  { name: "esphome_history", arguments: { action: "restore", path: "sensor.yaml", expected_sha256: "0".repeat(64), apply: true } },
+  { name: "esphome_firmware", arguments: { action: "install", configuration: "sensor.yaml", apply: true } },
+  { name: "esphome_serial", arguments: { action: "install", port: "COM3", configuration: "sensor.yaml", apply: true } },
+  { name: "esphome_pairing", arguments: { action: "status" } },
   { name: "hab_run", arguments: { args: ["entity", "list"] } },
   { name: "zigporter_run", arguments: { args: ["list-devices"] } },
   { name: "screenshot_url", arguments: { url: "http://homeassistant.local:8123/" } },
@@ -109,6 +118,17 @@ describe("MCP tool-profile enforcement", () => {
     expect(configurationNames).toContain("esphome_config_validate");
     expect(configurationNames).toContain("esphome_config_update");
     expect(configurationNames).toContain("esphome_config_create");
+    expect(configurationNames).not.toContain("esphome_device_lifecycle");
+    expect(configurationNames).toContain("esphome_boards");
+    expect(configurationNames).toContain("esphome_device_metadata");
+    expect(configurationNames).toContain("esphome_yaml_search");
+    expect(configurationNames).toContain("esphome_file");
+    expect(configurationNames).not.toContain("esphome_history");
+    expect(configurationNames).not.toContain("esphome_secrets");
+    expect(configurationNames).not.toContain("esphome_api_key");
+    expect(configurationNames).not.toContain("esphome_firmware");
+    expect(configurationNames).not.toContain("esphome_serial");
+    expect(configurationNames).not.toContain("esphome_pairing");
     expect(configurationNames).not.toContain("call_service");
     expect(configurationNames).not.toContain("hab_run");
   }, TIMEOUT_MS + 5000);

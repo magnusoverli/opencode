@@ -106,7 +106,21 @@ For an existing device, always follow this sequence:
 
 Use `esphome_config_create` with its default preview before applying a new
 configuration. Never use these tools for `secrets.yaml`; they reject it by
-design. Do not use the broken HAB legacy source commands (`config-read`,
+design. Source and include reads replace sensitive literals with opaque
+placeholders; preserve each placeholder exactly once and at its original YAML
+location. Use `esphome_secrets` only for key-name/fingerprint reads and
+write-only changes; secret values and raw API keys are never returned.
+
+Use `esphome_device_lifecycle` for adoption, ignore/unignore, clone, config-only
+rename, archive/unarchive, and confirmed permanent delete. Use
+`esphome_firmware` for managed compile/install jobs, status, cancellation,
+cleanup, and online rename; use `esphome_logs` for bounded logs and
+`esphome_serial` for ports, chip detection, and backend-attached provisioning.
+`esphome_pairing` manages remote-build pairing between Device Builder instances,
+not interactive browser Web Serial. Open the receiver's pairing window in the
+Device Builder UI first; MCP does not open that connection-scoped lease.
+
+Do not use the broken HAB legacy source commands (`config-read`,
 `config-write`, `config-patch`, `create`, or `info`) against Device Builder
 2026.6 and newer.
 

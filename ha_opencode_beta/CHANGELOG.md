@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.1b1
+
+- ESPHome management now covers device lifecycle, adoption, board and metadata discovery, YAML search and includes, write-only secret/key workflows, version history, bounded logs, managed firmware jobs, build cleanup, serial provisioning, and remote-build pairing.
+
 ## 2.5.1b0
 
 - ESPHome agents can now read, validate, create, and safely update Device Builder YAML through its native WebSocket API, with preview-first writes, stale-source checks, and post-write verification.

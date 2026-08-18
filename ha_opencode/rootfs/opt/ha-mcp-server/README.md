@@ -136,6 +136,18 @@ services per domain under `returns_response`.
 | `esphome_config_validate` | Validate ESPHome Configuration | `readOnly`, `idempotent` |
 | `esphome_config_update` | Update ESPHome Configuration | `idempotent` |
 | `esphome_config_create` | Create ESPHome Configuration | mutating |
+| `esphome_device_lifecycle` | Manage ESPHome Device Lifecycle | mutating |
+| `esphome_boards` | List ESPHome Board IDs | `readOnly`, `idempotent` |
+| `esphome_device_metadata` | Manage ESPHome Device Metadata | mutating |
+| `esphome_yaml_search` | Search ESPHome YAML | `readOnly`, `idempotent` |
+| `esphome_file` | Manage ESPHome Include File | mutating |
+| `esphome_secrets` | Manage ESPHome Secrets | mutating, write-only values |
+| `esphome_api_key` | Manage ESPHome API Keys | mutating, redacted |
+| `esphome_history` | Manage ESPHome Version History | mutating |
+| `esphome_logs` | Stream ESPHome Device Logs | bounded stream |
+| `esphome_firmware` | Manage ESPHome Firmware Jobs | mutating |
+| `esphome_serial` | Provision ESPHome Over Serial | mutating |
+| `esphome_pairing` | Manage ESPHome Build Pairing | mutating |
 | `esphome_compile` | Compile ESPHome Firmware | `idempotent` |
 | `esphome_upload` | Upload ESPHome Firmware | mutating |
 
@@ -143,8 +155,9 @@ ESPHome source writes use Device Builder's native multiplexed `/ws` API. Update
 and create default to preview-only; an apply requires an explicit flag. Updates
 also require the SHA-256 returned by the read tool, validate before writing,
 and read back after writing. A post-write failure is reported for manual
-recovery rather than risking an overwrite of a newer dashboard edit. Device
-YAML and Wi-Fi credentials are excluded from server logs.
+recovery rather than risking an overwrite of a newer dashboard edit. Sensitive
+source literals use opaque location-bound placeholders, and known secret values,
+API keys, pairing keys, and Wi-Fi credentials are removed from results and logs.
 
 ### Events & Templates
 | Tool | Title | Annotations |

@@ -7,6 +7,9 @@ import {
   createESPHomeConfig,
   readESPHomeConfig,
   redactESPHomeToolArgs,
+  maskESPHomeSensitiveText,
+  restoreESPHomeSensitivePlaceholders,
+  sanitizeESPHomeResult,
   sha256Text,
   updateESPHomeConfig,
   validateConfigurationFilename,
@@ -113,6 +116,53 @@ describe("ESPHome Device Builder WebSocket client", () => {
     await expect(client.command("devices/list")).rejects.toThrow(/did not accept.*ingress session/i);
   });
 
+  it("collects bounded stream events and stops a long-running stream", async () => {
+    let originalMessageId;
+    const baseUrl = await startWebSocketServer((socket) => {
+      socket.send(JSON.stringify({ server_version: "1.9.2", requires_auth: false }));
+      socket.on("message", (raw) => {
+        const message = JSON.parse(raw.toString());
+        if (message.command === "devices/logs") {
+          originalMessageId = message.message_id;
+          socket.send(JSON.stringify({ message_id: originalMessageId, event: "output", data: "line one" }));
+          socket.send(JSON.stringify({ message_id: originalMessageId, event: "output", data: "line two" }));
+          socket.send(JSON.stringify({ message_id: originalMessageId, event: "output", data: "line three" }));
+        } else if (message.command === "devices/stop_stream") {
+          expect(message.args).toEqual({ stream_id: originalMessageId });
+          socket.send(JSON.stringify({ message_id: message.message_id, result: { cancelled: true } }));
+        }
+      });
+    });
+    const client = new ESPHomeDeviceBuilderClient({ baseUrl });
+    const result = await client.stream("devices/logs", { configuration: "kitchen.yaml" }, {
+      timeoutMs: 5000,
+      maxEvents: 2,
+      maxChars: 100,
+      stopCommand: "devices/stop_stream",
+    });
+    expect(result).toMatchObject({ truncated: true, stopReason: "event_limit" });
+    expect(result.events).toEqual([
+      { event: "output", data: "line one" },
+      { event: "output", data: "line two" },
+    ]);
+  });
+
+  it("forces a stream closed when stop acknowledgement never arrives", async () => {
+    const baseUrl = await startWebSocketServer((socket) => {
+      socket.send(JSON.stringify({ server_version: "1.9.2", requires_auth: false }));
+      socket.on("message", () => {});
+    });
+    const client = new ESPHomeDeviceBuilderClient({ baseUrl });
+    const started = Date.now();
+    const result = await client.stream("devices/logs", { configuration: "kitchen.yaml" }, {
+      timeoutMs: 20,
+      stopGraceMs: 20,
+      stopCommand: "devices/stop_stream",
+    });
+    expect(result).toMatchObject({ truncated: true, stopReason: "timeout" });
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
   it("times out and closes a socket that never sends server info", async () => {
     let closed;
     const socketClosed = new Promise((resolve) => { closed = resolve; });
@@ -135,7 +185,8 @@ describe("ESPHome source workflow", () => {
   it("rejects paths and secrets", () => {
     expect(() => validateConfigurationFilename("../kitchen.yaml")).toThrow(/filename, not a path/);
     expect(() => validateConfigurationFilename("secrets.yaml")).toThrow(/intentionally unavailable/);
-    expect(() => validateConfigurationFilename("kitchen.yml")).toThrow(/end with .yaml/);
+    expect(validateConfigurationFilename("kitchen.yml")).toBe("kitchen.yml");
+    expect(() => validateConfigurationFilename("kitchen.json")).toThrow(/end with .yaml or .yml/);
   });
 
   it("validates an in-memory candidate without writing it", async () => {
@@ -297,5 +348,55 @@ describe("ESPHome source workflow", () => {
     });
     expect(JSON.stringify(redacted)).not.toContain("private");
     expect(JSON.stringify(redacted)).not.toContain("secret yaml");
+  });
+
+  it("round-trips sensitive YAML through opaque placeholders", () => {
+    const source = "api:\n  encryption:\n    key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\nwifi:\n  password: super-secret\n";
+    const masked = maskESPHomeSensitiveText(source);
+    expect(masked.content).not.toContain("AQEBAQ");
+    expect(masked.content).not.toContain("super-secret");
+    expect(masked.content).not.toContain(sha256Text("super-secret").slice(0, 12));
+    expect(masked.replacements.size).toBe(2);
+    expect(restoreESPHomeSensitivePlaceholders(`${masked.content}logger:\n`, source)).toBe(`${source}logger:\n`);
+  });
+
+  it("masks common, multiline, nested-result, and known secret representations", () => {
+    const source = "substitutions:\n  wifi_password: |2-\n    line-one\n    line-two\n  client_secret: \"quoted#value\"\n";
+    const masked = maskESPHomeSensitiveText(source);
+    expect(masked.content).not.toContain("line-one");
+    expect(masked.content).not.toContain("line-two");
+    expect(masked.content).not.toContain("quoted#value");
+    expect(restoreESPHomeSensitivePlaceholders(masked.content, source)).toBe(source);
+
+    const flowSource = "wifi: {password: \"flow#secret\"}\n";
+    const flowMasked = maskESPHomeSensitiveText(flowSource);
+    expect(flowMasked.content).not.toContain("flow#secret");
+    expect(() => restoreESPHomeSensitivePlaceholders(flowMasked.content, flowSource)).toThrow(/flow-style YAML collections/);
+
+    const sanitized = sanitizeESPHomeResult({
+      password: "not-in-yaml",
+      output: "connection failed for known-plain-value",
+    }, ["known-plain-value"]);
+    expect(sanitized).toEqual({ password: "<redacted>", output: "connection failed for <redacted>" });
+  });
+
+  it("rejects moving a sensitive placeholder to another YAML field", () => {
+    const source = "wifi:\n  password: wifi-value\nmqtt:\n  password: mqtt-value\n";
+    const masked = maskESPHomeSensitiveText(source);
+    const moved = masked.content.replace("wifi:\n  password:", "wifi:\n  token:");
+    expect(() => restoreESPHomeSensitivePlaceholders(moved, source)).toThrow(/must remain at/);
+  });
+
+  it("masks sensitive substitution definitions and rejects multiline flow edits", () => {
+    const substitutionSource = "substitutions:\n  network_credential: $inner_credential\n  inner_credential: exposed-secret\nwifi:\n  password: $network_credential\n";
+    const substitutionMasked = maskESPHomeSensitiveText(substitutionSource);
+    expect(substitutionMasked.content).not.toContain("exposed-secret");
+    expect(restoreESPHomeSensitivePlaceholders(substitutionMasked.content, substitutionSource)).toBe(substitutionSource);
+
+    const flowSource = "wifi:\n  networks: [\n    {ssid: one, password: first-secret},\n    {ssid: two, password: second-secret}\n  ]\n";
+    const flowMasked = maskESPHomeSensitiveText(flowSource);
+    expect(flowMasked.content).not.toContain("first-secret");
+    expect(flowMasked.content).not.toContain("second-secret");
+    expect(() => restoreESPHomeSensitivePlaceholders(flowMasked.content, flowSource)).toThrow(/flow-style YAML collections/);
   });
 });

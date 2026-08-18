@@ -13,6 +13,7 @@ const tools = [
   { name: "write_config_safe" },
   { name: "esphome_config_read" },
   { name: "esphome_config_update" },
+  { name: "esphome_boards" },
   { name: "call_service" },
   { name: "hab_run" },
 ];
@@ -38,6 +39,7 @@ describe("MCP tool profiles", () => {
       "write_config_safe",
       "esphome_config_read",
       "esphome_config_update",
+      "esphome_boards",
     ]);
     expect(isToolAllowedInProfile("hab_run", "configuration")).toBe(false);
   });

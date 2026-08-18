@@ -105,10 +105,27 @@ import {
   ESPHomeDeviceBuilderClient,
   createESPHomeConfig,
   readESPHomeConfig,
+  redactESPHomeSensitiveText,
   redactESPHomeToolArgs,
+  sanitizeESPHomeResult,
   updateESPHomeConfig,
   validateESPHomeConfig,
 } from "./lib/esphome-device-builder.js";
+import {
+  listESPHomeBoards,
+  manageESPHomeApiKey,
+  manageESPHomeFile,
+  manageESPHomeFirmware,
+  manageESPHomeHistory,
+  manageESPHomeLifecycle,
+  manageESPHomeMetadata,
+  manageESPHomePairing,
+  manageESPHomeSecrets,
+  manageESPHomeSerial,
+  sanitizeESPHomeResultWithSecrets,
+  searchESPHomeYaml,
+  streamESPHomeLogs as streamESPHomeDeviceLogs,
+} from "./lib/esphome-device-management.js";
 import { requireTimezoneAwareTimestamp } from "./lib/timestamps.js";
 import {
   DEFAULT_LIST_LIMIT as SUPERVISOR_DEFAULT_LIST_LIMIT,
@@ -1076,29 +1093,50 @@ function invalidateESPHomeCache() {
 async function withESPHomeDeviceBuilder(operation) {
   if (!HA_ACCESS_TOKEN) throw new Error(ESPHOME_TOKEN_ERROR);
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const esphome = await getESPHomeConnection();
-    if (!esphome.ok) throw new Error(`ESPHome discovery failed: ${esphome.error}`);
-    if (esphome.state !== "started") {
-      throw new Error(`ESPHome add-on is not running (current state: ${esphome.state}). Please start the ESPHome add-on first.`);
-    }
-
-    const client = new ESPHomeDeviceBuilderClient({
-      baseUrl: esphome.url,
-      ingressSession: esphome.ingressSession,
-      token: HA_ACCESS_TOKEN,
-    });
+  const esphome = await getESPHomeConnection();
+  if (!esphome.ok) throw new Error(`ESPHome discovery failed: ${esphome.error}`);
+  if (esphome.state !== "started") {
+    throw new Error(`ESPHome add-on is not running (current state: ${esphome.state}). Please start the ESPHome add-on first.`);
+  }
+  const client = new ESPHomeDeviceBuilderClient({
+    baseUrl: esphome.url,
+    ingressSession: esphome.ingressSession,
+    token: HA_ACCESS_TOKEN,
+  });
+  let result;
+  try {
+    result = await operation(client, esphome);
+  } catch (error) {
+    const authFailure = error?.statusCode === 401
+      || error?.statusCode === 403
+      || /did not accept.*ingress session/i.test(error?.message || "");
+    if (authFailure) invalidateESPHomeCache();
     try {
-      return await operation(client, esphome);
-    } catch (error) {
-      const authFailure = error?.statusCode === 401
-        || error?.statusCode === 403
-        || /did not accept.*ingress session/i.test(error?.message || "");
-      if (!authFailure || attempt > 0) throw error;
-      invalidateESPHomeCache();
+      const safe = await sanitizeESPHomeResultWithSecrets(client, { error: error.message });
+      throw new Error(`${safe.error}${authFailure ? "; ingress was refreshed, inspect current state before retrying" : ""}`);
+    } catch (redactionError) {
+      if (!redactionError.message?.startsWith("ESPHome output was withheld")) throw redactionError;
+      throw new Error(`ESPHome Device Builder operation failed (${error.code || "details withheld"})`);
     }
   }
-  throw new Error("ESPHome Device Builder authentication failed");
+  try {
+    return await sanitizeESPHomeResultWithSecrets(client, result);
+  } catch {
+    throw new Error("ESPHome operation completed, but its output was withheld because secret redaction was unavailable");
+  }
+}
+
+async function sanitizeLegacyESPHomeOutput(esphome, text, fallback) {
+  const client = new ESPHomeDeviceBuilderClient({
+    baseUrl: esphome.url,
+    ingressSession: esphome.ingressSession,
+    token: HA_ACCESS_TOKEN,
+  });
+  try {
+    return await sanitizeESPHomeResultWithSecrets(client, text);
+  } catch {
+    return fallback;
+  }
 }
 
 /**
@@ -3439,7 +3477,16 @@ const TOOLS = [
     name: "esphome_list_devices",
     title: "List ESPHome Devices",
     description: "List all configured ESPHome devices, including the exact configuration filename needed by the ESPHome source tools. Requires ESPHome add-on to be installed and running.",
-    inputSchema: EMPTY_INPUT_SCHEMA,
+    inputSchema: {
+      type: "object",
+      properties: {
+        include_archived: {
+          type: "boolean",
+          description: "Also list archived configurations. Defaults to false.",
+        },
+      },
+      additionalProperties: false,
+    },
     annotations: {
       readOnly: true,
       idempotent: true,
@@ -3448,7 +3495,7 @@ const TOOLS = [
   {
     name: "esphome_config_read",
     title: "Read ESPHome Configuration",
-    description: "Read the complete YAML source for one active ESPHome device and return its SHA-256 for guarded updates. Use the exact configuration filename from esphome_list_devices. secrets.yaml and paths are intentionally rejected.",
+    description: "Read complete YAML for one active ESPHome device and return its SHA-256 for guarded updates. Inline credentials and API keys are replaced by opaque location-bound placeholders that must be preserved unchanged. secrets.yaml and paths are rejected.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3468,7 +3515,7 @@ const TOOLS = [
   {
     name: "esphome_config_validate",
     title: "Validate ESPHome Configuration",
-    description: "Validate a complete in-memory ESPHome YAML candidate through Device Builder without writing it. Read the existing source first and preserve the complete document.",
+    description: "Validate a complete in-memory ESPHome YAML candidate through Device Builder without writing it. Read first and preserve every opaque sensitive-value placeholder exactly once and in place.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3492,7 +3539,7 @@ const TOOLS = [
   {
     name: "esphome_config_update",
     title: "Update ESPHome Configuration",
-    description: "Validate and safely replace one active ESPHome device YAML. Defaults to preview only. Pass apply=true only after the user approves. expected_sha256 rejects stale edits; applied writes are read back and revalidated without overwriting newer concurrent edits.",
+    description: "Validate and safely replace one active ESPHome device YAML. Defaults to preview only. Preserve every opaque sensitive-value placeholder from the read. expected_sha256 rejects stale edits; applied writes are read back and revalidated without overwriting newer concurrent edits.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3566,6 +3613,251 @@ const TOOLS = [
       readOnly: false,
       idempotent: false,
     },
+  },
+  {
+    name: "esphome_device_lifecycle",
+    title: "Manage ESPHome Device Lifecycle",
+    description: "Preview or apply native Device Builder lifecycle operations: adopt, ignore/unignore, clone, config-only rename, archive, unarchive, or permanent delete. Mutations default to preview. File operations use a best-effort source hash guard because Device Builder has no atomic CAS; delete also requires an exact confirmation string.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["adopt", "set_ignored", "clone", "rename", "archive", "unarchive", "delete"] },
+        configuration: { type: "string", description: "Active or archived .yaml filename" },
+        device_name: { type: "string", description: "Discoverable device name for adopt or set_ignored" },
+        new_name: { type: "string", description: "New ESPHome hostname for clone or rename" },
+        new_friendly_name: { type: "string", description: "Optional clone display name" },
+        ignored: { type: "boolean", description: "true to ignore a discoverable device; false to unignore" },
+        generate_encryption_key: { type: "boolean", description: "Request encryption during adoption. Defaults to true." },
+        location: { type: "string", enum: ["active", "archived"], description: "Source location. Defaults to active." },
+        expected_sha256: { type: "string", pattern: "^[A-Fa-f0-9]{64}$", description: "Current source hash required when applying file lifecycle operations" },
+        confirmation: { type: "string", description: "Permanent delete requires exactly DELETE <configuration>" },
+        apply: { type: "boolean", description: "Execute the mutation. Defaults to false." },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false },
+  },
+  {
+    name: "esphome_boards",
+    title: "List ESPHome Board IDs",
+    description: "Search Device Builder's paginated board catalog and return valid board IDs for configuration creation and metadata.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        platform: { type: "string" },
+        variant: { type: "string" },
+        mcu: { type: "string" },
+        tag: { type: "string" },
+        offset: { type: "integer", minimum: 0 },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnly: true, idempotent: true },
+  },
+  {
+    name: "esphome_device_metadata",
+    title: "Manage ESPHome Device Metadata",
+    description: "Read device metadata, list label IDs, or preview/apply a friendly-name, comment, board-ID, or label-assignment change. YAML-backed friendly-name edits require the current source hash.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["get", "list_labels", "set_friendly_name", "set_attributes", "set_labels"] },
+        configuration: { type: "string" },
+        friendly_name: { type: "string" },
+        comment: { type: "string", description: "Use an empty string to clear" },
+        board_id: { type: "string", description: "Use an empty string to clear" },
+        label_ids: { type: "array", items: { type: "string" }, maxItems: 100 },
+        expected_sha256: { type: "string", pattern: "^[A-Fa-f0-9]{64}$" },
+        apply: { type: "boolean" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false },
+  },
+  {
+    name: "esphome_yaml_search",
+    title: "Search ESPHome YAML",
+    description: "Search raw top-level device YAML and return bounded matching lines with context. Known secrets, literal credential fields, and API keys are redacted from results.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        max_results: { type: "integer", minimum: 1, maximum: 200 },
+        case_sensitive: { type: "boolean" },
+        context_lines: { type: "integer", minimum: 0, maximum: 10 },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: true, idempotent: true },
+  },
+  {
+    name: "esphome_file",
+    title: "Manage ESPHome Include File",
+    description: "Read or preview/apply a hash-guarded update to an existing config-root-contained YAML companion such as a !include file. Sensitive values are opaque placeholders that must remain in place. secrets.yaml is excluded; post-write validation covers direct references and reports transitive-validation limits.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["read", "update"] },
+        path: { type: "string", description: "Config-root-relative .yaml/.yml path, for example packages/common.yaml" },
+        content: { type: "string" },
+        expected_sha256: { type: "string", pattern: "^[A-Fa-f0-9]{64}$" },
+        apply: { type: "boolean" },
+      },
+      required: ["action", "path"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false },
+  },
+  {
+    name: "esphome_secrets",
+    title: "Manage ESPHome Secrets",
+    description: "List secret names, return a value-redacted secrets.yaml fingerprint, set one secret, or preview/apply a whole-file hash-guarded update. Secret values are never returned or logged; writes default to preview.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "fingerprint", "set", "update"] },
+        key: { type: "string" },
+        value: { type: "string" },
+        overwrite: { type: "boolean" },
+        content: { type: "string" },
+        expected_sha256: { type: "string", pattern: "^[A-Fa-f0-9]{64}$" },
+        allow_wipe: { type: "boolean", description: "Permit an empty secrets.yaml during whole-file update" },
+        apply: { type: "boolean" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false },
+  },
+  {
+    name: "esphome_api_key",
+    title: "Manage ESPHome API Encryption Keys",
+    description: "Report whether a device API key resolves, with only a SHA-256 fingerprint, or preview/apply replacement of a secrets.yaml key used by one or more devices. Raw keys are never returned. Shared-secret replacement requires firmware reinstall and matching Home Assistant key updates.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["status", "set_secret"] },
+        configuration: { type: "string" },
+        secret_key: { type: "string" },
+        key: { type: "string", description: "Canonical base64 encoding of exactly 32 bytes" },
+        expected_key_sha256: { type: "string", pattern: "^[A-Fa-f0-9]{64}$" },
+        confirmation: { type: "string", description: "Rotation requires exactly ROTATE <secret_key>" },
+        apply: { type: "boolean" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false },
+  },
+  {
+    name: "esphome_history",
+    title: "Manage ESPHome Version History",
+    description: "List, read, diff, or preview/apply restoration of Device Builder Git-backed YAML history. Historical sensitive values are masked. Restore is last-write-wins upstream, so it defaults to preview and requires the current source hash when the file exists.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "get", "diff", "list_deleted", "restore"] },
+        path: { type: "string" },
+        sha: { type: "string", pattern: "^[A-Fa-f0-9]{4,40}$" },
+        expected_sha256: { type: "string", pattern: "^[A-Fa-f0-9]{64}$" },
+        reveal_content: { type: "boolean" },
+        apply: { type: "boolean" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false },
+  },
+  {
+    name: "esphome_logs",
+    title: "Stream ESPHome Device Logs",
+    description: "Stream a bounded, credential-redacted window of OTA or serial device logs through Device Builder and stop the backend process automatically at the duration or output limit.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        configuration: { type: "string" },
+        port: { type: "string", description: "OTA, hostname/IP, COM port, or /dev serial path" },
+        no_states: { type: "boolean" },
+        duration_seconds: { type: "integer", minimum: 1, maximum: 45 },
+        max_lines: { type: "integer", minimum: 1, maximum: 500 },
+      },
+      required: ["configuration"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: true, idempotent: false },
+  },
+  {
+    name: "esphome_firmware",
+    title: "Manage ESPHome Firmware Jobs",
+    description: "Preview/apply compile-and-install, cancel jobs, clean one device or the whole build environment, inspect/follow bounded job output, or run an online rename. Submission returns managed Device Builder job IDs immediately.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["compile", "install", "status", "follow", "cancel", "clean", "clean_all", "rename_online"] },
+        configuration: { type: "string" },
+        job_id: { type: "string" },
+        status: { type: "string", enum: ["queued", "running", "completed", "failed", "cancelled"] },
+        port: { type: "string" },
+        force_local: { type: "boolean" },
+        bootloader: { type: "boolean" },
+        new_name: { type: "string" },
+        expected_sha256: { type: "string", pattern: "^[A-Fa-f0-9]{64}$" },
+        confirmation: { type: "string", description: "clean_all requires exactly RESET ALL ESPHOME BUILDS" },
+        duration_seconds: { type: "integer", minimum: 1, maximum: 45 },
+        apply: { type: "boolean" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false },
+  },
+  {
+    name: "esphome_serial",
+    title: "Provision ESPHome Over Serial",
+    description: "List serial ports visible to the Device Builder host, detect a connected chip, or preview/apply a forced-local compile-and-serial-install chain for an existing configuration. Browser Web Serial devices are not visible to this backend tool.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list_ports", "detect", "install"] },
+        port: { type: "string" },
+        configuration: { type: "string" },
+        expected_platform: { type: "string" },
+        apply: { type: "boolean" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false },
+  },
+  {
+    name: "esphome_pairing",
+    title: "Manage ESPHome Build Pairing",
+    description: "Inspect or preview/apply Device Builder remote-build receiver and offloader pairing. Open the receiver's five-minute pairing window in Device Builder first; safely bounding that connection-scoped lease is not possible through one-shot MCP calls. Browser Web Serial pairing is also interactive.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["status", "configure_receiver", "preview", "request", "approve_peer", "remove_peer", "unpair"] },
+        enabled: { type: "boolean" },
+        cleanup_ttl_seconds: { type: "integer", minimum: 3600, maximum: 2592000 },
+        hostname: { type: "string" },
+        port: { type: "integer", minimum: 1, maximum: 65535 },
+        pin_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        receiver_label: { type: "string" },
+        offloader_label: { type: "string" },
+        pairing_key: { type: "string" },
+        dashboard_id: { type: "string" },
+        confirmation: { type: "string" },
+        apply: { type: "boolean" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false },
   },
   {
     name: "esphome_compile",
@@ -6031,6 +6323,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         sendLog("info", "esphome", { action: "list_devices" });
         return await withESPHomeDeviceBuilder(async (client, esphome) => {
           const devices = await client.command("devices/list");
+          const archived = args?.include_archived ? await client.command("devices/list_archived") : [];
           
           let responseText = `# ESPHome Devices\n\n`;
           responseText += `**ESPHome Version:** ${esphome.version}\n`;
@@ -6040,7 +6333,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const configured = devices.configured || [];
           const importable = devices.importable || [];
           
-          if (configured.length === 0 && importable.length === 0) {
+          if (configured.length === 0 && importable.length === 0 && archived.length === 0) {
             responseText += `*No ESPHome devices configured yet.*\n\n`;
             responseText += `Create a new device in the ESPHome dashboard to get started.\n`;
           } else {
@@ -6061,6 +6354,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               responseText += `These devices can be adopted into ESPHome:\n\n`;
               for (const device of importable) {
                 responseText += `- **${device.name}** (${device.project_name} v${device.project_version}) - ${device.network}\n`;
+              }
+            }
+
+            if (archived.length > 0) {
+              responseText += `\n## Archived Devices (${archived.length})\n\n`;
+              responseText += `| Device | Configuration | Comment |\n`;
+              responseText += `|--------|---------------|---------|\n`;
+              for (const device of archived) {
+                responseText += `| ${device.friendly_name || device.name || '-'} | ${device.configuration} | ${device.comment || '-'} |\n`;
               }
             }
           }
@@ -6090,7 +6392,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         sendLog("info", "esphome", { action: "config_validate", configuration, content_chars: content?.length });
         const result = await withESPHomeDeviceBuilder((client) => validateESPHomeConfig(client, configuration, content));
         return makeCompatibleResponse({
-          content: [createJsonTextContent(result, { audience: ["user", "assistant"], priority: 0.9 })],
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 0.9 })],
         });
       }
 
@@ -6104,7 +6406,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           apply,
         }));
         return makeCompatibleResponse({
-          content: [createJsonTextContent(result, { audience: ["user", "assistant"], priority: 1 })],
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 1 })],
         });
       }
 
@@ -6137,7 +6439,193 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           apply,
         }));
         return makeCompatibleResponse({
-          content: [createJsonTextContent(result, { audience: ["user", "assistant"], priority: 1 })],
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 1 })],
+        });
+      }
+
+      case "esphome_device_lifecycle": {
+        const result = await withESPHomeDeviceBuilder((client) => manageESPHomeLifecycle(client, {
+          action: args.action,
+          configuration: args.configuration,
+          deviceName: args.device_name,
+          newName: args.new_name,
+          newFriendlyName: args.new_friendly_name,
+          ignored: args.ignored,
+          generateEncryptionKey: args.generate_encryption_key ?? true,
+          location: args.location || "active",
+          expectedSha256: args.expected_sha256,
+          confirmation: args.confirmation,
+          apply: args.apply ?? false,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 1 })],
+        });
+      }
+
+      case "esphome_boards": {
+        const result = await withESPHomeDeviceBuilder((client) => listESPHomeBoards(client, {
+          query: args?.query,
+          platform: args?.platform,
+          variant: args?.variant,
+          mcu: args?.mcu,
+          tag: args?.tag,
+          offset: args?.offset ?? 0,
+          limit: args?.limit ?? 50,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "esphome_device_metadata": {
+        const result = await withESPHomeDeviceBuilder((client) => manageESPHomeMetadata(client, {
+          action: args.action,
+          configuration: args.configuration,
+          friendlyName: args.friendly_name,
+          comment: args.comment,
+          boardId: args.board_id,
+          labelIds: args.label_ids,
+          expectedSha256: args.expected_sha256,
+          apply: args.apply ?? false,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 0.9 })],
+        });
+      }
+
+      case "esphome_yaml_search": {
+        const result = await withESPHomeDeviceBuilder((client) => searchESPHomeYaml(client, {
+          query: args.query,
+          maxResults: args.max_results ?? 50,
+          caseSensitive: args.case_sensitive ?? false,
+          contextLines: args.context_lines ?? 2,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "esphome_file": {
+        const result = await withESPHomeDeviceBuilder((client) => manageESPHomeFile(client, {
+          action: args.action,
+          filePath: args.path,
+          content: args.content,
+          expectedSha256: args.expected_sha256,
+          apply: args.apply ?? false,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["assistant"], priority: 0.9 })],
+        });
+      }
+
+      case "esphome_secrets": {
+        const result = await withESPHomeDeviceBuilder((client) => manageESPHomeSecrets(client, {
+          action: args.action,
+          key: args.key,
+          value: args.value,
+          overwrite: args.overwrite ?? true,
+          content: args.content,
+          expectedSha256: args.expected_sha256,
+          allowWipe: args.allow_wipe ?? false,
+          apply: args.apply ?? false,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["assistant"], priority: 1 })],
+        });
+      }
+
+      case "esphome_api_key": {
+        const result = await withESPHomeDeviceBuilder((client) => manageESPHomeApiKey(client, {
+          action: args.action,
+          configuration: args.configuration,
+          secretKey: args.secret_key,
+          key: args.key,
+          expectedKeySha256: args.expected_key_sha256,
+          confirmation: args.confirmation,
+          apply: args.apply ?? false,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["assistant"], priority: 1 })],
+        });
+      }
+
+      case "esphome_history": {
+        const result = await withESPHomeDeviceBuilder((client) => manageESPHomeHistory(client, {
+          action: args.action,
+          filePath: args.path,
+          sha: args.sha,
+          expectedSha256: args.expected_sha256,
+          revealContent: args.reveal_content ?? false,
+          apply: args.apply ?? false,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["assistant"], priority: 0.9 })],
+        });
+      }
+
+      case "esphome_logs": {
+        const result = await withESPHomeDeviceBuilder((client) => streamESPHomeDeviceLogs(client, {
+          configuration: args.configuration,
+          port: args.port || "OTA",
+          noStates: args.no_states ?? false,
+          durationSeconds: args.duration_seconds ?? 10,
+          maxLines: args.max_lines ?? 200,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "esphome_firmware": {
+        const result = await withESPHomeDeviceBuilder((client) => manageESPHomeFirmware(client, {
+          action: args.action,
+          configuration: args.configuration,
+          jobId: args.job_id,
+          status: args.status,
+          port: args.port || "OTA",
+          forceLocal: args.force_local ?? false,
+          bootloader: args.bootloader ?? false,
+          newName: args.new_name,
+          expectedSha256: args.expected_sha256,
+          confirmation: args.confirmation,
+          durationSeconds: args.duration_seconds ?? 30,
+          apply: args.apply ?? false,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 1 })],
+        });
+      }
+
+      case "esphome_serial": {
+        const result = await withESPHomeDeviceBuilder((client) => manageESPHomeSerial(client, {
+          action: args.action,
+          port: args.port,
+          configuration: args.configuration,
+          expectedPlatform: args.expected_platform,
+          apply: args.apply ?? false,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 1 })],
+        });
+      }
+
+      case "esphome_pairing": {
+        const result = await withESPHomeDeviceBuilder((client) => manageESPHomePairing(client, {
+          action: args.action,
+          enabled: args.enabled,
+          cleanupTtlSeconds: args.cleanup_ttl_seconds,
+          hostname: args.hostname,
+          port: args.port,
+          pinSha256: args.pin_sha256,
+          receiverLabel: args.receiver_label || "",
+          offloaderLabel: args.offloader_label || "",
+          pairingKey: args.pairing_key,
+          dashboardId: args.dashboard_id,
+          confirmation: args.confirmation,
+          apply: args.apply ?? false,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 1 })],
         });
       }
 
@@ -6163,7 +6651,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         
         // Ensure device has .yaml extension
-        const configuration = device.endsWith(".yaml") ? device : `${device}.yaml`;
+        const configuration = /\.ya?ml$/i.test(device) ? device : `${device}.yaml`;
         
         try {
           const result = await streamESPHomeLogs(
@@ -6201,8 +6689,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             responseText += `- Platform-specific issues\n`;
           }
           
+          const safeResponseText = await sanitizeLegacyESPHomeOutput(
+            esphome,
+            responseText,
+            `# ESPHome Compile: ${device}\n\n**Status:** ${result.success ? "Success" : "Failed"}\n**Exit Code:** ${result.code}\n\nBuild log withheld because secret redaction was unavailable.`,
+          );
           return makeCompatibleResponse({
-            content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 })],
+            content: [createTextContent(safeResponseText, { audience: ["user", "assistant"], priority: 0.9 })],
           });
         } catch (e) {
           throw new Error(`ESPHome compile failed: ${e.message}`);
@@ -6231,7 +6724,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         
         // Ensure device has .yaml extension
-        const configuration = device.endsWith(".yaml") ? device : `${device}.yaml`;
+        const configuration = /\.ya?ml$/i.test(device) ? device : `${device}.yaml`;
         
         try {
           const result = await streamESPHomeLogs(
@@ -6274,8 +6767,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             responseText += `- Firewall blocking OTA port (default: 3232)\n`;
           }
           
+          const safeResponseText = await sanitizeLegacyESPHomeOutput(
+            esphome,
+            responseText,
+            `# ESPHome Upload: ${device}\n\n**Status:** ${result.success ? "Success" : "Failed"}\n**Exit Code:** ${result.code}\n\nUpload log withheld because secret redaction was unavailable.`,
+          );
           return makeCompatibleResponse({
-            content: [createTextContent(responseText, { audience: ["user", "assistant"], priority: 0.9 })],
+            content: [createTextContent(safeResponseText, { audience: ["user", "assistant"], priority: 0.9 })],
           });
         } catch (e) {
           throw new Error(`ESPHome upload failed: ${e.message}`);
@@ -6611,9 +7109,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error(`Unknown tool: ${name}`);
     }
   } catch (error) {
-    sendLog("error", "mcp-server", { action: "tool_error", tool: name, error: error.message });
+    const safeErrorMessage = name.startsWith("esphome_")
+      ? redactESPHomeSensitiveText(error.message)
+      : error.message;
+    sendLog("error", "mcp-server", { action: "tool_error", tool: name, error: safeErrorMessage });
     return makeCompatibleResponse({
-      content: [createTextContent(`Error: ${error.message}`, { audience: ["user"], priority: 1.0 })],
+      content: [createTextContent(`Error: ${safeErrorMessage}`, { audience: ["user"], priority: 1.0 })],
       isError: true,
     });
   }
