@@ -51,6 +51,7 @@ ENV ADDON_CHANNEL=${ADDON_CHANNEL}
 # Install system dependencies in a single layer
 # - nodejs/npm: Required for OpenCode
 # - git: Required by OpenCode for version control operations
+# - openssh-client: Required by Git when remotes use SSH
 # - jq: JSON processing for helper scripts
 # - curl/ca-certificates: For downloading ttyd
 # - bzip2: Required by system tar to extract OpenChamber voice models
@@ -67,6 +68,7 @@ RUN apt-get update \
         git \
         jq \
         nodejs \
+        openssh-client \
         npm \
         procps \
         python3 \
