@@ -79,6 +79,13 @@ describe(`${CHANNEL} runtime pin`, () => {
       /opencode_certified_version\(\)/,
     );
   });
+
+  it("ships OpenSSH client tools for Git SSH remotes", () => {
+    assert.match(dockerfile, /^\s*openssh-client \\/m);
+    for (const command of ["ssh", "ssh-keygen", "ssh-keyscan"]) {
+      assert.match(dockerfile, new RegExp(`command -v ${command} >/dev/null`));
+    }
+  });
 });
 
 describe(`${CHANNEL} bundled runtime precedence`, () => {
