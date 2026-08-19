@@ -178,6 +178,19 @@ Detailed procedures now ship as five skills that OpenCode loads only when a task
 
 The always-loaded `AGENTS.md` keeps only unconditional consent, safety, and secret-handling rules plus a map to these skills. Skills are deployed to `/data/.config/opencode/skills/`. If you edit a deployed skill, the add-on preserves your copy and logs that it skipped the update; delete your edited copy to restore the shipped version.
 
+### Custom Skills and Agents
+
+The Home Assistant configuration directory `/config` is mounted inside the add-on as `/homeassistant`, which is also OpenCode's working directory. OpenCode therefore discovers user-owned project skills and agents from these paths:
+
+```text
+/config/.opencode/skills/<skill-name>/SKILL.md
+/config/.opencode/agents/<agent-name>.md
+```
+
+Create the `.opencode` directories if they do not exist. Because the files live under `/config`, they are persistent, included in Home Assistant backups, and available to configuration file tools that show dot-directories, such as File Editor, Samba, and Studio Code Server. No additional volume mapping or symlink is required.
+
+These project definitions are separate from the skills shipped in `/data/.config/opencode/skills/`; adding a custom skill or agent does not expose or modify the bundled files. Follow OpenCode's [skill](https://opencode.ai/docs/skills/) and [agent](https://opencode.ai/docs/agents/) file formats, then restart the add-on after adding or changing a definition so both terminal and LAN sessions load it.
+
 ### Read-Only Session
 
 > Requires `interface_mode: terminal`.
