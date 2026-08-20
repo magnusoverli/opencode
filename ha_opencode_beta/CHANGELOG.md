@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.1b2
+
+- Git remotes using SSH now work out of the box with the bundled OpenSSH client tools.
+
 ## 2.5.1b1
 
 - ESPHome management now covers device lifecycle, adoption, board and metadata discovery, YAML search and includes, write-only secret/key workflows, version history, bounded logs, managed firmware jobs, build cleanup, serial provisioning, and remote-build pairing.

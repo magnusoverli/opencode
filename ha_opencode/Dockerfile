@@ -51,6 +51,7 @@ ENV ADDON_CHANNEL=${ADDON_CHANNEL}
 # Install system dependencies in a single layer
 # - nodejs/npm: Required for OpenCode
 # - git: Required by OpenCode for version control operations
+# - openssh-client: Provides ssh, ssh-keygen, and ssh-keyscan for Git SSH remotes
 # - jq: JSON processing for helper scripts
 # - curl/ca-certificates: For downloading ttyd
 # - bzip2: Required by system tar to extract OpenChamber voice models
@@ -67,11 +68,15 @@ RUN apt-get update \
         git \
         jq \
         nodejs \
+        openssh-client \
         npm \
         procps \
         python3 \
         python3-venv \
         tmux \
+    && command -v ssh >/dev/null \
+    && command -v ssh-keygen >/dev/null \
+    && command -v ssh-keyscan >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
 # Chromium path for puppeteer-core (used by screenshot MCP tool)
