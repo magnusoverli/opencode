@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.2b0
+
+- Updated Home Assistant Supervisor volume map types to remove legacy-schema warnings.
+
 ## 2.5.1b2
 
 - Git remotes using SSH now work out of the box with the bundled OpenSSH client tools.

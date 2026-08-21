@@ -28,9 +28,9 @@ ports_description:
 map:
   - type: homeassistant_config
     read_only: false
-  - type: addons
+  - type: local_apps
     read_only: false
-  - type: all_addon_configs
+  - type: all_app_configs
     read_only: false
     path: /addon_configs
 

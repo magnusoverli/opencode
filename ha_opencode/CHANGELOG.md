@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Updated Home Assistant Supervisor volume map types to remove legacy-schema warnings.
+
 ## 2.5.1
 
 - Git remotes using SSH now work out of the box with the bundled OpenSSH client tools.

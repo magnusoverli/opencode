@@ -86,6 +86,14 @@ describe(`${CHANNEL} runtime pin`, () => {
       assert.match(dockerfile, new RegExp(`command -v ${command} >/dev/null`));
     }
   });
+
+  it("uses current Supervisor map types for local app development", () => {
+    const config = read(ADDON_DIR, "config.yaml");
+
+    assert.match(config, /^  - type: local_apps$/m);
+    assert.match(config, /^  - type: all_app_configs$/m);
+    assert.doesNotMatch(config, /^  - type: (addons|all_addon_configs)$/m);
+  });
 });
 
 describe(`${CHANNEL} bundled runtime precedence`, () => {
