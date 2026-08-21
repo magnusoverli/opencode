@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 2.5.1
+
 - Git remotes using SSH now work out of the box with the bundled OpenSSH client tools.
 - Documented the persistent `/config/.opencode` locations for user-owned skills and agents, including editor access and restart behavior.
 - ESPHome agents can now read, validate, create, and safely update Device Builder YAML through its native WebSocket API, with preview-first writes, stale-source checks, and post-write verification.
