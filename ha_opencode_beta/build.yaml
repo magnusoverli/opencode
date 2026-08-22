@@ -16,7 +16,7 @@ args:
   # The certified OpenCode runtime for this channel. Must be an exact version —
   # never "latest" or a range — and must match the OPENCODE_VERSION ARG default
   # in Dockerfile. test/runtime-contract.test.js asserts both.
-  OPENCODE_VERSION: "1.18.16"
+  OPENCODE_VERSION: "1.18.21"
   # The other genuine per-channel pin: beta builds from dev, so this can lead
   # stable while a new OpenChamber soaks.
   OPENCHAMBER_VERSION: "1.18.3"

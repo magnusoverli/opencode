@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.3b0
+
+- Updated the certified OpenCode runtime to 1.18.21, restoring responses after providers report an unknown finish reason.
+- Added ESPHome 2026.8 Device Builder migration planning, structured connectivity and crash troubleshooting, correct terminal stream completion, and 1.12 protocol coverage.
+
 ## 2.5.2b0
 
 - Updated Home Assistant Supervisor volume map types to remove legacy-schema warnings.

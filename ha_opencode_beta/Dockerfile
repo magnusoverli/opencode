@@ -33,7 +33,7 @@ ARG TTYD_VERSION=1.7.7
 # can run, and it changes only through a tested add-on release. build.yaml
 # carries the same value and is what CI reads; the two are asserted equal by
 # test/runtime-contract.test.js so a half-done bump cannot ship.
-ARG OPENCODE_VERSION=1.18.16
+ARG OPENCODE_VERSION=1.18.21
 ARG OPENCHAMBER_VERSION=1.18.3
 ARG PPQ_PROXY_VERSION=0.1.0
 ARG TSX_VERSION=4.20.6
