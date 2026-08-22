@@ -13,6 +13,7 @@ import {
   searchESPHomeYaml,
   sanitizeESPHomeResultWithSecrets,
   streamESPHomeLogs,
+  troubleshootESPHomeDevice,
   validateESPHomeContainedPath,
 } from "../lib/esphome-device-management.js";
 import { sha256Text } from "../lib/esphome-device-builder.js";
@@ -130,6 +131,70 @@ describe("ESPHome lifecycle and inventory management", () => {
       configuration: "common.yaml",
       apply: false,
     })).rejects.toThrow(/not an active configured device/);
+  });
+});
+
+describe("ESPHome troubleshooting", () => {
+  it("returns sparse structured connectivity evidence without inventing defaults", async () => {
+    const evidence = {
+      configuration: "kitchen.yaml",
+      address: "kitchen.local",
+      dns_inconclusive: true,
+      ping_attempted: false,
+    };
+    const client = recordingClient((command, args) => {
+      if (command === "devices/list") return { configured: [{ configuration: "kitchen.yaml" }] };
+      if (command === "devices/troubleshoot") {
+        expect(args).toEqual({ configuration: "kitchen.yaml" });
+        return evidence;
+      }
+      throw new Error(`Unexpected command ${command}`);
+    });
+    await expect(troubleshootESPHomeDevice(client, {
+      action: "connectivity",
+      configuration: "kitchen.yaml",
+    })).resolves.toEqual(evidence);
+  });
+
+  it("decodes bounded crash excerpts and preserves stale-build outcomes", async () => {
+    const lines = ["Backtrace: 0x40081234:0x3ffb1234"];
+    const client = recordingClient((command, args) => {
+      if (command === "devices/list") return { configured: [{ configuration: "kitchen.yaml" }] };
+      if (command === "devices/decode_backtrace") {
+        expect(args).toEqual({ configuration: "kitchen.yaml", lines });
+        return { decoded: [{ index: 0, text: "Decoded frame" }], stale_build: true, unavailable_reason: "", local_config_hash: "abc" };
+      }
+      throw new Error(`Unexpected command ${command}`);
+    });
+    const result = await troubleshootESPHomeDevice(client, {
+      action: "decode_backtrace",
+      configuration: "kitchen.yaml",
+      lines,
+    });
+    expect(result).toMatchObject({ stale_build: true, decoded: [{ index: 0 }] });
+  });
+
+  it("enforces active devices, action-specific arguments, and backtrace bounds", async () => {
+    const client = recordingClient((command) => command === "devices/list" ? { configured: [{ configuration: "kitchen.yaml" }] } : null);
+    await expect(troubleshootESPHomeDevice(client, {
+      action: "connectivity",
+      configuration: "missing.yaml",
+    })).rejects.toThrow(/not an active configured device/);
+    await expect(troubleshootESPHomeDevice(client, {
+      action: "connectivity",
+      configuration: "kitchen.yaml",
+      lines: ["unexpected"],
+    })).rejects.toThrow(/only valid for decode_backtrace/);
+    await expect(troubleshootESPHomeDevice(client, {
+      action: "decode_backtrace",
+      configuration: "kitchen.yaml",
+      lines: [],
+    })).rejects.toThrow(/between 1 and 200/);
+    await expect(troubleshootESPHomeDevice(client, {
+      action: "decode_backtrace",
+      configuration: "kitchen.yaml",
+      lines: ["x".repeat(501)],
+    })).rejects.toThrow(/at most 500/);
   });
 });
 

@@ -119,6 +119,20 @@ describe(`${CHANNEL} skills`, () => {
       assert.ok(agents.includes(marker), `AGENTS.md lost ${marker}`);
     }
   });
+
+  it("documents the ESPHome troubleshooting and migration tools", () => {
+    const files = [
+      path.join(MCP_DIR, "README.md"),
+      path.join(MCP_DIR, "MCP_PROFILE_COMPACT.md"),
+      path.join(MCP_DIR, "MCP_PROFILE_CONFIGURATION.md"),
+      path.join(MCP_DIR, "MCP_PROFILE_FULL.md"),
+      path.join(SKILLS_DIR, "home-assistant-zigbee-esphome", "SKILL.md"),
+      path.join(ADDON_DIR, "DOCS.md"),
+    ];
+    const combined = files.map((file) => fs.readFileSync(file, "utf8")).join("\n");
+    assert.ok(combined.includes("esphome_troubleshoot"));
+    assert.ok(combined.includes("esphome_config_migrate"));
+  });
 });
 
 describe(`${CHANNEL} read-only agent`, () => {

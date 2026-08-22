@@ -104,6 +104,11 @@ For an existing device, always follow this sequence:
 5. Call `esphome_config_update` with the same `expected_sha256` and
    `apply: true`.
 
+For version migrations, run `esphome_config_migrate` after obtaining the exact
+configuration filename. Review its structured `changes`, complete candidate,
+validation result, and `expected_sha256`; preview and apply that candidate only
+through `esphome_config_update`. The migration tool itself never writes.
+
 Use `esphome_config_create` with its default preview before applying a new
 configuration. Never use these tools for `secrets.yaml`; they reject it by
 design. Source and include reads replace sensitive literals with opaque
@@ -124,9 +129,18 @@ Do not use the broken HAB legacy source commands (`config-read`,
 `config-write`, `config-patch`, `create`, or `info`) against Device Builder
 2026.6 and newer.
 
-For an ESPHome device that has gone unavailable, check the Wi-Fi signal entity
-and the device's uptime entity before assuming a firmware problem — a device
-rebooting every few minutes is a power or Wi-Fi issue, not a flash.
+For an unavailable ESPHome device, run
+`esphome_troubleshoot(action="connectivity")` and interpret DNS, mDNS, and ping
+evidence independently; a persisted-address ping is not identity proof. Also
+check the Wi-Fi signal and uptime entities before assuming a firmware problem.
+A device rebooting every few minutes is commonly a power or Wi-Fi issue, not a
+bad flash.
+
+For a serial crash excerpt, send only the crash region to
+`esphome_troubleshoot(action="decode_backtrace")`. Do not trust decoded symbols
+when `stale_build` is true, and treat `unavailable_reason` as an honest inability
+to decode rather than inventing frames. Backend-streamed logs may already carry
+decoded frames.
 
 Use `--json` on every zigporter listing and inspection command; the human-
 readable output is meant for people, and parsing it wastes tokens and invites

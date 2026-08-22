@@ -5,6 +5,7 @@ import {
   DeviceBuilderCommandError,
   ESPHomeDeviceBuilderClient,
   createESPHomeConfig,
+  migrateESPHomeConfig,
   readESPHomeConfig,
   redactESPHomeToolArgs,
   maskESPHomeSensitiveText,
@@ -35,10 +36,14 @@ function makeFakeClient(initialSource = "esphome:\n  name: kitchen\n") {
   let source = initialSource;
   const calls = [];
   let validate = () => ({ yaml_errors: [], validation_errors: [] });
+  let migrate = () => ({ yaml_diff: null, changes: [] });
   const client = {
     calls,
     setValidate(fn) {
       validate = fn;
+    },
+    setMigrate(fn) {
+      migrate = fn;
     },
     async command(command, args = {}) {
       calls.push({ command, args });
@@ -49,6 +54,8 @@ function makeFakeClient(initialSource = "esphome:\n  name: kitchen\n") {
           return source;
         case "editor/validate_yaml":
           return validate(args.content);
+        case "editor/migrate_config":
+          return migrate(args.content);
         case "devices/update_config":
           source = args.content;
           return null;
@@ -71,7 +78,7 @@ describe("ESPHome Device Builder WebSocket client", () => {
     let requestDetails;
     const baseUrl = await startWebSocketServer((socket, request) => {
       requestDetails = request;
-      socket.send(JSON.stringify({ server_version: "1.9.2", requires_auth: false }));
+      socket.send(JSON.stringify({ server_version: "1.12.0", esphome_version: "2026.8.0", port: 6052 }));
       socket.on("message", (raw) => {
         const command = JSON.parse(raw.toString());
         expect(command).toEqual({ command: "devices/get_config", message_id: "1", args: { configuration: "kitchen.yaml" } });
@@ -93,7 +100,7 @@ describe("ESPHome Device Builder WebSocket client", () => {
 
   it("preserves structured command errors without exposing transport credentials", async () => {
     const baseUrl = await startWebSocketServer((socket) => {
-      socket.send(JSON.stringify({ server_version: "1.9.2", requires_auth: false }));
+      socket.send(JSON.stringify({ server_version: "1.12.0", requires_auth: false }));
       socket.on("message", (raw) => {
         const command = JSON.parse(raw.toString());
         socket.send(JSON.stringify({ message_id: command.message_id, error_code: "not_found", details: "missing config" }));
@@ -110,7 +117,7 @@ describe("ESPHome Device Builder WebSocket client", () => {
 
   it("rejects a WebSocket that is not on the trusted ingress site", async () => {
     const baseUrl = await startWebSocketServer((socket) => {
-      socket.send(JSON.stringify({ server_version: "1.9.2", requires_auth: true }));
+      socket.send(JSON.stringify({ server_version: "1.12.0", requires_auth: true }));
     });
     const client = new ESPHomeDeviceBuilderClient({ baseUrl });
     await expect(client.command("devices/list")).rejects.toThrow(/did not accept.*ingress session/i);
@@ -119,7 +126,7 @@ describe("ESPHome Device Builder WebSocket client", () => {
   it("collects bounded stream events and stops a long-running stream", async () => {
     let originalMessageId;
     const baseUrl = await startWebSocketServer((socket) => {
-      socket.send(JSON.stringify({ server_version: "1.9.2", requires_auth: false }));
+      socket.send(JSON.stringify({ server_version: "1.12.0", requires_auth: false }));
       socket.on("message", (raw) => {
         const message = JSON.parse(raw.toString());
         if (message.command === "devices/logs") {
@@ -147,9 +154,36 @@ describe("ESPHome Device Builder WebSocket client", () => {
     ]);
   });
 
+  it("completes a stream on the terminal result event without sending stop", async () => {
+    let stopCommands = 0;
+    const baseUrl = await startWebSocketServer((socket) => {
+      socket.send(JSON.stringify({ server_version: "1.12.0", requires_auth: false }));
+      socket.on("message", (raw) => {
+        const message = JSON.parse(raw.toString());
+        if (message.command === "devices/stop_stream") {
+          stopCommands += 1;
+          return;
+        }
+        socket.send(JSON.stringify({ message_id: message.message_id, event: "output", data: "finished" }));
+        socket.send(JSON.stringify({ message_id: message.message_id, event: "result", data: { success: true, code: 0 } }));
+      });
+    });
+    const client = new ESPHomeDeviceBuilderClient({ baseUrl });
+    const result = await client.stream("devices/logs", { configuration: "kitchen.yaml" }, {
+      timeoutMs: 5000,
+      stopCommand: "devices/stop_stream",
+    });
+    expect(result).toMatchObject({ result: { success: true, code: 0 }, truncated: false, stopReason: "" });
+    expect(result.events).toEqual([
+      { event: "output", data: "finished" },
+      { event: "result", data: { success: true, code: 0 } },
+    ]);
+    expect(stopCommands).toBe(0);
+  });
+
   it("forces a stream closed when stop acknowledgement never arrives", async () => {
     const baseUrl = await startWebSocketServer((socket) => {
-      socket.send(JSON.stringify({ server_version: "1.9.2", requires_auth: false }));
+      socket.send(JSON.stringify({ server_version: "1.12.0", requires_auth: false }));
       socket.on("message", () => {});
     });
     const client = new ESPHomeDeviceBuilderClient({ baseUrl });
@@ -195,6 +229,66 @@ describe("ESPHome source workflow", () => {
     const result = await validateESPHomeConfig(client, "kitchen.yaml", "esphome:\n bad: value\n");
     expect(result.valid).toBe(false);
     expect(client.calls.some((call) => call.command === "devices/update_config")).toBe(false);
+  });
+
+  it("plans and validates a version-aware migration without writing", async () => {
+    const source = "esphome:\n  name: kitchen\nsgp4x:\n  voc: voc_sensor\nwifi:\n  password: private-value\n";
+    const client = makeFakeClient(source);
+    client.setMigrate((content) => {
+      expect(content).not.toContain("private-value");
+      return {
+        yaml_diff: { fromLine: 4, toLine: 4, replacement: "  voc_index: voc_sensor" },
+        changes: [{ kind: "field", scope: "sgp4x", old: "voc", new: "voc_index", since: "2026.8.0b1", required: false }],
+      };
+    });
+
+    const result = await migrateESPHomeConfig(client, "kitchen.yaml");
+    expect(result).toMatchObject({ migration_available: true, valid: true, ready_to_update: true, expected_sha256: sha256Text(source) });
+    expect(result.content).toContain("voc_index: voc_sensor");
+    expect(result.content).not.toContain("private-value");
+    expect(client.getSource()).toBe(source);
+    expect(client.calls.some((call) => call.command === "devices/update_config")).toBe(false);
+  });
+
+  it("returns a compact no-op migration result", async () => {
+    const client = makeFakeClient();
+    const result = await migrateESPHomeConfig(client, "kitchen.yaml");
+    expect(result).toEqual({
+      configuration: "kitchen.yaml",
+      migration_available: false,
+      changes: [],
+      expected_sha256: sha256Text(client.getSource()),
+      ready_to_update: false,
+    });
+    expect(result).not.toHaveProperty("content");
+  });
+
+  it("supports migration insertions and rejects malformed or out-of-bounds splices", async () => {
+    const client = makeFakeClient("esphome:\n  name: kitchen\n");
+    client.setMigrate(() => ({
+      yaml_diff: { fromLine: 3, toLine: 2, replacement: "logger:" },
+      changes: [{ kind: "key", scope: "", old: "", new: "logger" }],
+    }));
+    await expect(migrateESPHomeConfig(client, "kitchen.yaml")).resolves.toMatchObject({
+      content: "esphome:\n  name: kitchen\nlogger:\n",
+      ready_to_update: true,
+    });
+
+    client.setMigrate(() => ({ yaml_diff: { fromLine: 99, toLine: 99, replacement: "bad" }, changes: [] }));
+    await expect(migrateESPHomeConfig(client, "kitchen.yaml")).rejects.toThrow(/out-of-bounds migration diff/);
+    client.setMigrate(() => ({ yaml_diff: { fromLine: "1", toLine: 1, replacement: "bad" }, changes: [] }));
+    await expect(migrateESPHomeConfig(client, "kitchen.yaml")).rejects.toThrow(/invalid migration diff/);
+  });
+
+  it("reports an invalid migrated candidate as not ready to update", async () => {
+    const client = makeFakeClient();
+    client.setMigrate(() => ({
+      yaml_diff: { fromLine: 1, toLine: 1, replacement: "invalid:" },
+      changes: [{ kind: "key", scope: "", old: "esphome", new: "invalid" }],
+    }));
+    client.setValidate(() => ({ yaml_errors: [], validation_errors: [{ message: "missing esphome" }] }));
+    const result = await migrateESPHomeConfig(client, "kitchen.yaml");
+    expect(result).toMatchObject({ migration_available: true, valid: false, ready_to_update: false });
   });
 
   it("previews, hash-checks, validates, writes, and verifies an update", async () => {
@@ -348,6 +442,21 @@ describe("ESPHome source workflow", () => {
     });
     expect(JSON.stringify(redacted)).not.toContain("private");
     expect(JSON.stringify(redacted)).not.toContain("secret yaml");
+  });
+
+  it("redacts crash lines from generic tool logging", () => {
+    const redacted = redactESPHomeToolArgs("esphome_troubleshoot", {
+      action: "decode_backtrace",
+      configuration: "kitchen.yaml",
+      lines: ["private crash line", "second line"],
+    });
+    expect(redacted).toEqual({
+      action: "decode_backtrace",
+      configuration: "kitchen.yaml",
+      lines_count: 2,
+      lines_chars: 29,
+    });
+    expect(JSON.stringify(redacted)).not.toContain("private crash line");
   });
 
   it("round-trips sensitive YAML through opaque placeholders", () => {

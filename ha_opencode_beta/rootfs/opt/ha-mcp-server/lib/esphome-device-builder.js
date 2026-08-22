@@ -223,6 +223,7 @@ export class ESPHomeDeviceBuilderClient {
           }
           events.push({ event: message.event, data: message.data });
           eventChars += serialized.length;
+          if (message.event === "result") finishStream(message.data ?? null, stopRequested);
           return;
         }
         if (Object.hasOwn(message, "result")) finishStream(message.result, stopRequested);
@@ -247,6 +248,11 @@ export function redactESPHomeToolArgs(name, args) {
     for (const [field, fieldValue] of Object.entries(value)) {
       if (field === "content" || field === "file_content") {
         safe[`${field}_chars`] = typeof fieldValue === "string" ? fieldValue.length : null;
+      } else if (field === "lines") {
+        safe.lines_count = Array.isArray(fieldValue) ? fieldValue.length : null;
+        safe.lines_chars = Array.isArray(fieldValue)
+          ? fieldValue.reduce((total, line) => total + (typeof line === "string" ? line.length : 0), 0)
+          : null;
       } else if (field === "ssid") {
         safe.has_ssid = Boolean(fieldValue);
       } else if (field === "query") {
@@ -529,6 +535,50 @@ export async function validateESPHomeConfig(client, configuration, content, { re
     bytes,
     sha256: sha256Text(content),
     ...normalizeESPHomeValidation(result),
+  };
+}
+
+function applyDeviceBuilderYamlDiff(content, diff) {
+  if (!diff || typeof diff !== "object") throw new Error("ESPHome Device Builder returned an invalid migration diff");
+  const { fromLine, toLine, replacement } = diff;
+  if (!Number.isInteger(fromLine) || !Number.isInteger(toLine) || typeof replacement !== "string") {
+    throw new Error("ESPHome Device Builder returned an invalid migration diff");
+  }
+  const lines = content.split("\n");
+  const insertion = toLine === fromLine - 1;
+  if (fromLine < 1 || fromLine > lines.length + (insertion ? 1 : 0)) {
+    throw new Error("ESPHome Device Builder returned an out-of-bounds migration diff");
+  }
+  if ((!insertion && (toLine < fromLine || toLine > lines.length)) || (insertion && toLine < 0)) {
+    throw new Error("ESPHome Device Builder returned an out-of-bounds migration diff");
+  }
+  return [...lines.slice(0, fromLine - 1), replacement, ...lines.slice(toLine)].join("\n");
+}
+
+export async function migrateESPHomeConfig(client, configuration) {
+  const original = await readESPHomeConfig(client, configuration);
+  const result = await client.command("editor/migrate_config", { content: original.content });
+  const changes = Array.isArray(result?.changes) ? result.changes : [];
+  if (result?.yaml_diff == null) {
+    if (changes.length) throw new Error("ESPHome Device Builder returned migration changes without a YAML diff");
+    return {
+      configuration: original.configuration,
+      migration_available: false,
+      changes: [],
+      expected_sha256: original.sha256,
+      ready_to_update: false,
+    };
+  }
+
+  const content = applyDeviceBuilderYamlDiff(original.content, result.yaml_diff);
+  const validation = await validateESPHomeConfig(client, configuration, content);
+  return {
+    ...validation,
+    content,
+    migration_available: true,
+    changes,
+    expected_sha256: original.sha256,
+    ready_to_update: validation.valid && validation.sha256 !== original.sha256,
   };
 }
 

@@ -102,6 +102,14 @@ describe("MCP tool-profile enforcement", () => {
     expect(compactNames).not.toContain("call_service");
     expect(compactNames).not.toContain("write_config_safe");
     expect(compactNames).not.toContain("hab_run");
+    expect(compactNames).toContain("esphome_list_devices");
+    expect(compactNames).toContain("esphome_troubleshoot");
+    expect(compactNames).not.toContain("esphome_config_migrate");
+
+    const troubleshoot = compact.tools.find((tool) => tool.name === "esphome_troubleshoot");
+    expect(troubleshoot.inputSchema.additionalProperties).toBe(false);
+    expect(troubleshoot.inputSchema.properties.lines.maxItems).toBe(200);
+    expect(troubleshoot.inputSchema.properties.lines.items.maxLength).toBe(500);
 
     const rejected = await request("compact", {
       method: "tools/call",
@@ -116,6 +124,7 @@ describe("MCP tool-profile enforcement", () => {
     expect(configurationNames).toContain("esphome_list_devices");
     expect(configurationNames).toContain("esphome_config_read");
     expect(configurationNames).toContain("esphome_config_validate");
+    expect(configurationNames).toContain("esphome_config_migrate");
     expect(configurationNames).toContain("esphome_config_update");
     expect(configurationNames).toContain("esphome_config_create");
     expect(configurationNames).not.toContain("esphome_device_lifecycle");
@@ -140,9 +149,10 @@ describe("MCP tool-profile enforcement", () => {
       expect(compactNames.has(name), `${name} is advertised in the compact profile`).toBe(false);
     }
     // The read-only work still has to be possible.
-    for (const name of ["get_states", "get_history", "get_logbook", "diagnose_entity", "get_error_log"]) {
+    for (const name of ["get_states", "get_history", "get_logbook", "diagnose_entity", "get_error_log", "esphome_list_devices", "esphome_troubleshoot"]) {
       expect(compactNames.has(name), `${name} is missing from the compact profile`).toBe(true);
     }
+    expect(compactNames.has("esphome_config_migrate")).toBe(false);
   }, TIMEOUT_MS + 5000);
 
   it.each(MUTATING_TOOLS)(

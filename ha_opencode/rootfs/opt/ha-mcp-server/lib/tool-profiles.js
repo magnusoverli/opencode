@@ -29,6 +29,8 @@ const COMPACT_TOOL_NAMES = [
   "detect_anomalies",
   "get_suggestions",
   "diagnose_entity",
+  "esphome_list_devices",
+  "esphome_troubleshoot",
 ];
 
 const CONFIGURATION_TOOL_NAMES = [
@@ -39,9 +41,9 @@ const CONFIGURATION_TOOL_NAMES = [
   "check_config_syntax",
   "validate_config",
   "write_config_safe",
-  "esphome_list_devices",
   "esphome_config_read",
   "esphome_config_validate",
+  "esphome_config_migrate",
   "esphome_config_update",
   "esphome_config_create",
   "esphome_boards",

@@ -215,6 +215,29 @@ export async function searchESPHomeYaml(client, {
   return { query, results };
 }
 
+export async function troubleshootESPHomeDevice(client, {
+  action,
+  configuration,
+  lines,
+}) {
+  configuration = validateConfigurationFilename(configuration);
+  await requireConfiguredDevice(client, configuration);
+  if (action === "connectivity") {
+    if (lines !== undefined) throw new Error("lines is only valid for decode_backtrace");
+    return client.command("devices/troubleshoot", { configuration });
+  }
+  if (action === "decode_backtrace") {
+    if (!Array.isArray(lines) || lines.length < 1 || lines.length > 200) {
+      throw new Error("lines must contain between 1 and 200 crash-log lines");
+    }
+    if (lines.some((line) => typeof line !== "string" || line.length > 500)) {
+      throw new Error("each crash-log line must be a string of at most 500 characters");
+    }
+    return client.command("devices/decode_backtrace", { configuration, lines });
+  }
+  throw new Error(`Unsupported troubleshooting action: ${action}`);
+}
+
 export async function manageESPHomeLifecycle(client, {
   action,
   configuration,

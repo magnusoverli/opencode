@@ -11,7 +11,10 @@ const tools = [
   { name: "get_home_context" },
   { name: "get_integration_docs" },
   { name: "write_config_safe" },
+  { name: "esphome_list_devices" },
+  { name: "esphome_troubleshoot" },
   { name: "esphome_config_read" },
+  { name: "esphome_config_migrate" },
   { name: "esphome_config_update" },
   { name: "esphome_boards" },
   { name: "call_service" },
@@ -28,6 +31,8 @@ describe("MCP tool profiles", () => {
   it("keeps only diagnostics in the compact profile", () => {
     expect(filterToolsForProfile(tools, "compact").map((tool) => tool.name)).toEqual([
       "get_home_context",
+      "esphome_list_devices",
+      "esphome_troubleshoot",
     ]);
     expect(isToolAllowedInProfile("call_service", "compact")).toBe(false);
   });
@@ -37,7 +42,10 @@ describe("MCP tool profiles", () => {
       "get_home_context",
       "get_integration_docs",
       "write_config_safe",
+      "esphome_list_devices",
+      "esphome_troubleshoot",
       "esphome_config_read",
+      "esphome_config_migrate",
       "esphome_config_update",
       "esphome_boards",
     ]);

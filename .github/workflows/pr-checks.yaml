@@ -47,11 +47,17 @@ jobs:
           bash scripts/promote-beta-to-stable.sh --check
 
   mcp-server:
-    name: Home Assistant MCP server
+    name: Home Assistant MCP server (${{ matrix.channel }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        channel:
+          - ha_opencode
+          - ha_opencode_beta
     defaults:
       run:
-        working-directory: ha_opencode_beta/rootfs/opt/ha-mcp-server
+        working-directory: ${{ matrix.channel }}/rootfs/opt/ha-mcp-server
     steps:
       - uses: actions/checkout@v6
 

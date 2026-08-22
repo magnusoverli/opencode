@@ -134,6 +134,7 @@ services per domain under `returns_response`.
 | `esphome_list_devices` | List ESPHome Devices | `readOnly`, `idempotent` |
 | `esphome_config_read` | Read ESPHome Configuration | `readOnly`, `idempotent` |
 | `esphome_config_validate` | Validate ESPHome Configuration | `readOnly`, `idempotent` |
+| `esphome_config_migrate` | Plan ESPHome Configuration Migration | `readOnly`, `idempotent` |
 | `esphome_config_update` | Update ESPHome Configuration | `idempotent` |
 | `esphome_config_create` | Create ESPHome Configuration | mutating |
 | `esphome_device_lifecycle` | Manage ESPHome Device Lifecycle | mutating |
@@ -145,6 +146,7 @@ services per domain under `returns_response`.
 | `esphome_api_key` | Manage ESPHome API Keys | mutating, redacted |
 | `esphome_history` | Manage ESPHome Version History | mutating |
 | `esphome_logs` | Stream ESPHome Device Logs | bounded stream |
+| `esphome_troubleshoot` | Troubleshoot ESPHome Device | `readOnly`, live probe |
 | `esphome_firmware` | Manage ESPHome Firmware Jobs | mutating |
 | `esphome_serial` | Provision ESPHome Over Serial | mutating |
 | `esphome_pairing` | Manage ESPHome Build Pairing | mutating |
@@ -158,6 +160,10 @@ and read back after writing. A post-write failure is reported for manual
 recovery rather than risking an overwrite of a newer dashboard edit. Sensitive
 source literals use opaque location-bound placeholders, and known secret values,
 API keys, pairing keys, and Wi-Fi credentials are removed from results and logs.
+Migration planning returns a complete validated candidate and source hash but
+never writes; apply it through the guarded update tool. Troubleshooting returns
+structured DNS, mDNS, and ICMP evidence or bounded crash decoding, and raw crash
+lines are not written to MCP logs.
 
 ### Events & Templates
 | Tool | Title | Annotations |

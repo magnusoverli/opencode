@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Updated Home Assistant Supervisor volume map types to remove legacy-schema warnings.
+- Added ESPHome 2026.8 Device Builder migration planning, structured connectivity and crash troubleshooting, correct terminal stream completion, and 1.12 protocol coverage.
 
 ## 2.5.1
 

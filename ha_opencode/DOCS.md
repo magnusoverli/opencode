@@ -620,8 +620,8 @@ The built-in `homeassistant` MCP server can expose a narrower capability set thr
 
 | Profile | Includes | Excludes |
 |---------|----------|----------|
-| `compact` | Read-only entity state, history, diagnostics, templates, calendars, and home context | Config writes, device control, updates, screenshots, `hab`, and Zigbee administration |
-| `configuration` | Everything in `compact`, plus current docs, syntax checks, full validation, safe config writes, and decision notes | Device control, updates, screenshots, `hab`, and Zigbee administration |
+| `compact` | Read-only entity state, history, diagnostics, templates, calendars, home context, and ESPHome troubleshooting | Config writes, device control, updates, screenshots, `hab`, and Zigbee administration |
+| `configuration` | Everything in `compact`, plus current docs, syntax checks, full validation, safe config writes, ESPHome migration planning, and decision notes | Device control, updates, screenshots, `hab`, and Zigbee administration |
 | `full` | Every currently available built-in MCP tool | Nothing beyond separately disabled features such as screenshots without a token |
 
 `full` is the default and preserves existing behavior. Restart the add-on after changing profiles. `get_agent_capabilities` reports the active profile, exposed tool count, and omitted count so an agent can explain what it can actually do.
@@ -824,6 +824,7 @@ Then restart OpenCode (exit and run `opencode` again).
 | `esphome_list_devices` | List all ESPHome devices with their status and exact configuration filename |
 | `esphome_config_read` | Read complete device YAML with a SHA-256 for stale-write protection |
 | `esphome_config_validate` | Validate a complete in-memory YAML candidate without writing |
+| `esphome_config_migrate` | Generate a version-aware, validated migration candidate without writing; apply it through the guarded update tool |
 | `esphome_config_update` | Preview or apply a validated hash-guarded update with post-write verification |
 | `esphome_config_create` | Preview or create a new Device Builder configuration without overwrite |
 | `esphome_device_lifecycle` | Adopt, ignore, clone, rename, archive, restore, or permanently delete a device with preview and confirmation guards |
@@ -835,6 +836,7 @@ Then restart OpenCode (exit and run `opencode` again).
 | `esphome_api_key` | Inspect redacted API-key status or rotate a guarded shared encryption secret |
 | `esphome_history` | Inspect, diff, and restore Device Builder version history |
 | `esphome_logs` | Stream a bounded credential-redacted OTA or serial log window |
+| `esphome_troubleshoot` | Probe DNS/mDNS/ICMP connectivity or decode a bounded serial crash excerpt without logging raw lines |
 | `esphome_firmware` | Queue and monitor compile/install, cancel, clean, and online-rename jobs |
 | `esphome_serial` | List host serial ports, detect chips, and queue forced-local serial installs |
 | `esphome_pairing` | Manage bounded remote-build pairing workflows between Device Builder instances |

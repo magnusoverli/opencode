@@ -104,6 +104,7 @@ import { createSupervisorAppsClient } from "./lib/supervisor-apps.js";
 import {
   ESPHomeDeviceBuilderClient,
   createESPHomeConfig,
+  migrateESPHomeConfig,
   readESPHomeConfig,
   redactESPHomeSensitiveText,
   redactESPHomeToolArgs,
@@ -125,6 +126,7 @@ import {
   sanitizeESPHomeResultWithSecrets,
   searchESPHomeYaml,
   streamESPHomeLogs as streamESPHomeDeviceLogs,
+  troubleshootESPHomeDevice,
 } from "./lib/esphome-device-management.js";
 import { requireTimezoneAwareTimestamp } from "./lib/timestamps.js";
 import {
@@ -3537,6 +3539,26 @@ const TOOLS = [
     },
   },
   {
+    name: "esphome_config_migrate",
+    title: "Plan ESPHome Configuration Migration",
+    description: "Preview Device Builder's version-aware migrations for one active configuration. Returns structured changes, a complete validated candidate with protected sensitive-value placeholders, and the source SHA-256. This tool never writes; review the result and apply it through esphome_config_update.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        configuration: {
+          type: "string",
+          description: "Exact active configuration filename",
+        },
+      },
+      required: ["configuration"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnly: true,
+      idempotent: true,
+    },
+  },
+  {
     name: "esphome_config_update",
     title: "Update ESPHome Configuration",
     description: "Validate and safely replace one active ESPHome device YAML. Defaults to preview only. Preserve every opaque sensitive-value placeholder from the read. expected_sha256 rejects stale edits; applied writes are read back and revalidated without overwriting newer concurrent edits.",
@@ -3787,6 +3809,28 @@ const TOOLS = [
         max_lines: { type: "integer", minimum: 1, maximum: 500 },
       },
       required: ["configuration"],
+      additionalProperties: false,
+    },
+    annotations: { readOnly: true, idempotent: false },
+  },
+  {
+    name: "esphome_troubleshoot",
+    title: "Troubleshoot ESPHome Device",
+    description: "Run a live Device Builder connectivity probe or decode a bounded serial crash excerpt. Connectivity returns objective DNS, mDNS, and ICMP evidence and may refresh derived reachability state. Decoded symbols can be unavailable or stale; inspect stale_build and unavailable_reason.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["connectivity", "decode_backtrace"] },
+        configuration: { type: "string", description: "Exact active configuration filename" },
+        lines: {
+          type: "array",
+          minItems: 1,
+          maxItems: 200,
+          items: { type: "string", maxLength: 500 },
+          description: "Crash-region lines for decode_backtrace only. Raw lines are never logged by this MCP server.",
+        },
+      },
+      required: ["action", "configuration"],
       additionalProperties: false,
     },
     annotations: { readOnly: true, idempotent: false },
@@ -6344,7 +6388,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               
               for (const device of configured) {
                 const runtime = device.runtime_state || device;
-                responseText += `| ${device.friendly_name || device.name} | ${device.configuration} | ${device.target_platform || '-'} | ${device.current_version || '-'} | ${runtime.deployed_version || '-'} | ${runtime.state || 'unknown'} |\n`;
+                responseText += `| ${device.friendly_name || device.name || device.configuration} | ${device.configuration} | ${device.target_platform || '-'} | ${device.current_version || '-'} | ${runtime.deployed_version || '-'} | ${runtime.state || 'unknown'} |\n`;
               }
               responseText += `\n`;
             }
@@ -6353,7 +6397,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               responseText += `## Discoverable Devices (${importable.length})\n\n`;
               responseText += `These devices can be adopted into ESPHome:\n\n`;
               for (const device of importable) {
-                responseText += `- **${device.name}** (${device.project_name} v${device.project_version}) - ${device.network}\n`;
+                responseText += `- **${device.name || "Unnamed device"}** (${device.project_name || "unknown project"} v${device.project_version || "unknown"}) - ${device.network || "unknown network"}\n`;
               }
             }
 
@@ -6393,6 +6437,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await withESPHomeDeviceBuilder((client) => validateESPHomeConfig(client, configuration, content));
         return makeCompatibleResponse({
           content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 0.9 })],
+        });
+      }
+
+      case "esphome_config_migrate": {
+        const { configuration } = args;
+        sendLog("info", "esphome", { action: "config_migrate", configuration });
+        const result = await withESPHomeDeviceBuilder((client) => migrateESPHomeConfig(client, configuration));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["assistant"], priority: 0.9 })],
         });
       }
 
@@ -6573,6 +6626,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }));
         return makeCompatibleResponse({
           content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 0.8 })],
+        });
+      }
+
+      case "esphome_troubleshoot": {
+        const result = await withESPHomeDeviceBuilder((client) => troubleshootESPHomeDevice(client, {
+          action: args.action,
+          configuration: args.configuration,
+          lines: args.lines,
+        }));
+        return makeCompatibleResponse({
+          content: [createJsonTextContent(sanitizeESPHomeResult(result), { audience: ["user", "assistant"], priority: 0.9 })],
         });
       }
 
