@@ -1,16 +1,17 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## 2.5.3
+
+- **Certified OpenCode 1.18.25** — adds Azure/Microsoft Entra ID authentication through Azure CLI without an API key or Bun, and V1 support for compatible V2 configuration fields.
+- **Provider and sign-in reliability** — fixes Cloudflare AI Gateway/Anthropic routing, OpenAI-compatible `textVerbosity`, device-login links behind a base path, immutable-token GitHub authentication, and Amazon Bedrock reasoning-message caching.
+- **OpenChamber 1.21.0** — updated the web UI and verified its Home Assistant Ingress patch, including the proxy-served runtime shim; unsupported in-app runtime-update notifications remain disabled.
+- **ESPHome Device Builder 1.12 support** — added migration planning, structured connectivity and crash troubleshooting, terminal stream completion, and the current Device Builder protocol.
+- **Current Home Assistant compatibility** — updated Supervisor volume map types to remove legacy-schema warnings.
+
 ## 2.5.2
 
 - **Reliable interrupted-stream recovery ([issue #104](https://github.com/magnusoverli/opencode/issues/104))** — updated the certified OpenCode runtime to 1.18.21, which continues a response after an upstream provider reports an unknown finish reason instead of silently stopping the session.
-
-## [Unreleased]
-
-- Updated Home Assistant Supervisor volume map types to remove legacy-schema warnings.
-- Added ESPHome 2026.8 Device Builder migration planning, structured connectivity and crash troubleshooting, correct terminal stream completion, and 1.12 protocol coverage.
-- Removed OpenChamber's unsupported OpenCode runtime update notification; runtime upgrades continue through tested add-on releases.
-- Corrected the OpenChamber Ingress smoke test to validate the runtime shim served by the proxy.
 
 ## 2.5.1
 
