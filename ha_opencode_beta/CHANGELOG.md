@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.3b1
+
+- Removed OpenChamber's unsupported OpenCode runtime update notification; runtime upgrades continue through tested add-on releases.
+
 ## 2.5.3b0
 
 - Updated the certified OpenCode runtime to 1.18.21, restoring responses after providers report an unknown finish reason.

@@ -28,6 +28,9 @@ fi
 # cannot shadow the build this release was tested against.
 export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
 export OPENCODE_DISABLE_AUTOUPDATE=true
+# OpenChamber otherwise performs a separate runtime update check and offers an
+# in-place upgrade. The image binary is a certified, immutable runtime.
+export OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR="/usr/local/bin"
 
 INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
 if [ "${INTERFACE_MODE}" != "openchamber" ]; then
@@ -47,8 +50,8 @@ export OPENCHAMBER_OPENCODE_HOSTNAME="127.0.0.1"
 # Ingress-patched at image build time, so an in-app update cannot persist or
 # stay patched and only hangs the UI on "Waiting for server...". Point the
 # update-check API at a local canned "no update" endpoint served by the ingress
-# proxy below, so both the update notification and the update-install action
-# report no update available. OpenChamber is updated by updating the add-on.
+# proxy below, so both the OpenChamber update notification and the update-install
+# action report no update available. OpenChamber is updated by updating the add-on.
 export OPENCHAMBER_UPDATE_API_URL="http://127.0.0.1:${OPENCHAMBER_INGRESS_PORT}/__ha_openchamber_update_check"
 
 mkdir -p "${OPENCHAMBER_DATA_DIR}"

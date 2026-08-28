@@ -149,6 +149,20 @@ describe(`${CHANNEL} bundled runtime precedence`, () => {
     }
   });
 
+  it("tells OpenChamber the certified runtime cannot be upgraded in place", () => {
+    const openchamber = read(
+      ROOTFS,
+      "etc",
+      "s6-overlay",
+      "s6-rc.d",
+      "ha-openchamber",
+      "run",
+    );
+
+    assert.match(openchamber, /OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR="\/usr\/local\/bin"/);
+    assert.match(openchamber, /OPENCHAMBER_BIN="\/usr\/local\/bin\/openchamber"/);
+  });
+
   it("carries no update-policy option or plumbing", () => {
     assert.ok(!/opencode_update_policy/.test(read(ADDON_DIR, "config.yaml")));
     assert.ok(!/opencode_update_policy/.test(read(ADDON_DIR, "translations", "en.yaml")));
