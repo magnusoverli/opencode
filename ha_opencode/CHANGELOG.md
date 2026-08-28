@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Updated Home Assistant Supervisor volume map types to remove legacy-schema warnings.
 - Added ESPHome 2026.8 Device Builder migration planning, structured connectivity and crash troubleshooting, correct terminal stream completion, and 1.12 protocol coverage.
 - Removed OpenChamber's unsupported OpenCode runtime update notification; runtime upgrades continue through tested add-on releases.
+- Corrected the OpenChamber Ingress smoke test to validate the runtime shim served by the proxy.
 
 ## 2.5.1
 

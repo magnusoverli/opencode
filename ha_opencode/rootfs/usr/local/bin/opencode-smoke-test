@@ -187,10 +187,10 @@ else
         fail "OpenChamber index.html carries the Ingress runtime patch" \
              "the build-time patch did not apply"
     fi
-    if [ -f "${OPENCHAMBER_DIST}/__openchamber_ingress_runtime.js" ]; then
-        pass "OpenChamber Ingress runtime shim is present"
+    if grep -Fq 'if (upstreamPath.split("?", 1)[0] === "/__openchamber_ingress_runtime.js") {' /usr/local/bin/openchamber-ingress-proxy.js; then
+        pass "OpenChamber Ingress runtime shim is served by the proxy"
     else
-        fail "OpenChamber Ingress runtime shim is present"
+        fail "OpenChamber Ingress runtime shim is served by the proxy"
     fi
 fi
 

@@ -360,6 +360,19 @@ describe("openchamber ingress proxy: provider OAuth loopback bridge", () => {
     assert.deepEqual(JSON.parse(response.body), { path: "/api/provider", method: "GET" });
   });
 
+  it("serves the ingress runtime shim with the active prefix", async () => {
+    const response = await request(proxyPort, {
+      method: "GET",
+      path: `${INGRESS_PATH}/__openchamber_ingress_runtime.js`,
+      headers: { "x-ingress-path": INGRESS_PATH },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.headers["content-type"], /^application\/javascript/);
+    assert.match(response.body, new RegExp(`const configuredBasePath = "${INGRESS_PATH}";`));
+    assert.match(response.body, /window\.__OPENCHAMBER_API_BASE_URL__/);
+  });
+
   it("bridges without an ingress path prefix", async () => {
     await postJson(proxyPort, "/api/provider/openai/oauth/authorize", { method: 0 });
     const response = await postJson(proxyPort, "/api/provider/openai/oauth/callback", {

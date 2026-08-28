@@ -46,6 +46,8 @@ describe(`${CHANNEL} runtime pin`, () => {
 
   const dockerfilePin = /^ARG OPENCODE_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
   const buildYamlPin = /^\s*OPENCODE_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
+  const dockerfileOpenchamberPin = /^ARG OPENCHAMBER_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
+  const buildYamlOpenchamberPin = /^\s*OPENCHAMBER_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
 
   it("pins an exact OpenCode version in the Dockerfile", () => {
     assert.ok(dockerfilePin, "Dockerfile has no ARG OPENCODE_VERSION");
@@ -59,6 +61,13 @@ describe(`${CHANNEL} runtime pin`, () => {
   it("pins the same version in build.yaml, which is what CI reads", () => {
     assert.ok(buildYamlPin, "build.yaml has no OPENCODE_VERSION");
     assert.equal(buildYamlPin, dockerfilePin);
+  });
+
+  it("pins the same exact OpenChamber version in the Dockerfile and build.yaml", () => {
+    assert.ok(dockerfileOpenchamberPin, "Dockerfile has no ARG OPENCHAMBER_VERSION");
+    assert.ok(buildYamlOpenchamberPin, "build.yaml has no OPENCHAMBER_VERSION");
+    assert.match(dockerfileOpenchamberPin, /^\d+\.\d+\.\d+$/);
+    assert.equal(buildYamlOpenchamberPin, dockerfileOpenchamberPin);
   });
 
   it("stays on the certified V1 line", () => {
