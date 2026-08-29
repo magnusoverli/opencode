@@ -244,6 +244,30 @@ only where they provide a demonstrated capability that MCP cannot.
 
 ## Proposed 2.6.0b0 Scope
 
+### Phase 0 results on the feature branch
+
+The first non-shipping spike lives at
+`spikes/opencode-v2-homeassistant/` and currently proves:
+
+- exact CLI/plugin beta `0.0.0-beta-18600` installation from a committed lock;
+- `opencode2 serve` can run as an s6-ownable foreground process on an explicit
+  loopback address and port;
+- the server enforces HTTP Basic authentication and can use a managed password
+  instead of logging an automatically generated credential;
+- one exact local plugin loads through the real V2 loader and appears active;
+- the plugin's MCP transform registers a direct-tool (`codemode: false`) remote
+  Home Assistant server without accepting caller-controlled profile selection;
+- one explicit managed config document is loaded while project config is
+  disabled;
+- the spike launcher strips Home Assistant credentials from the V2 environment,
+  and its sentinel is absent from plugin config and server logs;
+- the foreground process tree is terminated in the Linux CI harness; graceful
+  image shutdown and non-Linux development hosts remain lifecycle gates.
+
+The spike does not yet solve sidecar authentication, unprivileged filesystem
+access, dynamic context injection, or a real Home Assistant MCP exchange. It is
+kept outside both add-on images until those boundaries are implemented.
+
 `2.6.0b0` should be an explicitly experimental, terminal-only V2 beta. It must
 not be promoted mechanically from 2.5 or treated as stable-ready.
 

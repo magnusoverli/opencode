@@ -1,0 +1,16 @@
+{
+  "name": "opencode-v2-homeassistant-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "verify:versions": "node scripts/verify-versions.js"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "0.0.0-beta-18600"
+  },
+  "devDependencies": {
+    "@opencode-ai/cli": "0.0.0-beta-18600"
+  }
+}

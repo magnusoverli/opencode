@@ -90,6 +90,30 @@ jobs:
       - name: Run tests
         run: npm test
 
+  opencode-v2-plugin:
+    name: OpenCode V2 Home Assistant plugin spike
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spikes/opencode-v2-homeassistant
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: spikes/opencode-v2-homeassistant/package-lock.json
+
+      - name: Install exact V2 beta dependency set
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify matching CLI and plugin pins
+        run: npm run verify:versions
+
+      - name: Run plugin and real V2 server tests
+        run: npm test
+
   shell:
     name: Shell scripts and service definitions
     runs-on: ubuntu-latest
