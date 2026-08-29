@@ -4,6 +4,9 @@ This document records confirmed OpenCode V2 beta changes, the proposed Home
 Assistant plugin architecture, and the release gates for the 2.6 line. It is an
 engineering plan, not a claim that V2 is ready for stable users.
 
+User-data migration and rollback are specified separately in
+[`OPENCODE_V2_MIGRATION.md`](OPENCODE_V2_MIGRATION.md).
+
 ## Status Snapshot
 
 Captured on 2026-08-28:
@@ -67,7 +70,7 @@ The current V1 LAN service cannot be renamed mechanically:
 
 Affected V1 integration points include:
 
-- `ha_opencode_beta/Dockerfile`
+- `ha_opencode_v2_preview/Dockerfile` (new Preview integration target)
 - `rootfs/usr/local/lib/opencode/runtime.sh`
 - `rootfs/usr/local/bin/opencode-session.sh`
 - `rootfs/usr/local/bin/ha-readonly`
@@ -132,11 +135,12 @@ Current official V2 documentation confirms these gaps:
 
 Static safety rules can move to V2's discovered global
 `~/.config/opencode/AGENTS.md`. Every other currently injected source needs an
-explicit destination: `AGENTS.local.md`, MCP/profile guidance, focus mode, and
-startup-hook guidance can be added by the plugin; bounded briefing and decision
-context can use its per-model-call `session.context` hook. The hook must be
-proven to reach initial and tool-continuation requests without duplicating
-context before a user-facing V2 beta starts.
+explicit destination: MCP/profile guidance and focus mode can be added by the
+plugin; bounded briefing and decision context can use its per-model-call
+`session.context` hook. Shared project `AGENTS.md`, `AGENTS.local.md`, and
+startup-hook guidance are disabled in the initial Preview rather than loaded
+implicitly. The hook must be proven to reach initial and tool-continuation
+requests without duplicating context before a user-facing V2 beta starts.
 
 ## Home Assistant Plugin Architecture
 
@@ -321,9 +325,9 @@ visual and irrelevant. The initial target is:
 | Screenshot/access-token-dependent paths | Rejected in initial b0; later owned by the privileged sidecar |
 | Zigbee2MQTT and serial passthrough | Supported only through the sidecar and existing bounded tools |
 | Raw `opencode_config` | Rejected until native V2 validation and plugin policy are enforceable |
-| Project `opencode.json(c)`, `.opencode` config and plugins | Disabled in initial b0 |
+| Project `opencode.json(c)`, `.opencode` config/plugins, `AGENTS.md`, and `AGENTS.local.md` | Disabled in initial b0 |
 | User environment variables | Rejected initially; later requires an explicit trust and secret-exposure model |
-| Startup hooks | Supported under the existing explicit root-code trust model; guidance must reach V2 context |
+| Startup hooks | Rejected in initial b0; later require the editable workspace lease before execution |
 
 ### 2.6.0b0 acceptance criteria
 
@@ -373,14 +377,16 @@ visual and irrelevant. The initial target is:
 - Add a CI lane that installs only the exact pinned V2 set and fails if npm
   resolves anything else.
 
-### Phase 1: beta image integration
+### Phase 1: Preview image integration
 
 - Add V2 runtime selection, native config generation, isolated state paths, and
-  s6 supervision to `ha_opencode_beta` only.
+  s6 supervision to the separate `ha_opencode_v2_preview` add-on only. Stable
+  and `ha_opencode_beta` remain on V1.
 - Bundle the plugin in the image; never install or update it at runtime.
 - Extend `opencode-smoke-test` with V2 runtime, plugin, MCP, permission, context,
   process-lifecycle, and rollback probes.
-- Release `2.6.0b0` only after both architecture builds pass.
+- Add independent Preview image, tag, changelog, and release workflows.
+- Release Preview `2.6.0b0` only after both architecture builds pass.
 
 ### Phase 2: close beta gaps
 
@@ -404,7 +410,7 @@ Stable 2.6.0 requires all of the following:
 5. V1 session/config/auth migration and rollback are demonstrated on copied
    persistent data.
 6. Plan/read-only modes enforce non-mutation under native V2 permissions.
-7. Both architectures complete a soak in the beta channel.
+7. Both architectures complete a soak in the V2 Preview channel.
 
 ## Regression Cases To Retain
 
