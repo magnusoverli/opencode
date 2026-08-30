@@ -1,23 +1,23 @@
-# OpenCode Runtime Upgrade Checklist
+# OpenCode V1 Stable Runtime Maintenance Checklist
 
-The add-on ships one certified OpenCode build. Changing it is a deliberate act,
-not a dependency bump — this checklist is what "certified" means in practice.
+The stable add-on ships one certified OpenCode V1 build. Changing it is a
+deliberate act, not a dependency bump. Beta targets V2 from `3.0.0b0` and no
+longer serves as a V1 soak channel.
 
-Work through it against a **beta** build, on a real Home Assistant instance,
-before promoting anything to stable. Nothing here is automated, because every
-item is a place where an upstream change has broken this add-on before and the
-failure was only visible to a person using it.
+Work through it against a candidate stable V1 image on a real Home Assistant
+instance before publishing. Nothing here is automated, because every item is a
+place where an upstream change has broken this add-on before and the failure was
+only visible to a person using it.
 
-Related: [`OPENCODE_V2_FUTURE.md`](OPENCODE_V2_FUTURE.md) governs the V1→V2
-decision, which this checklist does **not** cover. Do not use it to move to a
-2.x runtime.
+Related: [`OPENCODE_V2_FUTURE.md`](OPENCODE_V2_FUTURE.md) governs beta's V2
+runtime. This checklist does **not** cover V2.
 
 ## 1. Bump the pin
 
-- [ ] `ha_opencode_beta/Dockerfile` — `ARG OPENCODE_VERSION=<exact version>`
-- [ ] `ha_opencode_beta/build.yaml` — `OPENCODE_VERSION: "<same exact version>"`
+- [ ] `ha_opencode/Dockerfile` — `ARG OPENCODE_VERSION=<exact version>`
+- [ ] `ha_opencode/build.yaml` — `OPENCODE_VERSION: "<same exact version>"`
 - [ ] Exact version only. Never `latest`, never a range. The two must match —
-      `ha_opencode_beta/test/runtime-contract.test.js` fails otherwise, and so
+      `ha_opencode/test/runtime-contract.test.js` fails otherwise, and so
       does the image build if npm resolves something else.
 - [ ] Read upstream's release notes for everything between the old pin and the
       new one. Config-schema, permission, MCP, LSP and formatter changes are the
@@ -25,7 +25,7 @@ decision, which this checklist does **not** cover. Do not use it to move to a
 
 ## 2. Build and boot
 
-- [ ] Beta image builds for **both** `amd64` and `aarch64`.
+- [ ] Stable image builds for **both** `amd64` and `aarch64`.
 - [ ] Add-on starts; the log shows `Certified OpenCode version: <version>` and
       an `Effective OpenCode version` that matches it.
 - [ ] No warning about the runtime resolving outside `/usr/local/bin/opencode`.
@@ -106,7 +106,7 @@ pass.**
 
 ## 10. Upgrade path
 
-- [ ] Install the previous stable, then upgrade to the beta over it. Sessions,
+- [ ] Install the previous stable, then upgrade to the candidate stable over it. Sessions,
       auth, decision notes and `AGENTS.md` customisations all survive.
 - [ ] With a persisted legacy `opencode_update_policy: latest` in the saved
       options, the log shows the migration notice, `/data/.npm-global` is left
@@ -114,16 +114,9 @@ pass.**
 
 ## 11. Soak
 
-- [ ] Leave the beta running for several days of ordinary use.
+- [ ] Leave the candidate stable running for several days of ordinary use.
 - [ ] Re-read the add-on log for anything new: repeated warnings, crashed
       services, a watchdog restart.
 
-Only then promote:
-
-```
-scripts/promote-beta-to-stable.sh --check
-scripts/promote-beta-to-stable.sh
-```
-
-and mirror stable's `config.yaml`, `translations/en.yaml`, `DOCS.md` and
-`CHANGELOG.md` by hand — promotion deliberately copies code only.
+Only then publish a stable V1 maintenance release. Do not copy the V2 beta tree
+over stable; `scripts/promote-beta-to-stable.sh` deliberately refuses to run.

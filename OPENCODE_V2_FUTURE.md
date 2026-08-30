@@ -1,7 +1,7 @@
 # OpenCode V2 Readiness
 
 This document records confirmed OpenCode V2 beta changes, the proposed Home
-Assistant plugin architecture, and the release gates for the 2.6 line. It is an
+Assistant plugin architecture, and the release gates for the 3.0 beta line. It is an
 engineering plan, not a claim that V2 is ready for stable users.
 
 User-data migration and rollback are specified separately in
@@ -9,19 +9,23 @@ User-data migration and rollback are specified separately in
 
 ## Status Snapshot
 
-Captured on 2026-08-28:
+Updated on 2026-08-30:
 
 - Stable OpenCode is `opencode-ai@1.18.25` and remains the certified runtime in
   stable add-on 2.5.3.
-- V2 is an active beta published separately as `@opencode-ai/cli`. The beta tag
-  pointed to `0.0.0-beta-18600` when this snapshot was taken and installs the
+- V2 is an active beta published separately as `@opencode-ai/cli`. The selected
+  exact build is `0.0.0-beta-18684` and installs the
   `opencode2` command.
-- Companion V2 packages used the same exact beta version. A V2 spike must pin
+- Companion V2 packages use the same exact beta version. The beta integration must pin
   the CLI and its direct first-party plugin dependency graph; direct client or
   server dependencies are added only if add-on code imports them. It must never
   consume the moving `beta`, `next`, or `dev` tag in an image or lockfile.
 - V1 and V2 are designed to install side by side. The first experiments must
   leave `/usr/local/bin/opencode` and all stable services on V1.
+- `ha_opencode_beta` is the V2 integration and release target beginning with
+  `3.0.0b0`. `ha_opencode` remains the certified V1 stable add-on. There is no
+  third Preview add-on and no mechanical beta-to-stable promotion while the
+  channels use different OpenCode generations.
 - V2's plugin and server APIs are explicitly beta and may continue to change.
 - The current V2 branch is `v2`, not the old `2.0` branch.
 - OpenChamber's V2 compatibility work is still open in
@@ -59,9 +63,10 @@ still need to start successfully in the Home Assistant Debian Trixie images;
 the x64 baseline package must also be tested on a host without AVX2.
 
 V2 is daemon-first. Its shared daemon, client-owned `--standalone` server, and
-explicit `serve` process have different ownership models. Phase 0 must choose
-one exact foreground process tree that s6 can own; `2.6.0b0` cannot ship while
-that process tree, authentication, shutdown, and orphan cleanup are ambiguous.
+explicit `serve` process have different ownership models. The beta now stages
+one explicit authenticated `serve` process under s6 on private loopback as UID
+60000. User-facing activation remains blocked until Linux image shutdown and
+orphan cleanup are proven.
 The current V1 LAN service cannot be renamed mechanically:
 
 - V2 `serve` does not accept V1's `--cors` option.
@@ -70,7 +75,7 @@ The current V1 LAN service cannot be renamed mechanically:
 
 Affected V1 integration points include:
 
-- `ha_opencode_v2_preview/Dockerfile` (new Preview integration target)
+- `ha_opencode_beta/Dockerfile`
 - `rootfs/usr/local/lib/opencode/runtime.sh`
 - `rootfs/usr/local/bin/opencode-session.sh`
 - `rootfs/usr/local/bin/ha-readonly`
@@ -138,7 +143,7 @@ Static safety rules can move to V2's discovered global
 explicit destination: MCP/profile guidance and focus mode can be added by the
 plugin; bounded briefing and decision context can use its per-model-call
 `session.context` hook. Shared project `AGENTS.md`, `AGENTS.local.md`, and
-startup-hook guidance are disabled in the initial Preview rather than loaded
+startup-hook guidance are disabled in the initial beta rather than loaded
 implicitly. The hook must be proven to reach initial and tool-continuation
 requests without duplicating context before a user-facing V2 beta starts.
 
@@ -222,7 +227,8 @@ sidecars. The spike must inventory each secret source and document whether it is
 available to shell tools. User-supplied environment variables are trusted
 arbitrary process input, not covered by a blanket non-disclosure promise.
 
-V2 auto-discovers local plugins. `2.6.0b0` must disable project/user plugin
+V2 auto-discovers local plugins independently of the confirmed project-config
+disable flag. `3.0.0b0` must disable project/user plugin
 discovery or enforce a tested allowlist containing only the exact bundled
 plugin. If V2 provides no enforceable mechanism, user/project plugins must be
 explicitly classified as trusted arbitrary code and the beta cannot claim that
@@ -246,14 +252,14 @@ the first milestone:
 After the thin plugin is stable, selected first-class tools may be evaluated
 only where they provide a demonstrated capability that MCP cannot.
 
-## Proposed 2.6.0b0 Scope
+## Proposed 3.0.0b0 Scope
 
-### Phase 0 results on the feature branch
+### Integrated beta foundation
 
-The first non-shipping spike lives at
-`spikes/opencode-v2-homeassistant/` and currently proves:
+The V2 package and tests live directly under
+`ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant/` and currently prove:
 
-- exact CLI/plugin beta `0.0.0-beta-18600` installation from a committed lock;
+- exact CLI/plugin beta `0.0.0-beta-18684` installation from a committed lock;
 - `opencode2 serve` can run as an s6-ownable foreground process on an explicit
   loopback address and port;
 - the server enforces HTTP Basic authentication and can use a managed password
@@ -263,16 +269,16 @@ The first non-shipping spike lives at
   Home Assistant server without accepting caller-controlled profile selection;
 - one explicit managed config document is loaded while project config is
   disabled;
-- the spike launcher strips Home Assistant credentials from the V2 environment,
+- the test launcher strips Home Assistant credentials from the V2 environment,
   and its sentinel is absent from plugin config and server logs;
 - the foreground process tree is terminated in the Linux CI harness; graceful
   image shutdown and non-Linux development hosts remain lifecycle gates.
 
-The spike does not yet solve sidecar authentication, unprivileged filesystem
-access, dynamic context injection, or a real Home Assistant MCP exchange. It is
-kept outside both add-on images until those boundaries are implemented.
+The integrated foundation does not yet solve sidecar authentication,
+unprivileged filesystem access, dynamic context injection, or a real Home
+Assistant MCP exchange. V2 activation remains gated on those boundaries.
 
-`2.6.0b0` should be an explicitly experimental, terminal-only V2 beta. It must
+`3.0.0b0` should be an explicitly experimental, terminal-first V2 beta. It must
 not be promoted mechanically from 2.5 or treated as stable-ready.
 
 ### Required vertical slice
@@ -300,16 +306,16 @@ not be promoted mechanically from 2.5 or treated as stable-ready.
     hook without placing secrets in model context.
 14. Keep OpenChamber disabled for V2 until upstream compatibility is released.
 15. Clearly report that LSP and formatter integration are unavailable in the
-    first preview unless upstream implements them before the pin is selected.
+    first beta unless upstream implements them before the pin is selected.
 16. Build and smoke-test both amd64 and aarch64 images.
 
-### Existing option disposition for b0
+### Existing option disposition for 3.0.0b0
 
 Every existing option must be supported, rejected with a clear startup error,
 disabled with a visible migration warning, or ignored only when it is purely
 visual and irrelevant. The initial target is:
 
-| Option area | 2.6.0b0 disposition |
+| Option area | 3.0.0b0 disposition |
 |---|---|
 | Terminal theme, font, cursor | Supported |
 | Focus mode | Supported through plugin context |
@@ -329,11 +335,12 @@ visual and irrelevant. The initial target is:
 | User environment variables | Rejected initially; later requires an explicit trust and secret-exposure model |
 | Startup hooks | Rejected in initial b0; later require the editable workspace lease before execution |
 
-### 2.6.0b0 acceptance criteria
+### 3.0.0b0 acceptance criteria
 
 - The image asserts the exact resolved V2 CLI and plugin versions.
 - `opencode2 --version` and help run on amd64 and aarch64.
-- V1 remains available and unchanged during the engineering spike.
+- V1 stable remains available and unchanged; beta's V1 private roots remain an
+  untouched rollback source during copy-on-write migration.
 - V2 starts and stops without an orphan service or MCP child.
 - The plugin appears once, unloads cleanly, and does not duplicate MCP servers
   after reload.
@@ -362,31 +369,34 @@ visual and irrelevant. The initial target is:
 - Through ttyd and Home Assistant Ingress, a real provider can authenticate, a
   model can answer, invoke one allowed Home Assistant MCP tool, consume its
   result, and complete the response.
-- Fresh isolated V2 state does not modify the existing V1 data, and V1 can
-  resume after the V2 test. Copied-data migration remains a later beta gate.
+- Copy-on-write V2 migration preserves the existing beta V1 data byte-for-byte,
+  validates sessions and provider credentials before activation, and leaves the
+  V1 roots usable by the previous beta image.
 - OpenChamber is not started against V2.
 
 ## Investigation and Delivery Phases
 
-### Phase 0: isolated plugin spike
+### Phase 0: integrated beta foundation
 
-- Create a non-shipping spike with exact beta dependencies.
+- Integrate exact V2 dependencies, plugin code, and tests directly in
+  `ha_opencode_beta` without publishing an incomplete tag.
 - Prove plugin load/unload, MCP transform, direct tool discovery, permission
   denial, all three profile modes, plugin trust policy, and credential
   isolation.
 - Add a CI lane that installs only the exact pinned V2 set and fails if npm
   resolves anything else.
 
-### Phase 1: Preview image integration
+### Phase 1: beta runtime activation
 
-- Add V2 runtime selection, native config generation, isolated state paths, and
-  s6 supervision to the separate `ha_opencode_v2_preview` add-on only. Stable
-  and `ha_opencode_beta` remain on V1.
+- Add V2 runtime selection, native config generation, copy-on-write migration,
+  isolated state paths, and s6 supervision to `ha_opencode_beta` only. Stable
+  remains on V1.
 - Bundle the plugin in the image; never install or update it at runtime.
 - Extend `opencode-smoke-test` with V2 runtime, plugin, MCP, permission, context,
   process-lifecycle, and rollback probes.
-- Add independent Preview image, tag, changelog, and release workflows.
-- Release Preview `2.6.0b0` only after both architecture builds pass.
+- Reuse the beta image, `beta-v*` tags, changelog, and release workflows after
+  making them V2-aware.
+- Release beta `3.0.0b0` only after both architecture builds pass.
 
 ### Phase 2: close beta gaps
 
@@ -398,9 +408,9 @@ visual and irrelevant. The initial target is:
 - Integrate an OpenChamber release that explicitly supports V2, then rerun all
   Ingress, OAuth, streaming, service-worker, update-policy, and asset tests.
 
-### Phase 3: stable 2.6.0 gate
+### Phase 3: stable 3.0.0 gate
 
-Stable 2.6.0 requires all of the following:
+Stable 3.0.0 requires all of the following:
 
 1. Upstream publishes a supported V2 release rather than a moving beta.
 2. The plugin and server/client contracts used by the add-on are stable.
@@ -410,7 +420,7 @@ Stable 2.6.0 requires all of the following:
 5. V1 session/config/auth migration and rollback are demonstrated on copied
    persistent data.
 6. Plan/read-only modes enforce non-mutation under native V2 permissions.
-7. Both architectures complete a soak in the V2 Preview channel.
+7. Both architectures complete a soak in the V2 beta channel.
 
 ## Regression Cases To Retain
 

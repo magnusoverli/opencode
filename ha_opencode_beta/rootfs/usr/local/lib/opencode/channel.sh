@@ -2,11 +2,9 @@
 # =============================================================================
 # Release-channel identity
 #
-# The stable and beta add-ons are built from identical rootfs trees. Promoting
-# beta to stable is a straight copy of rootfs/, so a channel name written into
-# any file here would travel with it and mislabel the other channel. The only
-# thing that distinguishes the two at runtime is ADDON_CHANNEL, set from a
-# Docker build arg (see the Dockerfile) and inherited by every process.
+# Stable remains on OpenCode V1 while this beta tree integrates V2. Channel
+# identity still enters through ADDON_CHANNEL and is centralised here because
+# both add-ons share the live /homeassistant workspace.
 #
 # Sourced, not executed.
 #

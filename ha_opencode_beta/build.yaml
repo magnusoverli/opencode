@@ -1,5 +1,5 @@
 ---
-# NOTE: only OPENCODE_VERSION and OPENCHAMBER_VERSION below are read by CI
+# NOTE: OPENCODE_VERSION, OPENCODE_V2_VERSION, and OPENCHAMBER_VERSION below are read by CI
 # (.github/workflows/build-beta.yaml scrapes them with sed and passes them as
 # build args). Both are per-channel pins, which is what lets a new runtime soak
 # in beta while stable stays put.
@@ -17,6 +17,9 @@ args:
   # never "latest" or a range — and must match the OPENCODE_VERSION ARG default
   # in Dockerfile. test/runtime-contract.test.js asserts both.
   OPENCODE_VERSION: "1.18.25"
+  # OpenCode V2 becomes the beta runtime in 3.0.0b0. V1 remains installed only
+  # as an untouched migration/rollback source until V2 activation is complete.
+  OPENCODE_V2_VERSION: "0.0.0-beta-18684"
   # The other genuine per-channel pin: beta builds from dev, so this can lead
   # stable while a new OpenChamber soaks.
   OPENCHAMBER_VERSION: "1.21.0"

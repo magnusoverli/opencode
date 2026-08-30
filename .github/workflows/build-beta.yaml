@@ -38,9 +38,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Test OpenChamber service ownership
+      - name: Test beta OpenChamber service ownership
         shell: bash
-        run: node --test ha_opencode/test/openchamber-s6-services.test.js
+        run: node --test ha_opencode_beta/test/openchamber-s6-services.test.js
 
       - name: Get version
         id: version
@@ -84,13 +84,25 @@ jobs:
           echo "opencode_version=${OPENCODE_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Using OpenCode ${OPENCODE_VERSION} for beta build"
 
+          OPENCODE_V2_VERSION=$(sed -n 's/^[[:space:]]*OPENCODE_V2_VERSION:[[:space:]]*"\([^"]*\)".*/\1/p' ha_opencode_beta/build.yaml)
+          if ! printf '%s' "${OPENCODE_V2_VERSION}" | grep -Eq '^0\.0\.0-beta-[0-9]+$'; then
+            echo "::error::OPENCODE_V2_VERSION must be an exact beta version, got '${OPENCODE_V2_VERSION}'"
+            exit 1
+          fi
+          PACKAGE_V2_VERSION=$(node -p "require('./ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant/package.json').dependencies['@opencode-ai/cli']")
+          if [ "${PACKAGE_V2_VERSION}" != "${OPENCODE_V2_VERSION}" ]; then
+            echo "::error::build.yaml V2 pin ${OPENCODE_V2_VERSION} does not match package ${PACKAGE_V2_VERSION}"
+            exit 1
+          fi
+          echo "opencode_v2_version=${OPENCODE_V2_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Using OpenCode V2 ${OPENCODE_V2_VERSION} for beta build"
+
       - name: Assert this folder really is the beta add-on
         shell: bash
         run: |
-          # The two folders ship identical rootfs trees; ADDON_CHANNEL below is
-          # the only thing that makes this image behave as beta. If that arg
-          # ever stopped matching the folder, beta would write into stable's
-          # decision notes and nothing would look wrong until a user noticed.
+          # Stable and beta now carry different OpenCode generations, but the
+          # channel identity still controls shared-workspace paths such as
+          # decision notes. Assert it before publishing either architecture.
           grep -qx 'slug: "ha_opencode_beta"' ha_opencode_beta/config.yaml || {
             echo "::error::ha_opencode_beta/config.yaml does not declare slug ha_opencode_beta."
             grep -n "^slug:" ha_opencode_beta/config.yaml
@@ -128,6 +140,7 @@ jobs:
             BUILD_ARCH=${{ matrix.ha_arch }}
             ADDON_CHANNEL=beta
             OPENCODE_VERSION=${{ steps.beta_build_args.outputs.opencode_version }}
+            OPENCODE_V2_VERSION=${{ steps.beta_build_args.outputs.opencode_v2_version }}
             OPENCHAMBER_VERSION=${{ steps.beta_build_args.outputs.openchamber_version }}
           cache-from: type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
           cache-to: type=gha,mode=max,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}

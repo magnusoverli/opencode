@@ -224,6 +224,10 @@ backup_exclude:
   # Generated home context is rebuilt at every start; restoring a stale copy
   # would describe a different installation.
   - "context/*"
+  # V2 migration candidates are disposable and may contain transient plaintext
+  # copies. Only an activated V2 generation belongs in a backup.
+  - "v2/work/*"
+  - "v2/cache/*"
   # Startup-hook output. Hooks run with the Supervisor token and any keys the
   # user configured, so whatever they print must not travel in a backup.
   - "hooks/*"

@@ -5,7 +5,7 @@ import plugin, {
   PLUGIN_ID,
   createServerConfig,
   parseOptions,
-} from "../plugin.js";
+} from "../rootfs/opt/opencode-v2-homeassistant/plugin.js";
 
 const DEFAULT_OPTIONS = Object.freeze({
   endpoint: "http://127.0.0.1:43110/mcp",

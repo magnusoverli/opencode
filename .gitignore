@@ -1,7 +1,7 @@
 # Dependencies (installed during Docker build)
 node_modules/
 package-lock.json
-!spikes/opencode-v2-homeassistant/package-lock.json
+!ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant/package-lock.json
 
 # OS files
 .DS_Store

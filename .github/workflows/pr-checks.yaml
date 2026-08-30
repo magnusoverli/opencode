@@ -30,21 +30,18 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install exact V2 beta dependency set for integrated contracts
+        working-directory: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
+        run: npm ci --no-audit --no-fund
+
       - name: Beta add-on contract tests
         run: node --test "ha_opencode_beta/test/*.test.js"
 
       - name: Stable add-on contract tests
         run: node --test "ha_opencode/test/*.test.js"
 
-      - name: Assert both channels declare every option their code reads
-        run: |
-          # promote-beta-to-stable.sh refuses to promote when beta's code reads
-          # an option stable's manifest does not declare. Running its read-only
-          # mode here surfaces that in review rather than at promotion time.
-          #
-          # Invoked through bash: the file is not marked executable in the index,
-          # and a checkout on a runner honours that.
-          bash scripts/promote-beta-to-stable.sh --check
+      - name: Assert each channel declares every option its own code reads
+        run: bash scripts/check-addon-options.sh ha_opencode ha_opencode_beta
 
   mcp-server:
     name: Home Assistant MCP server (${{ matrix.channel }})
@@ -91,11 +88,11 @@ jobs:
         run: npm test
 
   opencode-v2-plugin:
-    name: OpenCode V2 Home Assistant plugin spike
+    name: OpenCode V2 beta runtime integration
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: spikes/opencode-v2-homeassistant
+        working-directory: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
     steps:
       - uses: actions/checkout@v6
 
@@ -103,7 +100,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: spikes/opencode-v2-homeassistant/package-lock.json
+          cache-dependency-path: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant/package-lock.json
 
       - name: Install exact V2 beta dependency set
         run: npm ci --no-audit --no-fund

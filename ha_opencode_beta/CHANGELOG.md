@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.0b0
+
+- Began the OpenCode V2 beta transition with an exact matched CLI/plugin build, isolated `/data/v2` state roots, and preserved V1 rollback data; stable remains on OpenCode V1 while parity work continues.
+- Added fail-closed copy-on-write migration of beta V1 sessions and provider authentication into atomically activated V2 state generations.
+- Fixed V1-to-V2 validation to follow the pinned message, attachment, tool, compaction, and credential projections exactly.
+- Hardened V2 readiness and migration activation against probe state writes, incomplete session projection checks, ambiguous provider IDs, and unbounded image-fixture shutdown.
+- Added a native ordered V2 safety policy and an authenticated, unprivileged private-loopback V2 service while keeping terminal, LAN, OpenChamber, and MCP traffic on the V1 rollback runtime until the remaining isolation gates pass.
+
 ## 2.5.3b4
 
 - Updated OpenChamber to 1.21.0 and verified its Home Assistant Ingress patch against the published bundle, including its dynamically served runtime shim.

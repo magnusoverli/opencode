@@ -2,10 +2,10 @@
 
 Two channels, two folders.
 
-| | Folder | Tag | Image | Add-on shown in HA |
-|---|---|---|---|---|
-| **Stable** | `ha_opencode/` | `v2.3.8` | `ghcr.io/magnusoverli/ha_opencode` | OpenCode |
-| **Beta** | `ha_opencode_beta/` | `beta-v2.3.9b2` | `ghcr.io/magnusoverli/ha_opencode_beta` | OpenCode Beta |
+| | Folder | Runtime | Tag | Image | Add-on shown in HA |
+|---|---|---|---|---|---|
+| **Stable** | `ha_opencode/` | OpenCode V1 | `v2.5.3` | `ghcr.io/magnusoverli/ha_opencode` | OpenCode |
+| **Beta** | `ha_opencode_beta/` | OpenCode V2 beta | `beta-v3.0.0b0` | `ghcr.io/magnusoverli/ha_opencode_beta` | OpenCode Beta |
 
 Each folder is a complete add-on: its own `Dockerfile`, its own `rootfs/`, its
 own `config.yaml`. Both live on `main`, and both release from `main`.
@@ -20,14 +20,14 @@ Frigate (`frigate/`, `frigate_beta/`, …) use, and it exists because Home
 Assistant reads add-on definitions from the **default branch only**. It never
 sees any other branch.
 
-## The one rule
+## Runtime generations
 
-`rootfs/` must never name a channel.
+Stable and beta are independent runtime generations beginning with beta
+`3.0.0b0`. Stable remains on V1 while beta integrates V2. Do not copy beta's
+Dockerfile, rootfs, tests, or generated configuration over stable.
 
-Promotion is a straight copy of `ha_opencode_beta/rootfs/` over
-`ha_opencode/rootfs/`. A hardcoded `"beta"` anywhere in that tree would travel
-with the copy and mislabel stable. Channel identity comes from a single Docker
-build arg:
+Channel identity still comes from a Docker build arg because both add-ons share
+the live `/homeassistant` workspace:
 
 ```
 ADDON_CHANNEL=beta      # passed by .github/workflows/build-beta.yaml
@@ -35,11 +35,9 @@ ADDON_CHANNEL=stable    # passed by .github/workflows/build.yaml
 ```
 
 Shell code reads it through `rootfs/usr/local/lib/opencode/channel.sh`; Node
-code reads `process.env.ADDON_CHANNEL`. Add new channel-dependent values to
-`channel.sh` rather than branching on the variable at each call site.
-
-`scripts/promote-beta-to-stable.sh` enforces this: it refuses to finish if
-stable's `rootfs/` names the beta channel after a copy.
+code reads `process.env.ADDON_CHANNEL`. `scripts/promote-beta-to-stable.sh` now
+fails deliberately so the old mechanical release path cannot bypass V2's
+migration and rollback gates.
 
 ## Everyday work
 
@@ -51,7 +49,7 @@ git pull
 # ...edit ha_opencode_beta/rootfs/... , add a section to ha_opencode_beta/CHANGELOG.md...
 git commit -am "feat: the thing"
 git push
-git tag beta-v2.3.9b3 && git push origin beta-v2.3.9b3
+git tag beta-v3.0.0b0 && git push origin beta-v3.0.0b0
 ```
 
 The code only exists in `ha_opencode_beta/`, so a stable release physically
@@ -75,28 +73,15 @@ are allowed to differ, and a bot cannot tell "beta hasn't got this yet" from
 
 ### Promoting beta to stable
 
-```bash
-scripts/promote-beta-to-stable.sh --check    # what would change
-scripts/promote-beta-to-stable.sh            # copy beta's code onto stable
-# ...write the "## 2.3.8" section in ha_opencode/CHANGELOG.md...
-git commit -am "release: promote 2.3.9b2 to stable 2.3.8"
-git push
-git tag v2.3.8 && git push origin v2.3.8
-```
-
-The script copies `Dockerfile`, `.dockerignore`, `rootfs/` and `test/`. It does
-**not** copy `config.yaml`, `build.yaml`, `translations/`, `DOCS.md`,
-`CHANGELOG.md` or the icons — those carry each channel's identity, and copying
-them would publish beta's slug and panel title as stable.
-
-`OPENCHAMBER_VERSION` in `build.yaml` is a genuine per-channel pin and is not
-copied either. The script reports when the two differ so a soak that finished
-in beta is not silently left behind.
+There is no mechanical promotion while stable uses V1 and beta uses V2.
+Stable V2 adoption requires an explicit reviewed change that ports the validated
+runtime, migration bridge, option compatibility, and rollback behavior into
+`ha_opencode`. The disabled promotion script explains this and exits non-zero.
 
 ## Version numbering
 
-Beta versions are `<next-stable>b<N>` — `2.3.9b0`, `2.3.9b1`, … then stable
-ships as `2.3.9`.
+Beta versions are `<target-generation>b<N>`. The V2 line starts at `3.0.0b0`;
+stable remains on 2.x until a separate V2 stable gate is approved.
 
 **Never publish a lower version than what is already on `main`.** Supervisor's
 update check is `version != latest_version`, not `>`, so a lower number is
@@ -114,7 +99,7 @@ Tagging is the trigger for everything.
 | `build-beta.yaml` | `beta-v*` | Same, from `ha_opencode_beta/`, with `ADDON_CHANNEL=beta` |
 | `release-beta.yaml` | `beta-v*` | Writes `version:` into `ha_opencode_beta/config.yaml` on main, creates a prerelease |
 | `check-hab-update.yaml` | weekly | Reports the `HAB_VERSION` pin in both Dockerfiles against the latest hab release |
-| `check-opencode-update.yaml` | weekly | Reports the certified `OPENCODE_VERSION` in both channels against the latest release on npm. Read-only — it never bumps a pin |
+| `check-opencode-update.yaml` | weekly | Reports stable's V1 pin and beta's V2 beta pin against their separate npm streams. Read-only — it never bumps a pin |
 | `pr-checks.yaml` | pull request, push to main | Runs the add-on contract tests, the MCP server and YAML LSP suites, and syntax checks every shipped script |
 
 The image itself is not built on a pull request. It is built by the release
@@ -124,12 +109,10 @@ workflows and then verified on a real Home Assistant instance with
 
 ### Changing the OpenCode runtime
 
-`OPENCODE_VERSION` is a certified pin, not a dependency. Bumping it means
-working through [`OPENCODE_UPGRADE_CHECKLIST.md`](OPENCODE_UPGRADE_CHECKLIST.md)
-against a beta build before anything reaches stable. Both the Dockerfile ARG and
-`build.yaml` must carry the same exact version — CI reads `build.yaml`, the
-image build asserts the resolved install matches, and
-`test/runtime-contract.test.js` asserts the two agree.
+Stable's `OPENCODE_VERSION` and beta's `OPENCODE_V2_VERSION` are independent
+certified pins. Each Dockerfile ARG, `build.yaml`, package lock, image assertion,
+and runtime contract must agree. A beta V2 bump reruns the complete V2 lane in
+`OPENCODE_V2_FUTURE.md`; it is not a soak test for a stable V1 bump.
 
 Guards that will stop you:
 
@@ -229,6 +212,12 @@ and the GitHub Release already reference it, and a moved tag means a pinned
 ## Known gaps
 
 Things deliberately not fixed yet, so they don't surprise you:
+
+- **V2 project plugin discovery is independent of project-config disablement.**
+  The staged V2 server therefore uses a root-owned empty working directory and
+  remains private on authenticated loopback. Do not connect user-facing clients
+  or let them select `/homeassistant` until only the bundled plugin can be
+  enforced; `OPENCODE_DISABLE_PROJECT_CONFIG=1` is not sufficient by itself.
 
 - **A beta session still reads stable's `AGENTS.md`** when both add-ons are
   installed, because OpenCode discovers it from the working directory and

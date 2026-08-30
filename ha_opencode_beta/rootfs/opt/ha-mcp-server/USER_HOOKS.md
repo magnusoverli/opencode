@@ -51,7 +51,7 @@ add-on supervises it.
 
 ## Ports and reaching things
 
-`8099`, `3010`, `4096`, `4097` and `8787` are already bound inside the
+`8099`, `3010`, `4096`, `4097`, `4100` and `8787` are already bound inside the
 container. Never make a hook *listen* on one. **Connecting** to them is normal.
 
 A hook's own service is not reachable from the LAN — no port is mapped — but

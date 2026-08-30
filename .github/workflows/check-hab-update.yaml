@@ -33,7 +33,7 @@ jobs:
         id: pinned
         run: |
           # Each channel has its own Dockerfile now, so each has its own pin.
-          # They are normally equal — promotion copies the Dockerfile across —
+          # They may differ because stable V1 and beta V2 are released independently.
           # but reporting only one would hide a channel left behind.
           STABLE=$(grep -oP '^ARG HAB_VERSION=\K\S+' ha_opencode/Dockerfile)
           BETA=$(grep -oP '^ARG HAB_VERSION=\K\S+' ha_opencode_beta/Dockerfile)

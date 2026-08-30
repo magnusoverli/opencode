@@ -3,8 +3,8 @@
 // build.yaml, and every script that builds a PATH — so it is asserted here
 // rather than trusted to review.
 //
-// Scoped to the add-on folder this test file ships in, so the copy promoted to
-// stable checks stable and the beta copy checks beta.
+// Scoped to the beta add-on, whose V2 runtime contract intentionally differs
+// from the V1 stable add-on.
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -46,6 +46,11 @@ describe(`${CHANNEL} runtime pin`, () => {
 
   const dockerfilePin = /^ARG OPENCODE_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
   const buildYamlPin = /^\s*OPENCODE_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
+  const dockerfileV2Pin = /^ARG OPENCODE_V2_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
+  const buildYamlV2Pin = /^\s*OPENCODE_V2_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
+  const v2Package = JSON.parse(
+    read(ROOTFS, "opt", "opencode-v2-homeassistant", "package.json"),
+  );
   const dockerfileOpenchamberPin = /^ARG OPENCHAMBER_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
   const buildYamlOpenchamberPin = /^\s*OPENCHAMBER_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
 
@@ -70,10 +75,29 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.equal(buildYamlOpenchamberPin, dockerfileOpenchamberPin);
   });
 
-  it("stays on the certified V1 line", () => {
-    // V2 adoption is governed by OPENCODE_V2_FUTURE.md and its release gates,
-    // not by editing a pin.
+  it("retains the certified V1 rollback runtime during migration", () => {
     assert.match(dockerfilePin, /^1\./);
+  });
+
+  it("pins one matching exact V2 CLI and plugin beta", () => {
+    assert.match(dockerfileV2Pin, /^0\.0\.0-beta-\d+$/);
+    assert.equal(buildYamlV2Pin, dockerfileV2Pin);
+    assert.equal(v2Package.dependencies["@opencode-ai/cli"], dockerfileV2Pin);
+    assert.equal(v2Package.dependencies["@opencode-ai/plugin"], dockerfileV2Pin);
+  });
+
+  it("installs and verifies the V2 runtime from its committed lock", () => {
+    assert.match(dockerfile, /opencode-v2-homeassistant && npm ci --omit=dev/);
+    assert.match(dockerfile, /@opencode-ai\/cli\/package\.json'\)\.version/);
+    assert.match(dockerfile, /@opencode-ai\/plugin\/package\.json'\)\.version/);
+    assert.match(dockerfile, /opencode2 --version/);
+    assert.match(dockerfile, /\/usr\/local\/share\/opencode-v2-certified-version/);
+    assert.match(dockerfile, /cli-linux-x64-baseline\/bin\/opencode2/);
+    assert.match(dockerfile, /cli-linux-x64\/bin\/opencode2/);
+    assert.match(dockerfile, /cli-linux-arm64\/bin\/opencode2/);
+    for (const name of ["V2_INSTALL_PID", "MCP_INSTALL_PID", "LSP_INSTALL_PID"]) {
+      assert.match(dockerfile, new RegExp(`wait "\\$\\{${name}\\}"`));
+    }
   });
 
   it("fails the image build when the resolved runtime is not the pin", () => {
@@ -86,6 +110,33 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(
       read(ROOTFS, "usr", "local", "lib", "opencode", "runtime.sh"),
       /opencode_certified_version\(\)/,
+    );
+    assert.match(
+      read(ROOTFS, "usr", "local", "lib", "opencode", "runtime.sh"),
+      /opencode_v2_certified_version\(\)/,
+    );
+  });
+
+  it("exercises the staged V2 Linux privilege boundary during the image build", () => {
+    assert.match(dockerfile, /--reuid=60000/);
+    assert.match(dockerfile, /--regid=60000/);
+    assert.match(dockerfile, /--clear-groups/);
+    assert.match(dockerfile, /--no-new-privs/);
+    assert.match(dockerfile, /--bounding-set=-all/);
+    assert.match(dockerfile, /NoNewPrivs:/);
+    assert.match(dockerfile, /CapBnd:/);
+  });
+
+  it("bounds every process in the in-image migration fixture", () => {
+    assert.match(dockerfile, /curl -fsS --connect-timeout 1 --max-time 2/);
+    assert.match(dockerfile, /kill -KILL "\$\{V1_SERVER_PID\}"/);
+    assert.match(
+      dockerfile,
+      /timeout --signal=TERM --kill-after=10s 180s python3 \/usr\/local\/bin\/opencode-v2-migrate\.py/,
+    );
+    assert.match(
+      dockerfile,
+      /timeout --signal=TERM --kill-after=5s 30s opencode db/,
     );
   });
 
@@ -144,6 +195,7 @@ describe(`${CHANNEL} bundled runtime precedence`, () => {
     const mustDisable = [
       path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "init-opencode", "run"),
       path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "ha-opencode", "run"),
+      path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "ha-opencode-v2-server", "run"),
       path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "ha-opencode-server", "run"),
       path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "ha-openchamber", "run"),
       path.join("rootfs", "usr", "local", "bin", "opencode-session.sh"),

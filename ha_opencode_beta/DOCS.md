@@ -518,7 +518,7 @@ Put your own files under `/data/<name>/`. Never `/data/.cache` — it is deleted
 
 ### Ports and reachability
 
-Pick a port for your own service that the add-on is not already using. These are taken inside the container: `8099` (the interface behind Ingress), `3010` (OpenChamber), `4096` (OpenCode LAN server), `4097` (OpenChamber LAN), `8787` (PPQ proxy). *Listening* on one of those from a hook breaks the add-on in a way that is hard to trace. **Connecting** to them is fine and expected — see below.
+Pick a port for your own service that the add-on is not already using. These are taken inside the container: `8099` (the interface behind Ingress), `3010` (OpenChamber), `4096` (OpenCode LAN server), `4097` (OpenChamber LAN), `4100` (staged V2 loopback server), `8787` (PPQ proxy). *Listening* on one of those from a hook breaks the add-on in a way that is hard to trace. **Connecting** to them is fine and expected — see below.
 
 Your service is **not** reachable from your LAN. No port is mapped for it, and that is deliberate: a mapped port would put a service the add-on did not write, with no authentication in front of it, on your network.
 

@@ -1,9 +1,9 @@
-# OpenCode V2 Home Assistant Plugin Spike
+# OpenCode V2 Home Assistant Runtime
 
-This non-shipping package exercises the exact OpenCode V2 beta plugin contract
-before any V2 code enters an add-on image.
+This package pins and tests the OpenCode V2 runtime integrated into the
+`ha_opencode_beta` add-on.
 
-Current scope:
+Initial integration scope:
 
 - pin the CLI and plugin API to one matching beta build;
 - register one existing Home Assistant MCP sidecar through `ctx.mcp.transform`;
@@ -12,10 +12,10 @@ Current scope:
 - expose tools directly with `codemode: false`;
 - prove plugin cleanup and reject unsafe or credential-bearing options.
 
-It deliberately does not contain Home Assistant credentials, API clients, tool
-handlers, image/runtime changes, OpenChamber integration, or a production
-sidecar authentication design. Those remain gated by
-[`OPENCODE_V2_FUTURE.md`](../../OPENCODE_V2_FUTURE.md).
+It deliberately does not contain Home Assistant credentials, API clients, or
+tool handlers. Image activation, OpenChamber integration, and the production
+sidecar authentication design remain gated by
+[`OPENCODE_V2_FUTURE.md`](../../../../OPENCODE_V2_FUTURE.md).
 
 Run:
 

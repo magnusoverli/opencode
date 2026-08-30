@@ -8,6 +8,11 @@
 # configuration directory belong to it.
 # shellcheck source=/usr/local/lib/opencode/channel.sh
 source /usr/local/lib/opencode/channel.sh
+# Prepare V2-owned roots without changing this transitional init process's V1
+# environment. V2 launchers source the same helper and explicitly export the
+# isolated environment before they start any V2 process.
+# shellcheck source=/usr/local/lib/opencode/v2-environment.sh
+source /usr/local/lib/opencode/v2-environment.sh
 
 bashio::log.info "Initializing ${ADDON_CHANNEL_LABEL} (${ADDON_CHANNEL} channel)..."
 
@@ -30,7 +35,7 @@ LSP_ENABLED=$(bashio::config 'lsp_enabled' || echo "true")
 SCREENSHOT_ENABLED=$(bashio::config 'screenshot_enabled' || echo "false")
 ADDON_ACCESS_ENABLED=$(bashio::config 'addon_access_enabled' || echo "false")
 PPQ_PRIVATE_ENABLED=$(bashio::config 'ppq_private_enabled' || echo "false")
-RESTRICT_SENSITIVE_FILES=$(bashio::config 'restrict_sensitive_files' 2>/dev/null || echo "true")
+RESTRICT_SENSITIVE_FILES=$(bashio::config 'restrict_sensitive_files' 'true' 2>/dev/null)
 FOCUS_MODE=$(bashio::config 'focus_mode' 2>/dev/null || echo "false")
 HOME_BRIEFING_ENABLED=$(bashio::config 'home_briefing_enabled' 2>/dev/null || echo "true")
 DECISION_NOTES_ENABLED=$(bashio::config 'decision_notes_enabled' 2>/dev/null || echo "true")
@@ -97,8 +102,23 @@ export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
 export OPENCODE_DISABLE_AUTOUPDATE=true
 
 rm -rf "${OPENCODE_TMPDIR}"
-mkdir -p /data/.local/share/opencode /data/.config/opencode "${NPM_CONFIG_PREFIX}" "${OPENCODE_TMPDIR}"
-chmod 700 "${OPENCODE_TMPDIR}"
+mkdir -p /data/.local/share/opencode /data/.local/state/opencode /data/.config/opencode "${NPM_CONFIG_PREFIX}" "${OPENCODE_TMPDIR}"
+chmod 711 /data
+chmod 700 /data/.local/share/opencode /data/.local/state/opencode /data/.config/opencode "${OPENCODE_TMPDIR}"
+if [ -d /data/.ssh ]; then chmod 700 /data/.ssh; fi
+if [ -f /data/.gitconfig ]; then chmod 600 /data/.gitconfig; fi
+if [ -f /data/.npmrc ]; then chmod 600 /data/.npmrc; fi
+chmod 600 /data/options.json 2>/dev/null || true
+V2_ROOTS_READY=false
+if opencode_v2_prepare_directories; then
+    if chown opencode-v2:opencode-v2 /data/v2/cache /data/v2/cache/opencode; then
+        V2_ROOTS_READY=true
+    else
+        bashio::log.warning "OpenCode V2 cache ownership could not be secured; V2 migration is disabled for this boot"
+    fi
+else
+    bashio::log.warning "OpenCode V2 private roots are unsafe or unavailable; V2 migration is disabled for this boot"
+fi
 printf '%s\n' "${INTERFACE_MODE}" > /data/.interface_mode
 
 # ==============================================================================
@@ -147,7 +167,7 @@ OPTIONS_FILE="/data/options.json"
 ENV_VARS_COUNT=$(jq -r '.env_vars // [] | length' "${OPTIONS_FILE}")
 
 # Reserved names that would break the add-on if overridden
-ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","OPENCODE_MCP_TOOL_PROFILE","OPENCODE_NATIVE_HA_MCP_ENABLED","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_CONFIG","OPENCODE_CONFIG_CONTENT","OPENCODE_CONFIG_DIR","SHELL","USER","PWD"'
+ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","OPENCODE_MCP_TOOL_PROFILE","OPENCODE_NATIVE_HA_MCP_ENABLED","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","XDG_STATE_HOME","XDG_CACHE_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_CONFIG","OPENCODE_CONFIG_CONTENT","OPENCODE_CONFIG_DIR","OPENCODE_DISABLE_PROJECT_CONFIG","OPENCODE_SERVER_USERNAME","OPENCODE_SERVER_PASSWORD","OPENCODE_V2_ROOT","OPENCODE_V2_HOME","OPENCODE_V2_CONFIG_HOME","OPENCODE_V2_DATA_HOME","OPENCODE_V2_STATE_HOME","OPENCODE_V2_CACHE_HOME","OPENCODE_V2_WORK_ROOT","SHELL","USER","PWD"'
 
 if [ "${ENV_VARS_COUNT}" -gt 0 ]; then
     bashio::log.info "Processing ${ENV_VARS_COUNT} user-defined environment variable(s)..."
@@ -360,15 +380,6 @@ chmod 600 "${ENV_VARS_FILE}"
 
 rm -f /data/.env_vars_discovered
 
-if [ -n "${ACCESS_TOKEN}" ] || [ "${DISCOVER_Z2M_FLAG}" = "true" ]; then
-    bashio::log.info "Starting background discovery (Zigbee2MQTT/ESPHome)..."
-    # setsid detaches the process into its own session so it survives the
-    # oneshot's exit; output goes to a log file for debugging
-    HA_ACCESS_TOKEN="${ACCESS_TOKEN}" DISCOVER_Z2M="${DISCOVER_Z2M_FLAG}" \
-        setsid node /usr/local/bin/discover-services.js \
-        >/tmp/discover-services.log 2>&1 </dev/null &
-fi
-
 if [ -z "${ACCESS_TOKEN}" ]; then
     bashio::log.warning "No access token configured — ESPHome tools will not work"
     bashio::log.warning "Set a Long-Lived Access Token in the add-on Configuration tab"
@@ -501,11 +512,13 @@ opencode_log() { bashio::log.info "$*"; }
 source /usr/local/lib/opencode/runtime.sh
 
 setup_opencode_runtime() {
-    local cpu_mode bundled_package bundled_bin
-    local certified_version effective_bin effective_version
+    local cpu_mode bundled_package bundled_bin v2_package v2_bin
+    local certified_version effective_bin effective_version v2_certified_version v2_effective_version
 
     bundled_package="/usr/local/lib/node_modules/opencode-ai"
     bundled_bin="/usr/local/bin/opencode"
+    v2_package="/opt/opencode-v2-homeassistant"
+    v2_bin="/usr/local/bin/opencode2"
 
     cpu_mode=$(cat /data/.cpu_mode 2>/dev/null || echo "regular")
     certified_version=$(opencode_certified_version)
@@ -538,9 +551,99 @@ setup_opencode_runtime() {
     if [ "${effective_version}" != "unknown" ] && [ "${effective_version}" != "${certified_version}" ]; then
         bashio::log.warning "Running OpenCode ${effective_version} but this add-on certified ${certified_version}"
     fi
+
+    V2_RUNTIME_BINARY_READY=false
+    v2_certified_version=$(opencode_v2_certified_version)
+    if [ "${V2_ROOTS_READY}" = "true" ] \
+        && opencode_select_v2_package_binary "${v2_package}" "${cpu_mode}" \
+        && v2_effective_version=$(opencode_v2_probe_version "${v2_bin}"); then
+        if [ "${v2_effective_version}" = "${v2_certified_version}" ]; then
+            V2_RUNTIME_BINARY_READY=true
+            bashio::log.info "Staged OpenCode V2 runtime ready: ${v2_effective_version}"
+        else
+            bashio::log.warning "OpenCode V2 resolved to ${v2_effective_version}, not certified ${v2_certified_version}; V2 stays inactive"
+        fi
+    else
+        bashio::log.warning "The CPU-selected OpenCode V2 binary cannot be probed in isolated state; V2 stays inactive"
+    fi
 }
 
 setup_opencode_runtime
+
+# Build V2 state only from private copies. A failed or unsupported conversion is
+# non-fatal during the transition: V1 keeps running against its untouched roots,
+# and the non-secret journal records why V2 activation was deferred.
+V2_CERTIFIED_VERSION=$(opencode_v2_certified_version)
+V2_STATE_READY=false
+if [ "${V2_ROOTS_READY}" = "true" ] && [ "${V2_RUNTIME_BINARY_READY}" = "true" ]; then
+    if python3 /usr/local/bin/opencode-v2-migrate.py prepare \
+        --root /data/v2 \
+        --source-data /data/.local/share/opencode \
+        --retained-root /data/.config/opencode \
+        --retained-root /data/.local/state/opencode \
+        --retained-root /data/.ssh \
+        --v2-bin /usr/local/bin/opencode2 \
+        --runtime-user opencode-v2 \
+        --target-version "${V2_CERTIFIED_VERSION}"; then
+        V2_STATE_READY=true
+        bashio::log.info "OpenCode V2 copy-on-write state generation is ready"
+    else
+        bashio::log.warning "OpenCode V2 state conversion was deferred; continuing with the untouched V1 runtime and state"
+    fi
+else
+    bashio::log.warning "OpenCode V2 state conversion skipped because its roots or CPU-selected runtime are unavailable; continuing with the untouched V1 runtime and state"
+fi
+
+# Stage one authenticated V2 server behind a private loopback endpoint. Its
+# managed policy and global AGENTS.md live under root-owned /run, not in the
+# runtime-writable generation, so the unprivileged process cannot replace its
+# own startup policy. MCP stays disabled until the separate credential boundary
+# is ready; the user-facing terminal and LAN services continue to run V1.
+V2_RUNTIME_ROOT=/run/opencode-v2
+rm -rf -- "${V2_RUNTIME_ROOT}"
+if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
+    V2_RESTRICT_BOOL=$([ "${RESTRICT_SENSITIVE_FILES}" = "true" ] && echo "true" || echo "false")
+    V2_CONFIG_TEMP=""
+    V2_PASSWORD_TEMP=""
+    if mkdir -p "${V2_RUNTIME_ROOT}/config/opencode" "${V2_RUNTIME_ROOT}/home" "${V2_RUNTIME_ROOT}/workspace" \
+        && chmod 755 "${V2_RUNTIME_ROOT}" "${V2_RUNTIME_ROOT}/config" "${V2_RUNTIME_ROOT}/config/opencode" \
+            "${V2_RUNTIME_ROOT}/home" "${V2_RUNTIME_ROOT}/workspace" \
+        && cp /opt/ha-mcp-server/AGENTS.md "${V2_RUNTIME_ROOT}/config/opencode/AGENTS.md" \
+        && chmod 644 "${V2_RUNTIME_ROOT}/config/opencode/AGENTS.md"; then
+        V2_CONFIG_TEMP=$(mktemp "${V2_RUNTIME_ROOT}/.managed.XXXXXX")
+        V2_PASSWORD_TEMP=$(mktemp "${V2_RUNTIME_ROOT}/.password.XXXXXX")
+        if node /opt/opencode-v2-homeassistant/managed-config.js \
+                --restrict-sensitive-files "${V2_RESTRICT_BOOL}" \
+                --plugin-enabled false > "${V2_CONFIG_TEMP}" \
+            && chmod 644 "${V2_CONFIG_TEMP}" \
+            && mv -f "${V2_CONFIG_TEMP}" "${V2_RUNTIME_ROOT}/managed.json" \
+            && { od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "${V2_PASSWORD_TEMP}"; } \
+            && test "$(wc -c < "${V2_PASSWORD_TEMP}")" -eq 64 \
+            && chmod 600 "${V2_PASSWORD_TEMP}" \
+            && mv -f "${V2_PASSWORD_TEMP}" "${V2_RUNTIME_ROOT}/server-password"; then
+            printf '%s\n' "${OPENCODE_V2_GENERATION_ROOT}" > "${V2_RUNTIME_ROOT}/ready"
+            chmod 600 "${V2_RUNTIME_ROOT}/ready"
+            bashio::log.info "OpenCode V2 managed configuration and private loopback server are staged"
+            if [ "${MCP_ENABLED}" = "true" ]; then
+                bashio::log.info "OpenCode V2 MCP remains disabled until the credential-isolated sidecar is ready"
+            fi
+        else
+            rm -f -- "${V2_CONFIG_TEMP}" "${V2_PASSWORD_TEMP}"
+            bashio::log.warning "OpenCode V2 managed configuration could not be secured; its staged server is disabled for this boot"
+        fi
+    else
+        bashio::log.warning "OpenCode V2 runtime directory could not be created; its staged server is disabled for this boot"
+    fi
+fi
+
+if [ -n "${ACCESS_TOKEN}" ] || [ "${DISCOVER_Z2M_FLAG}" = "true" ]; then
+    bashio::log.info "Starting background discovery (Zigbee2MQTT/ESPHome)..."
+    # Start credential-bearing background work only after the isolated V2
+    # converter has stopped and its candidate has been validated.
+    HA_ACCESS_TOKEN="${ACCESS_TOKEN}" DISCOVER_Z2M="${DISCOVER_Z2M_FLAG}" \
+        setsid node /usr/local/bin/discover-services.js \
+        >/tmp/discover-services.log 2>&1 </dev/null &
+fi
 
 # ==============================================================================
 # Verify hab and zigporter CLIs are available

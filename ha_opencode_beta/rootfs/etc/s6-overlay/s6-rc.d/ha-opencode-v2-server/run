@@ -1,0 +1,71 @@
+#!/command/with-contenv bashio
+# Staged OpenCode V2 loopback server. V1 remains the user-facing rollback path
+# until the sidecar credential and /homeassistant write boundaries are complete.
+
+# shellcheck source=/usr/local/lib/opencode/v2-environment.sh
+source /usr/local/lib/opencode/v2-environment.sh
+
+V2_RUNTIME_ROOT=/run/opencode-v2
+if [ ! -f "${V2_RUNTIME_ROOT}/ready" ] \
+    || [ -L "${V2_RUNTIME_ROOT}/ready" ] \
+    || [ ! -f "${V2_RUNTIME_ROOT}/managed.json" ] \
+    || [ -L "${V2_RUNTIME_ROOT}/managed.json" ] \
+    || [ ! -f "${V2_RUNTIME_ROOT}/server-password" ] \
+    || [ -L "${V2_RUNTIME_ROOT}/server-password" ]; then
+    bashio::log.info "OpenCode V2 staged server is inactive because no secured runtime is ready"
+    exec sleep infinity
+fi
+
+if ! opencode_v2_select_generation; then
+    bashio::log.warning "OpenCode V2 staged server is inactive because its generation cannot be selected safely"
+    exec sleep infinity
+fi
+
+EXPECTED_GENERATION_ROOT=$(cat "${V2_RUNTIME_ROOT}/ready" 2>/dev/null || true)
+SERVER_PASSWORD=$(cat "${V2_RUNTIME_ROOT}/server-password" 2>/dev/null || true)
+if [ "${EXPECTED_GENERATION_ROOT}" != "${OPENCODE_V2_GENERATION_ROOT}" ] \
+    || [[ ! "${SERVER_PASSWORD}" =~ ^[a-f0-9]{64}$ ]]; then
+    bashio::log.warning "OpenCode V2 staged server is inactive because its secured runtime metadata is invalid"
+    exec sleep infinity
+fi
+
+if ! command -v setpriv >/dev/null 2>&1; then
+    bashio::log.warning "OpenCode V2 staged server is inactive because privilege demotion is unavailable"
+    exec sleep infinity
+fi
+
+bashio::log.info "Starting staged OpenCode V2 server as uid 60000 on private loopback port 4100"
+cd "${V2_RUNTIME_ROOT}/workspace"
+exec setpriv \
+    --reuid=60000 \
+    --regid=60000 \
+    --clear-groups \
+    --no-new-privs \
+    --inh-caps=-all \
+    --ambient-caps=-all \
+    --bounding-set=-all \
+    env -i \
+        HOME="${V2_RUNTIME_ROOT}/home" \
+        USER=opencode-v2 \
+        LOGNAME=opencode-v2 \
+        SHELL=/bin/bash \
+        PATH=/usr/local/bin:/usr/bin:/bin \
+        LANG=C.UTF-8 \
+        NODE_OPTIONS=--max-old-space-size=512 \
+        TMPDIR="${OPENCODE_V2_CACHE_HOME}" \
+        XDG_CONFIG_HOME="${V2_RUNTIME_ROOT}/config" \
+        XDG_DATA_HOME="${OPENCODE_V2_DATA_HOME}" \
+        XDG_STATE_HOME="${OPENCODE_V2_STATE_HOME}" \
+        XDG_CACHE_HOME="${OPENCODE_V2_CACHE_HOME}" \
+        OPENCODE_CONFIG="${V2_RUNTIME_ROOT}/managed.json" \
+        OPENCODE_DISABLE_PROJECT_CONFIG=1 \
+        OPENCODE_DISABLE_EXTERNAL_SKILLS=1 \
+        OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 \
+        OPENCODE_DISABLE_AUTOUPDATE=true \
+        OPENCODE_SERVER_USERNAME=opencode \
+        OPENCODE_SERVER_PASSWORD="${SERVER_PASSWORD}" \
+        /usr/local/bin/opencode2 serve \
+            --hostname 127.0.0.1 \
+            --port 4100 \
+            --print-logs \
+            --log-level info
