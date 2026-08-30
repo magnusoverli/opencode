@@ -60,6 +60,12 @@ ADDON_VERSION=$(cat /data/.addon_version 2>/dev/null || echo "unknown")
 ADDON_ACCESS_ENABLED=$(cat /data/.addon_access_enabled 2>/dev/null || echo "false")
 USER_HOOKS_ENABLED=$(cat /data/.user_hooks_enabled 2>/dev/null || echo "false")
 OPENCODE_VERSION=$(cat /data/.opencode_version 2>/dev/null || opencode --version 2>/dev/null || echo "unknown")
+OPENCODE_V2_VERSION=$(cat /usr/local/share/opencode-v2-certified-version 2>/dev/null || echo "unknown")
+if [ -f /run/opencode-v2/ready ]; then
+    OPENCODE_V2_STATUS="staged privately"
+else
+    OPENCODE_V2_STATUS="inactive"
+fi
 CPU_INFO=""
 if [ "${CPU_MODE}" = "baseline" ]; then
     CPU_INFO=" ${YELLOW}(baseline CPU mode)${NC}"
@@ -100,7 +106,8 @@ show_banner() {
     clear
     echo ""
     echo -e "${BLUE}${BOLD}${ADDON_CHANNEL_LABEL}${NC} ${GRAY}v${ADDON_VERSION}${NC}${CPU_INFO}"
-    echo -e "${GRAY}Runtime: OpenCode ${OPENCODE_VERSION} (certified with this add-on release)${NC}"
+    echo -e "${GRAY}Current TUI: OpenCode V1 ${OPENCODE_VERSION}${NC}"
+    echo -e "${GRAY}OpenCode V2: ${OPENCODE_V2_VERSION} (${OPENCODE_V2_STATUS}; this TUI is not attached yet)${NC}"
     echo -e "${GRAY}AI-powered coding agent for Home Assistant${NC}"
     echo ""
     echo -e "${GRAY}────────────────────────────────────────────────────────────${NC}"

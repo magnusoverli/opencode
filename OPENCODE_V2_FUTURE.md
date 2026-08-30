@@ -32,6 +32,14 @@ Updated on 2026-08-30:
   [openchamber/openchamber#3007](https://github.com/openchamber/openchamber/pull/3007).
   OpenChamber must not be pointed at V2 until compatible support is released and
   its Home Assistant Ingress behavior is revalidated.
+- The deployed `3.0.0b1` image passed a bounded live Home Assistant self-check:
+  V2 ran as UID/GID 60000 with no capabilities or readable process environment,
+  the root proxy retained port 8765, both unauthenticated endpoints returned
+  401, the sidecar MCP completed a read-only call, and no service restarted.
+- That live check found one non-blocking startup-order issue: two early proxy
+  connections reached `s6-ipcclient` before the sidecar Unix socket existed.
+  The backend recovered immediately, but the race and misleading sidecar port
+  log belong in the next beta cleanup.
 
 Sources:
 
@@ -41,6 +49,104 @@ Sources:
 - [V2 MCP servers](https://opencode.ai/v2/docs/mcp-servers)
 - [V2 permissions](https://opencode.ai/v2/docs/permissions)
 - [V2 branch](https://github.com/anomalyco/opencode/tree/v2)
+
+## Path to a User-Facing V2 Application
+
+### Why the TUI still reports 1.18.25
+
+This is intentional in `3.0.0b1`, not a stale upgrade. The terminal service
+still runs `opencode-session.sh`, which executes `/usr/local/bin/opencode`: the
+certified V1 `1.18.25` runtime. V2 currently runs only as the independently
+supervised, authenticated server on `127.0.0.1:4100`; ttyd, LAN, and
+OpenChamber are not connected to it. Keeping the TUI on V1 preserves a working
+rollback while the remaining workspace and plugin-discovery boundaries are
+closed.
+
+### Next beta: stabilization and truthful status
+
+The next beta should remain user-facing on V1 while it makes the staged V2
+foundation quieter and easier to verify:
+
+1. Bind the root TCP proxy to port 8765 immediately, then gate accepted
+   connections on a root-owned sidecar-ready marker. Early callers receive a
+   clean 503 until `/run/opencode-v2/mcp-sidecar.sock` is listening, while the
+   root listener never gives UID 60000 a replacement window and later genuine
+   backend failures remain visible.
+2. Change the sidecar startup message to say that the credential-bearing worker
+   listens on a root-only Unix socket and the root proxy publishes
+   `127.0.0.1:8765`.
+3. Update the terminal banner to report both facts explicitly: the current TUI
+   uses V1 `1.18.25`, while V2 `0.0.0-beta-18684` is staged privately.
+4. Add focused contracts for readiness-before-bind ordering and the corrected
+   log ownership language; run only shell syntax and the V2 state-isolation
+   contract during development.
+5. Exercise sidecar, proxy, broker, and V2 restart ordering under the exact s6
+   tree, preserving the root listener and reconnecting V2 without a crash loop.
+6. Repeat the bounded live checks on the release candidate and confirm that the
+   startup log contains no expected backend-connect errors.
+
+### First V2 terminal preview
+
+The first user-facing V2 milestone should be terminal-only and explicitly
+reversible. It must complete these gates before replacing the `opencode` call
+in `opencode-session.sh` with a V2 client attached to port 4100:
+
+1. Provide approved reads and writes under `/homeassistant` to UID 60000 without
+   changing host ownership, exposing retained V1 data, or making sidecar
+   credentials readable.
+2. Enforce a bundled-plugin allowlist, or disable project and user plugin
+   discovery, for every client-selected working directory including
+   `/homeassistant`.
+3. Define a client attachment and authentication path that does not put the V2
+   server password in terminal environment variables, command arguments, shell
+   history, or a user-readable file.
+4. Prove native V2 ordered permissions and the read-only agent after all config
+   and plugin hooks, including shell, edit, subagent, and MCP dispatch denial.
+5. Deliver static Home Assistant rules and bounded briefing/decision context to
+   initial requests and tool continuations without duplication.
+6. Prove TUI startup, provider authentication, session resume, clean shutdown,
+   tmux reattachment, and rollback to the retained V1 roots on real Home
+   Assistant.
+7. Add an explicit beta runtime selector for the preview; switch the default and
+   display the V2 version only after the V2 path passes the complete terminal
+   smoke test.
+
+### Parity after terminal cutover
+
+OpenChamber is not the first V2 client. After the terminal preview is reliable,
+close the remaining LSP/formatter, PPQ, native MCP, startup-hook, LAN, and
+custom-provider gaps. Integrate OpenChamber only after upstream V2 support lands
+and its Ingress, streaming, OAuth, update-policy, and service-worker behavior is
+revalidated. Stable 3.0 still requires a supported upstream V2 release and a
+multi-architecture beta soak.
+
+### V1 retirement schedule
+
+These are gate-based release targets rather than calendar promises. A beta does
+not ship merely to preserve the number if its prerequisite boundary is not
+closed.
+
+- `3.0.0b2` is the final planned beta with V1 as the default user-facing
+  runtime. It should complete the startup cleanup, dual-runtime banner, exact s6
+  restart checks, and as much of the terminal-preview implementation as can be
+  proven without weakening a boundary.
+- `3.0.0b3` targets V2 as the default terminal runtime. No V1 terminal, LAN, or
+  OpenChamber service should run unless the operator explicitly selects the
+  temporary V1 rollback mode. If OpenChamber still lacks V2 support, b3 should
+  reject that interface mode clearly rather than silently start V1 for it.
+- `3.0.0b4` targets removal of the V1 `opencode-ai` package, V1 session/server
+  launchers, V1 s6 service paths, and V1 config generation from the beta image.
+  This happens only after b3 proves provider authentication, migrated sessions,
+  `/homeassistant` work, read-only policy, shutdown, and rollback on real Home
+  Assistant.
+- Stable `3.0.0` is V2-only. It must not contain a dormant V1 executable or a
+  hidden V1 service path. Stable 2.5.x remains the separately versioned V1
+  product for users who are not ready to move.
+
+Removing V1 code does not authorize deleting V1 data. The untouched V1 roots
+and migration provenance remain available through the 3.0 beta/stable line so a
+Home Assistant add-on downgrade can recover them. Automatic deletion requires a
+separate, explicit retention policy in a later release.
 
 ## Confirmed Runtime Changes
 
@@ -59,14 +165,15 @@ specific add-on component imports that package.
 
 The CLI package publishes Linux glibc binaries for x64, x64 baseline, and
 arm64, so the add-on's amd64 and aarch64 targets are represented. Both binaries
-still need to start successfully in the Home Assistant Debian Trixie images;
-the x64 baseline package must also be tested on a host without AVX2.
+start successfully in the Home Assistant Debian Trixie images; the x64 baseline
+package must still be tested on a host without AVX2.
 
 V2 is daemon-first. Its shared daemon, client-owned `--standalone` server, and
 explicit `serve` process have different ownership models. The beta now stages
 one explicit authenticated `serve` process under s6 on private loopback as UID
-60000. User-facing activation remains blocked until Linux image shutdown and
-orphan cleanup are proven.
+60000. User-facing activation remains blocked on safe `/homeassistant` access,
+enforceable plugin discovery, secure TUI attachment, and complete terminal
+lifecycle validation.
 The current V1 LAN service cannot be renamed mechanically:
 
 - V2 `serve` does not accept V1's `--cors` option.
@@ -203,23 +310,22 @@ The plugin must not:
 - become the only read-only or sensitive-file boundary.
 
 The V1 process currently inherits `SUPERVISOR_TOKEN`, which means shell access
-or any in-process plugin can expose it. V2 must not repeat that design. The
-OpenCode process should run as an unprivileged user without the Supervisor token
-or Home Assistant access tokens. A separately supervised, more privileged
-integration sidecar should own those credentials and expose only the
-profile-filtered MCP contract over authenticated loopback Streamable HTTP, which
-V2 supports as a remote MCP server. A bare localhost port is not a boundary:
-shell commands could call it directly and bypass OpenCode permission checks.
-Phase 0 must design an ephemeral caller credential and OS process boundary that
-the bundled plugin can use but shell subprocesses cannot recover from config,
-environment, files, `/proc`, logs, or process arguments.
+or any in-process plugin can expose it. V2 does not repeat that design: it runs
+as an unprivileged user without Supervisor or Home Assistant access tokens, and
+the separately supervised sidecar owns those credentials. `3.0.0b1` closes the
+bare-localhost weakness with an authenticated profile-filtered MCP contract, a
+root-retained TCP proxy, a root-only Unix backend, and a peer-validated boot
+credential that shell subprocesses cannot recover from config, environment,
+files, `/proc`, logs, or process arguments. The remaining authentication design
+work concerns attaching a user-facing TUI client to the V2 server without
+exposing the server password.
 
 The unprivileged process must still perform approved edits under
-`/homeassistant`. Phase 0 must choose and test UID/GID, ACL, capability, or a
-separate safe-write mechanism without silently changing host ownership or
-making the sidecar process readable. If both file-write capability and process
-isolation cannot be achieved in the Home Assistant base image, the sidecar
-design is blocked rather than weakened.
+`/homeassistant`. The terminal-preview phase must choose and test UID/GID, ACL,
+capability, or a separate safe-write mechanism without silently changing host
+ownership or making the sidecar process readable. If both file-write capability
+and process isolation cannot be achieved in the Home Assistant base image, the
+user-facing V2 design is blocked rather than weakened.
 
 Model-provider credentials are a separate category: OpenCode may legitimately
 need them, while optional PPQ and Home Assistant credentials can remain in
@@ -228,12 +334,11 @@ available to shell tools. User-supplied environment variables are trusted
 arbitrary process input, not covered by a blanket non-disclosure promise.
 
 V2 auto-discovers local plugins independently of the confirmed project-config
-disable flag. `3.0.0b0` must disable project/user plugin
-discovery or enforce a tested allowlist containing only the exact bundled
-plugin. If V2 provides no enforceable mechanism, user/project plugins must be
-explicitly classified as trusted arbitrary code and the beta cannot claim that
-only audited plugin code executes. No plugin may be installed or updated at
-runtime.
+disable flag. Before the terminal preview, project/user plugin discovery must be
+disabled or a tested allowlist must contain only the exact bundled plugin. If V2
+provides no enforceable mechanism, user/project plugins must be explicitly
+classified as trusted arbitrary code and the beta cannot claim that only
+audited plugin code executes. No plugin may be installed or updated at runtime.
 
 ### Why not rewrite every MCP tool as a plugin tool?
 
@@ -252,7 +357,7 @@ the first milestone:
 After the thin plugin is stable, selected first-class tools may be evaluated
 only where they provide a demonstrated capability that MCP cannot.
 
-## Proposed 3.0.0b0 Scope
+## Delivered 3.0.0b0-b1 Foundation
 
 ### Integrated beta foundation
 
@@ -353,7 +458,7 @@ visual and irrelevant. The initial target is:
 | User environment variables | Rejected initially; later requires an explicit trust and secret-exposure model |
 | Startup hooks | Rejected in initial b0; later require the editable workspace lease before execution |
 
-### 3.0.0b0 acceptance criteria
+### User-facing V2 acceptance criteria
 
 - The image asserts the exact resolved V2 CLI and plugin versions.
 - `opencode2 --version` and help run on amd64 and aarch64.
@@ -404,7 +509,7 @@ visual and irrelevant. The initial target is:
 - Add a CI lane that installs only the exact pinned V2 set and fails if npm
   resolves anything else.
 
-### Phase 1: beta runtime activation
+### Phase 1: staged beta runtime (delivered in b0-b1)
 
 - Add V2 runtime selection, native config generation, copy-on-write migration,
   isolated state paths, and s6 supervision to `ha_opencode_beta` only. Stable
@@ -414,10 +519,13 @@ visual and irrelevant. The initial target is:
   process-lifecycle, and rollback probes.
 - Reuse the beta image, `beta-v*` tags, changelog, and release workflows after
   making them V2-aware.
-- Release beta `3.0.0b0` only after both architecture builds pass.
+- Both architecture builds and the live `3.0.0b1` boundary check passed; the
+  staged runtime remains private while the terminal continues on V1.
 
-### Phase 2: close beta gaps
+### Phase 2: terminal-first V2 activation and beta gaps
 
+- Complete the next-beta stabilization and first V2 terminal preview gates
+  above before changing the user-facing runtime.
 - Track working LSP and formatter execution upstream.
 - Revalidate PPQ/custom-provider configuration in native V2 form.
 - Test LAN authentication and replace V1 attach/CORS assumptions.

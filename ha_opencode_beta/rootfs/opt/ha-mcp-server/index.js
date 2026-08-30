@@ -7695,6 +7695,7 @@ Provide complete automation YAML and any required helper entities.`,
 
 async function main() {
   let close;
+  let readyFile;
   if (process.env.OPENCODE_MCP_TRANSPORT === "streamable-http") {
     const socketPath = process.env.OPENCODE_MCP_SIDECAR_SOCKET;
     const host = process.env.OPENCODE_MCP_SIDECAR_HOST || "127.0.0.1";
@@ -7708,6 +7709,23 @@ async function main() {
       publicHost: process.env.OPENCODE_MCP_SIDECAR_PUBLIC_HOST,
     });
     close = () => listener.close();
+    readyFile = process.env.OPENCODE_MCP_SIDECAR_READY_FILE;
+    if (readyFile) {
+      const temporaryReadyFile = `${readyFile}.${process.pid}.tmp`;
+      try {
+        const processStat = readFileSync("/proc/self/stat", "utf8");
+        const commandEnd = processStat.lastIndexOf(") ");
+        const statFields = commandEnd >= 0 ? processStat.slice(commandEnd + 2).trim().split(/\s+/) : [];
+        const startTime = statFields[19];
+        if (!/^\d+$/.test(startTime ?? "")) throw new Error("Cannot resolve sidecar process identity");
+        writeFileSync(temporaryReadyFile, `${process.pid} ${startTime}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        renameSync(temporaryReadyFile, readyFile);
+      } catch (error) {
+        try { unlinkSync(temporaryReadyFile); } catch {}
+        await close();
+        throw error;
+      }
+    }
   } else {
     const transport = new StdioServerTransport();
     await server.connect(transport);
@@ -7719,6 +7737,9 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     try {
+      if (readyFile) {
+        try { unlinkSync(readyFile); } catch {}
+      }
       await close();
     } catch {
       process.exitCode = 1;

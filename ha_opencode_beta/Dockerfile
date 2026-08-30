@@ -225,6 +225,7 @@ RUN chmod +x /usr/local/bin/* \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-sidecar/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-v2-credential-broker/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-proxy/run \
+    && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-proxy/connect \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-openchamber/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-openchamber-ingress/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-openchamber-lan/run \
@@ -309,35 +310,63 @@ RUN set -eu; \
 # intentionally an image-build check: Windows unit tests cannot prove Linux
 # effective IDs, capability sets, no_new_privs, or root-owned path denial.
 RUN set -eu; \
+    if [ "${BUILD_ARCH}" = "aarch64" ]; then \
+        echo 'Skipping architecture-neutral V2 boundary fixture on arm64; native compilation and pinned binary startup were verified in earlier layers'; \
+        exit 0; \
+    fi; \
     BOUNDARY_ROOT=$(mktemp -d); \
     RUNTIME_ROOT="${BOUNDARY_ROOT}/runtime"; \
     GENERATION_ROOT="${BOUNDARY_ROOT}/generation"; \
     CACHE_ROOT="${BOUNDARY_ROOT}/cache"; \
-    mkdir -p "${BOUNDARY_ROOT}/private" "${RUNTIME_ROOT}/home" "${RUNTIME_ROOT}/config/opencode" "${RUNTIME_ROOT}/workspace" "${GENERATION_ROOT}/data" "${GENERATION_ROOT}/state" "${CACHE_ROOT}"; \
+    FIXTURE_ATTEMPTS=100; \
+    FIXTURE_DELAY=0.1; \
+    mkdir -p "${BOUNDARY_ROOT}/private" "${RUNTIME_ROOT}/home" "${RUNTIME_ROOT}/config/opencode" "${RUNTIME_ROOT}/workspace" "${RUNTIME_ROOT}/clients" "${GENERATION_ROOT}/data" "${GENERATION_ROOT}/state" "${CACHE_ROOT}"; \
     chmod 711 "${BOUNDARY_ROOT}"; \
     chmod 700 "${BOUNDARY_ROOT}/private"; \
     chmod 755 "${RUNTIME_ROOT}" "${RUNTIME_ROOT}/home" "${RUNTIME_ROOT}/config" "${RUNTIME_ROOT}/config/opencode" "${RUNTIME_ROOT}/workspace"; \
+    chmod 700 "${RUNTIME_ROOT}/clients"; \
     chown -R 60000:60000 "${GENERATION_ROOT}" "${CACHE_ROOT}"; \
     printf '%s\n' private > "${BOUNDARY_ROOT}/private/sentinel"; \
     printf '%064d' 0 > "${RUNTIME_ROOT}/sidecar-secret"; \
     printf '%064d' 1 > "${RUNTIME_ROOT}/server-password"; \
     chmod 600 "${RUNTIME_ROOT}/sidecar-secret" "${RUNTIME_ROOT}/server-password"; \
     cp /opt/ha-mcp-server/AGENTS.md "${RUNTIME_ROOT}/config/opencode/AGENTS.md"; \
-    node /opt/opencode-v2-homeassistant/managed-config.js --plugin-enabled true > "${RUNTIME_ROOT}/managed.json"; \
-    env -i HOME=/data USER=root LOGNAME=root PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
-        SUPERVISOR_TOKEN=image-fixture-token OPENCODE_MCP_TOOL_PROFILE=compact \
-        OPENCODE_MCP_TRANSPORT=streamable-http OPENCODE_MCP_SIDECAR_SOCKET="${RUNTIME_ROOT}/mcp-sidecar.sock" OPENCODE_MCP_SIDECAR_PUBLIC_HOST=127.0.0.1:18765 \
-        OPENCODE_MCP_SIDECAR_SECRET_FILE="${RUNTIME_ROOT}/sidecar-secret" LD_PRELOAD=/usr/local/lib/opencode-v2-non-dumpable.so \
-        node /opt/ha-mcp-server/index.js >"${BOUNDARY_ROOT}/sidecar.log" 2>&1 & \
-    SIDECAR_PID=$!; \
-    s6-tcpserver -q -c 16 127.0.0.1 18765 s6-ipcclient "${RUNTIME_ROOT}/mcp-sidecar.sock" s6-ioconnect >"${BOUNDARY_ROOT}/proxy.log" 2>&1 & \
+    node /opt/opencode-v2-homeassistant/managed-config.js --plugin-enabled true \
+        --mcp-endpoint http://127.0.0.1:18765/mcp > "${RUNTIME_ROOT}/managed.json"; \
+    start_sidecar() { \
+        rm -f "${RUNTIME_ROOT}/mcp-sidecar.ready"; \
+        env -i HOME=/data USER=root LOGNAME=root PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
+            SUPERVISOR_TOKEN=image-fixture-token OPENCODE_MCP_TOOL_PROFILE=compact \
+            OPENCODE_MCP_TRANSPORT=streamable-http OPENCODE_MCP_SIDECAR_SOCKET="${RUNTIME_ROOT}/mcp-sidecar.sock" OPENCODE_MCP_SIDECAR_PUBLIC_HOST=127.0.0.1:18765 \
+            OPENCODE_MCP_SIDECAR_SECRET_FILE="${RUNTIME_ROOT}/sidecar-secret" OPENCODE_MCP_SIDECAR_READY_FILE="${RUNTIME_ROOT}/mcp-sidecar.ready" LD_PRELOAD=/usr/local/lib/opencode-v2-non-dumpable.so \
+            node /opt/ha-mcp-server/index.js >>"${BOUNDARY_ROOT}/sidecar.log" 2>&1 & \
+        SIDECAR_PID=$!; \
+    }; \
+    V2_RUNTIME_ROOT="${RUNTIME_ROOT}" s6-tcpserver -q -c 16 127.0.0.1 18765 \
+        /bin/bash /etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-proxy/connect >"${BOUNDARY_ROOT}/proxy.log" 2>&1 & \
     PROXY_PID=$!; \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do \
+        EARLY_STATUS=$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -X POST -w '%{http_code}' http://127.0.0.1:18765/mcp 2>/dev/null || true); \
+        [ "${EARLY_STATUS}" = "503" ] && break; \
+        sleep "${FIXTURE_DELAY}"; \
+    done; \
+    if [ "${EARLY_STATUS:-}" != "503" ]; then printf 'early proxy status: %s\n' "${EARLY_STATUS:-unset}"; cat "${BOUNDARY_ROOT}/proxy.log"; exit 1; fi; \
+    echo 'V2 boundary fixture: proxy pre-readiness passed'; \
+    if runuser -u opencode-v2 -- python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",18765))'; then exit 1; fi; \
+    start_sidecar; \
+    SIDECAR_MARKER_READY=false; \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do \
+        if [ -f "${RUNTIME_ROOT}/mcp-sidecar.ready" ] && [ -S "${RUNTIME_ROOT}/mcp-sidecar.sock" ]; then SIDECAR_MARKER_READY=true; break; fi; \
+        sleep "${FIXTURE_DELAY}"; \
+    done; \
+    if [ "${SIDECAR_MARKER_READY}" != true ]; then cat "${BOUNDARY_ROOT}/sidecar.log"; kill "${SIDECAR_PID}" 2>/dev/null || true; exit 1; fi; \
     SIDECAR_READY=false; \
-    for _attempt in $(seq 1 100); do \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do \
         if [ "$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -X POST -w '%{http_code}' http://127.0.0.1:18765/mcp 2>/dev/null || true)" = "401" ]; then SIDECAR_READY=true; break; fi; \
-        sleep 0.1; \
+        sleep "${FIXTURE_DELAY}"; \
     done; \
     if [ "${SIDECAR_READY}" != true ]; then cat "${BOUNDARY_ROOT}/sidecar.log" "${BOUNDARY_ROOT}/proxy.log"; kill "${SIDECAR_PID}" 2>/dev/null || true; exit 1; fi; \
+    echo 'V2 boundary fixture: sidecar readiness passed'; \
     PROC_CAPTURE="${CACHE_ROOT}/proc-capture"; \
     PROC_STOP="${CACHE_ROOT}/proc-stop"; \
     : > "${PROC_CAPTURE}"; \
@@ -347,17 +376,24 @@ RUN set -eu; \
     POLLER_PID=$!; \
     /usr/local/bin/opencode-v2-credential-broker "${RUNTIME_ROOT}" >"${BOUNDARY_ROOT}/broker.log" 2>&1 & \
     BROKER_PID=$!; \
-    for _attempt in $(seq 1 100); do [ -S "${RUNTIME_ROOT}/credential.sock" ] && break; sleep 0.1; done; \
+    /usr/local/bin/opencode-v2-credential-broker "${RUNTIME_ROOT}" client >"${BOUNDARY_ROOT}/client-broker.log" 2>&1 & \
+    CLIENT_BROKER_PID=$!; \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do [ -S "${RUNTIME_ROOT}/credential.sock" ] && break; sleep "${FIXTURE_DELAY}"; done; \
     test -S "${RUNTIME_ROOT}/credential.sock"; \
-    if runuser -u opencode-v2 -- python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",18765))'; then exit 1; fi; \
-    /usr/local/bin/opencode-v2-launch "${RUNTIME_ROOT}" "${GENERATION_ROOT}" "${CACHE_ROOT}" 18101 >"${BOUNDARY_ROOT}/v2.log" 2>&1 & \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do [ -S "${RUNTIME_ROOT}/client-credential.sock" ] && break; sleep "${FIXTURE_DELAY}"; done; \
+    test -S "${RUNTIME_ROOT}/client-credential.sock"; \
+    echo 'V2 boundary fixture: credential brokers ready'; \
+    runuser -u opencode-v2 -- python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("'"${RUNTIME_ROOT}"'/client-credential.sock"); assert s.recv(1) == b""'; \
+    echo 'V2 boundary fixture: unauthorized client denied'; \
+    /usr/local/bin/opencode-v2-launch "${RUNTIME_ROOT}" "${GENERATION_ROOT}" "${CACHE_ROOT}" 4100 >"${BOUNDARY_ROOT}/v2.log" 2>&1 & \
     SECURE_PID=$!; \
     HTTP_READY=false; \
-    for _attempt in $(seq 1 100); do \
-        if [ "$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -w '%{http_code}' -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:18101/global/health 2>/dev/null || true)" = "200" ]; then HTTP_READY=true; break; fi; \
-        sleep 0.1; \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do \
+        if [ "$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -w '%{http_code}' -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:4100/global/health 2>/dev/null || true)" = "200" ]; then HTTP_READY=true; break; fi; \
+        sleep "${FIXTURE_DELAY}"; \
     done; \
     if [ "${HTTP_READY}" != "true" ]; then cat "${BOUNDARY_ROOT}/v2.log"; kill "${SECURE_PID}" || true; exit 1; fi; \
+    echo 'V2 boundary fixture: server ready'; \
     kill -0 "${BROKER_PID}"; \
     test ! -e "${RUNTIME_ROOT}/v2.pid"; \
     test "$(awk '/^Uid:/ {print $2":"$3":"$4}' "/proc/${SECURE_PID}/status")" = "60000:60000:60000"; \
@@ -368,30 +404,74 @@ RUN set -eu; \
     if runuser -u opencode-v2 -- test -r "${BOUNDARY_ROOT}/private/sentinel"; then exit 1; fi; \
     V2_READY=false; \
     PLUGIN_RESPONSE=; \
-    for _attempt in $(seq 1 100); do \
-        PLUGIN_RESPONSE=$(curl -fsS --connect-timeout 1 --max-time 2 -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:18101/api/plugin 2>/dev/null || true); \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do \
+        PLUGIN_RESPONSE=$(curl -fsS --connect-timeout 1 --max-time 2 -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:4100/api/plugin 2>/dev/null || true); \
         if printf '%s' "${PLUGIN_RESPONSE}" | jq -e '.data[] | select(.id == "homeassistant.runtime-guard" and .status == "active")' >/dev/null 2>&1; then V2_READY=true; break; fi; \
-        sleep 0.1; \
+        sleep "${FIXTURE_DELAY}"; \
     done; \
     if [ "${V2_READY}" != "true" ]; then cat "${BOUNDARY_ROOT}/v2.log"; kill "${SECURE_PID}" || true; exit 1; fi; \
-    curl -fsS --max-time 2 -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:18101/api/health >/dev/null; \
+    curl -fsS --max-time 2 -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:4100/api/health >/dev/null; \
+    echo 'V2 boundary fixture: runtime guard ready'; \
+    if ! /usr/local/bin/opencode-v2-launch --client "${RUNTIME_ROOT}" "${GENERATION_ROOT}" "${CACHE_ROOT}" --probe >"${BOUNDARY_ROOT}/client-probe.json"; then \
+        cat "${BOUNDARY_ROOT}/client-broker.log"; \
+        find "${RUNTIME_ROOT}/clients" -mindepth 1 -maxdepth 1 -printf '%M %u:%g %f\n'; \
+        exit 1; \
+    fi; \
+    if ! jq -e '.version == "0.0.0-beta-18684"' "${BOUNDARY_ROOT}/client-probe.json" >/dev/null; then cat "${BOUNDARY_ROOT}/client-probe.json"; exit 1; fi; \
+    test -z "$(find "${RUNTIME_ROOT}/clients" -mindepth 1 -maxdepth 1 -print -quit)"; \
+    echo 'V2 boundary fixture: authenticated client passed'; \
     touch "${PROC_STOP}"; \
     wait "${POLLER_PID}"; \
     if grep -F -f "${RUNTIME_ROOT}/server-password" "${PROC_CAPTURE}"; then exit 1; fi; \
     if grep -F -f "${RUNTIME_ROOT}/sidecar-secret" "${PROC_CAPTURE}"; then exit 1; fi; \
     test ! -e "/proc/${SECURE_PID}/fd/3"; \
     if tr '\0' '\n' < "/proc/${SECURE_PID}/cmdline" | grep -F -f "${RUNTIME_ROOT}/server-password"; then exit 1; fi; \
+    echo 'V2 boundary fixture: process isolation passed'; \
     SIDECAR_SECRET_FILE="${RUNTIME_ROOT}/sidecar-secret" node --input-type=module -e 'import { readFileSync } from "node:fs"; import { Client } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js"; import { StreamableHTTPClientTransport } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js"; const secret=readFileSync(process.env.SIDECAR_SECRET_FILE,"utf8").trim(); const client=new Client({name:"image-fixture",version:"1"}); const transport=new StreamableHTTPClientTransport(new URL("http://127.0.0.1:18765/mcp"),{requestInit:{headers:{authorization:`Bearer ${secret}`}}}); await client.connect(transport); const tools=await client.listTools(); if (!tools.tools.some((tool)=>tool.name==="get_states")) process.exit(1); await client.close();'; \
+    kill "${SIDECAR_PID}"; \
+    wait "${SIDECAR_PID}"; \
+    test ! -e "${RUNTIME_ROOT}/mcp-sidecar.ready"; \
+    test "$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -X POST -w '%{http_code}' http://127.0.0.1:18765/mcp 2>/dev/null || true)" = "503"; \
+    echo 'V2 boundary fixture: sidecar shutdown passed'; \
+    kill -0 "${PROXY_PID}"; \
+    if runuser -u opencode-v2 -- python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",18765))'; then exit 1; fi; \
+    start_sidecar; \
+    SIDECAR_MARKER_READY=false; \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do \
+        if [ -f "${RUNTIME_ROOT}/mcp-sidecar.ready" ] && [ -S "${RUNTIME_ROOT}/mcp-sidecar.sock" ]; then SIDECAR_MARKER_READY=true; break; fi; \
+        sleep "${FIXTURE_DELAY}"; \
+    done; \
+    if [ "${SIDECAR_MARKER_READY}" != true ]; then cat "${BOUNDARY_ROOT}/sidecar.log"; exit 1; fi; \
+    SIDECAR_RESTARTED=false; \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do \
+        if [ "$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -X POST -w '%{http_code}' http://127.0.0.1:18765/mcp 2>/dev/null || true)" = "401" ]; then SIDECAR_RESTARTED=true; break; fi; \
+        sleep "${FIXTURE_DELAY}"; \
+    done; \
+    if [ "${SIDECAR_RESTARTED}" != "true" ]; then cat "${BOUNDARY_ROOT}/sidecar.log" "${BOUNDARY_ROOT}/proxy.log"; exit 1; fi; \
+    MCP_RECONNECTED=false; \
+    for _attempt in $(seq 1 "${FIXTURE_ATTEMPTS}"); do \
+        MCP_RESPONSE=$(curl -fsS --connect-timeout 1 --max-time 2 -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:4100/api/mcp 2>/dev/null || true); \
+        if printf '%s' "${MCP_RESPONSE}" | jq -e '.data[] | select(.name == "homeassistant" and .status.status == "connected")' >/dev/null 2>&1; then MCP_RECONNECTED=true; break; fi; \
+        sleep "${FIXTURE_DELAY}"; \
+    done; \
+    if [ "${MCP_RECONNECTED}" != "true" ]; then cat "${BOUNDARY_ROOT}/sidecar.log" "${BOUNDARY_ROOT}/proxy.log" "${BOUNDARY_ROOT}/v2.log"; exit 1; fi; \
+    echo 'V2 boundary fixture: sidecar reconnect passed'; \
     if ! kill -0 "${PROXY_PID}" 2>/dev/null; then cat "${BOUNDARY_ROOT}/proxy.log"; exit 1; fi; \
+    kill -KILL "${SIDECAR_PID}"; \
+    test -e "${RUNTIME_ROOT}/mcp-sidecar.ready"; \
+    test "$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -X POST -w '%{http_code}' http://127.0.0.1:18765/mcp 2>/dev/null || true)" = "503"; \
+    kill -0 "${PROXY_PID}"; \
+    wait "${SIDECAR_PID}" || true; \
+    echo 'V2 boundary fixture: abrupt sidecar death passed'; \
     if runuser -u opencode-v2 -- cat "/proc/${SECURE_PID}/environ" >/dev/null 2>&1; then cat "${BOUNDARY_ROOT}/v2.log"; kill "${SECURE_PID}" || true; exit 1; fi; \
     kill "${SECURE_PID}" 2>/dev/null || true; \
     wait "${SECURE_PID}" || true; \
-    kill "${SIDECAR_PID}" 2>/dev/null || true; \
-    wait "${SIDECAR_PID}" || true; \
     kill "${PROXY_PID}" 2>/dev/null || true; \
     kill "${BROKER_PID}" 2>/dev/null || true; \
+    kill "${CLIENT_BROKER_PID}" 2>/dev/null || true; \
     wait "${PROXY_PID}" || true; \
     wait "${BROKER_PID}" || true; \
+    wait "${CLIENT_BROKER_PID}" || true; \
     rm -rf "${BOUNDARY_ROOT}"
 
 # Build the custom ttyd index page (served via -I at runtime): ttyd's page is

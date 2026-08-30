@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+## 3.0.0b2
+
+- Kept the root MCP proxy bound during sidecar startup while returning a clean 503 until backend readiness, and made startup logs and the terminal banner distinguish the active V1 TUI from staged V2.
+- Hardened staged V2 credential delivery against PID reuse and stale readiness after abrupt sidecar exits.
+- Clarified why the TUI still uses V1 and set gate-based targets for b3 to make V2 the default terminal runtime and b4 to remove V1 code from the beta image.
+
 ## 3.0.0b1
 
 - Fixed the read-only session prompt normalization so the in-add-on smoke test no longer reports a false failure.

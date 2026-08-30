@@ -128,7 +128,7 @@ jobs:
             fi
           done < <(find ha_opencode ha_opencode_beta -type f \
               -not -path '*/node_modules/*' \
-              \( -name '*.sh' -o -path '*/s6-rc.d/*/run' -o -path '*/usr/local/bin/*' \))
+              \( -name '*.sh' -o -path '*/s6-rc.d/*/run' -o -path '*/s6-rc.d/*/connect' -o -path '*/usr/local/bin/*' \))
           exit "${status}"
 
       - name: Parse-check every shipped Node script

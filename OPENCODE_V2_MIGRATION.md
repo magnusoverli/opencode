@@ -180,6 +180,9 @@ After successful migration, s6 supervises one staged V2 server on
 is not used by the terminal, LAN server, or OpenChamber. When MCP is enabled,
 the staged V2 process connects to a separately supervised Home Assistant MCP
 sidecar on authenticated loopback; user-facing clients still remain on V1.
+Consequently, seeing `1.18.25` in the ttyd TUI is expected through `3.0.0b2`:
+`opencode-session.sh` still launches the retained V1 binary until the terminal
+activation gates below pass.
 
 The launcher:
 
@@ -242,7 +245,8 @@ directory.
 
 ## Rollback
 
-Until V2 is separately approved for stable:
+Through the b3 terminal cutover, while the beta image still contains the
+temporary V1 fallback:
 
 1. Stop or leave the staged V2 service inactive.
 2. Continue running the retained V1 terminal, LAN, OpenChamber, and MCP paths.
@@ -252,12 +256,42 @@ Until V2 is separately approved for stable:
 Removing `/data/v2` is not an automatic rollback step. It may contain V2-only
 sessions once user-facing activation begins and must be treated as user data.
 
+The planned b4 beta removes V1 executables and service definitions from the
+image, so rollback after that point is an add-on downgrade to a prior image, not
+an in-container runtime switch. The V1 roots remain byte-for-byte untouched and
+must not be automatically deleted; the downgraded image continues to read those
+original roots rather than attempting a V2-to-V1 database conversion.
+
+## V1 Decommission Gates
+
+- b2 remains V1-default and makes the staged/active runtime explicit in the
+  terminal banner.
+- b3 makes V2 the default terminal runtime and starts no V1 service unless the
+  temporary rollback selector is explicitly chosen.
+- b4 removes the V1 package, launchers, generated config, and s6 paths after the
+  b3 real-system soak passes.
+- Stable 3.0 ships V2 only; V1 remains available as the separate stable 2.5.x
+  add-on release line, not as hidden code inside the 3.0 image.
+- V1 persistent data survives code removal until a later explicit retention
+  policy is designed and approved.
+
 ## Remaining V2 Activation Gates
 
+- Keep the root TCP proxy bound to port 8765 throughout sidecar startup and
+  restart, return a clean 503 until a root-owned backend-ready marker exists,
+  correct the sidecar/proxy ownership log messages, and recheck exact s6 restart
+  behavior on Home Assistant.
 - Provide approved `/homeassistant` writes without exposing retained V1 or
   sidecar credentials.
 - Enforce project/plugin discovery restrictions for every client-selected
   working directory.
-- Connect ttyd/TUI only after those boundaries pass.
-- Exercise sidecar and V2 restart behavior under the exact s6 supervision tree
-  in a Home Assistant runtime.
+- Provide V2 server authentication to the TUI client without placing the
+  password in its environment, arguments, shell history, or readable files.
+- Prove native V2 read-only and ordered permission behavior after every config
+  and plugin hook.
+- Inject bounded briefing and decision context into initial and continuation
+  requests without duplication.
+- Connect ttyd/TUI only after those boundaries pass, first as an explicit
+  reversible preview while V1 data remains the rollback source.
+- Defer OpenChamber until its upstream V2 support and Home Assistant Ingress
+  behavior are validated separately.

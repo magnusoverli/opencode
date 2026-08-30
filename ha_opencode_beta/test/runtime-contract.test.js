@@ -117,6 +117,15 @@ describe(`${CHANNEL} runtime pin`, () => {
     );
   });
 
+  it("distinguishes the active V1 TUI from the staged V2 runtime", () => {
+    const session = read(ROOTFS, "usr", "local", "bin", "opencode-session.sh");
+
+    assert.match(session, /Current TUI: OpenCode V1 \$\{OPENCODE_VERSION\}/);
+    assert.match(session, /cat \/usr\/local\/share\/opencode-v2-certified-version/);
+    assert.match(session, /OpenCode V2: \$\{OPENCODE_V2_VERSION\} \(\$\{OPENCODE_V2_STATUS\}; this TUI is not attached yet\)/);
+    assert.match(session, /\[ -f \/run\/opencode-v2\/ready \]/);
+  });
+
   it("exercises the staged V2 Linux privilege boundary during the image build", () => {
     assert.match(dockerfile, /opencode-v2-launch/);
     assert.match(dockerfile, /secure-launcher\.c/);
@@ -132,6 +141,7 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(dockerfile, /test ! -e "\/proc\/\$\{SECURE_PID\}\/fd\/3"/);
     assert.match(dockerfile, /StreamableHTTPClientTransport/);
     assert.match(dockerfile, /await client\.listTools\(\)/);
+    assert.match(dockerfile, /Skipping architecture-neutral V2 boundary fixture on arm64/);
   });
 
   it("bounds every process in the in-image migration fixture", () => {

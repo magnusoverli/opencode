@@ -63,6 +63,15 @@ describe("OpenCode V2 state isolation", () => {
     "ha-opencode-v2-mcp-proxy",
     "run",
   );
+  const v2ProxyConnect = read(
+    ROOTFS,
+    "etc",
+    "s6-overlay",
+    "s6-rc.d",
+    "ha-opencode-v2-mcp-proxy",
+    "connect",
+  );
+  const mcpServer = read(ROOTFS, "opt", "ha-mcp-server", "index.js");
 
   it("assigns persistent V2 state to one atomically selected generation", () => {
     assert.match(environment, /OPENCODE_V2_GENERATIONS_ROOT="\$\{OPENCODE_V2_ROOT\}\/generations"/);
@@ -171,6 +180,8 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(init, /sidecar-secret/);
     assert.match(init, /cp \/opt\/ha-mcp-server\/AGENTS\.md/);
     assert.match(init, /mkdir -p "\$\{V2_RUNTIME_ROOT\}\/config\/opencode" "\$\{V2_RUNTIME_ROOT\}\/home" "\$\{V2_RUNTIME_ROOT\}\/workspace"/);
+    assert.match(init, /"\$\{V2_RUNTIME_ROOT\}\/clients"/);
+    assert.match(init, /chmod 700 "\$\{V2_RUNTIME_ROOT\}\/clients"/);
     assert.match(init, /bashio::config 'restrict_sensitive_files' 'true'/);
     assert.ok(init.indexOf("V2_STATE_READY=true") < init.indexOf("managed-config.js"));
   });
@@ -198,10 +209,23 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(nonDumpable, /setenv\("OPENCODE_SERVER_PASSWORD"/);
     assert.match(nonDumpable, /pipe2\(descriptors, O_CLOEXEC\)/);
     assert.match(credentialBroker, /SO_PEERCRED/);
-    assert.match(credentialBroker, /expected != peer\.pid/);
+    assert.match(credentialBroker, /validate_expected_identity\(pid_path, peer\.pid\)/);
+    assert.match(secureLauncher, /process_start_time\(getpid\(\)\)/);
+    assert.match(credentialBroker, /signal\(SIGPIPE, SIG_IGN\)/);
+    assert.match(credentialBroker, /client-credential\.sock/);
+    assert.match(credentialBroker, /validate_expected_client/);
+    assert.match(credentialBroker, /read_process_start_time/);
+    assert.match(secureLauncher, /publish_expected_client/);
+    assert.match(secureLauncher, /client-credential\.sock/);
+    assert.match(secureLauncher, /"--client"/);
+    assert.match(secureLauncher, /"http:\/\/127\.0\.0\.1:4100"/);
     assert.match(secureLauncher, /execve\(child_argv\[0\], child_argv, environ\)/);
     assert.match(v2Server, /http:\/\/127\.0\.0\.1:8765\/mcp/);
     assert.match(v2Server, /sidecar is not ready"\n        exit 1/);
+    assert.ok(
+      v2Server.indexOf("SIDECAR_READY=false") < v2Server.indexOf("exec /usr/local/bin/opencode-v2-launch"),
+      "V2 drops to UID 60000 before the root proxy owns its public listener",
+    );
     assert.match(v2Server, /4100/);
     assert.doesNotMatch(v2Server, /source \/data\/\.env_vars/);
     assert.doesNotMatch(v2Server, /SUPERVISOR_TOKEN|HA_TOKEN|HA_ACCESS_TOKEN|PPQ_API_KEY/);
@@ -221,6 +245,10 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(v2Sidecar, /OPENCODE_MCP_SIDECAR_SOCKET="\$\{V2_RUNTIME_ROOT\}\/mcp-sidecar\.sock"/);
     assert.match(v2Sidecar, /OPENCODE_MCP_SIDECAR_PUBLIC_HOST=127\.0\.0\.1:8765/);
     assert.match(v2Sidecar, /OPENCODE_MCP_SIDECAR_SECRET_FILE="\$\{SIDECAR_SECRET_FILE\}"/);
+    assert.match(v2Sidecar, /OPENCODE_MCP_SIDECAR_READY_FILE="\$\{SIDECAR_READY_FILE\}"/);
+    assert.match(v2Sidecar, /rm -f "\$\{SIDECAR_READY_FILE\}"/);
+    assert.match(v2Sidecar, /sidecar on root-only Unix socket \$\{V2_RUNTIME_ROOT\}\/mcp-sidecar\.sock/);
+    assert.doesNotMatch(v2Sidecar, /sidecar on private loopback port 8765/);
     assert.match(v2Sidecar, /source "\$\{SIDECAR_ENV_FILE\}"/);
     assert.doesNotMatch(v2Sidecar, /source \/data\/\.env_vars/);
     assert.match(v2Sidecar, /ulimit -c 0/);
@@ -242,7 +270,33 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(secureLauncher, /LD_PRELOAD.*opencode-v2-non-dumpable\.so/);
     assert.match(dockerfile, /cat "\/proc\/\$\{SECURE_PID\}\/environ"/);
     assert.match(v2Proxy, /s6-tcpserver -q -c 64 127\.0\.0\.1 8765/);
-    assert.match(v2Proxy, /s6-ipcclient "\$\{V2_RUNTIME_ROOT\}\/mcp-sidecar\.sock" s6-ioconnect/);
+    assert.doesNotMatch(v2Proxy, /until s6-ipcclient/);
+    assert.match(v2Proxy, /ha-opencode-v2-mcp-proxy\/connect/);
+    assert.match(v2ProxyConnect, /mcp-sidecar\.ready/);
+    assert.match(v2ProxyConnect, /V2_RUNTIME_ROOT="\$\{V2_RUNTIME_ROOT:-\/run\/opencode-v2\}"/);
+    assert.match(v2ProxyConnect, /0:0:600:1/);
+    assert.match(v2ProxyConnect, /\/proc\/\$\{ready_pid\}\/stat/);
+    assert.match(v2ProxyConnect, /\/proc\/\$\{ready_pid\}\/status/);
+    assert.match(v2ProxyConnect, /"\$\{1:-\}" != "Z"/);
+    assert.match(v2ProxyConnect, /\[ -S "\$\{SIDECAR_SOCKET\}" \]/);
+    assert.match(v2ProxyConnect, /HTTP\/1\.1 503 Service Unavailable/);
+    assert.match(v2ProxyConnect, /exec s6-ipcclient "\$\{SIDECAR_SOCKET\}" s6-ioconnect/);
+    assert.match(mcpServer, /OPENCODE_MCP_SIDECAR_READY_FILE/);
+    assert.match(mcpServer, /writeFileSync\(temporaryReadyFile/);
+    assert.match(mcpServer, /readFileSync\("\/proc\/self\/stat"/);
+    assert.match(mcpServer, /unlinkSync\(readyFile\)/);
+    assert.match(dockerfile, /chmod \+x \/etc\/s6-overlay\/s6-rc\.d\/ha-opencode-v2-mcp-proxy\/connect/);
+    assert.match(dockerfile, /EARLY_STATUS=\$\(curl/);
+    assert.match(dockerfile, /\[ "\$\{EARLY_STATUS\}" = "503" \]/);
+    assert.match(dockerfile, /SIDECAR_MARKER_READY=false/);
+    assert.match(dockerfile, /test ! -e "\$\{RUNTIME_ROOT\}\/mcp-sidecar\.ready"/);
+    assert.match(dockerfile, /SIDECAR_RESTARTED=false/);
+    assert.match(dockerfile, /MCP_RECONNECTED=false/);
+    assert.match(dockerfile, /kill -KILL "\$\{SIDECAR_PID\}"/);
+    assert.match(dockerfile, /abrupt sidecar death passed/);
+    assert.match(dockerfile, /opencode-v2-credential-broker "\$\{RUNTIME_ROOT\}" client/);
+    assert.match(dockerfile, /opencode-v2-launch --client .*--probe/);
+    assert.match(dockerfile, /client-probe\.json/);
     for (const marker of [
       ["user", "contents.d", "ha-opencode-v2-mcp-sidecar"],
       ["ha-opencode-v2-server", "dependencies.d", "ha-opencode-v2-mcp-sidecar"],

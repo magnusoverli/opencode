@@ -4,6 +4,9 @@
 V2_RUNTIME_ROOT=/run/opencode-v2
 SIDECAR_SECRET_FILE="${V2_RUNTIME_ROOT}/sidecar-secret"
 SIDECAR_ENV_FILE="${V2_RUNTIME_ROOT}/sidecar-env"
+SIDECAR_READY_FILE="${V2_RUNTIME_ROOT}/mcp-sidecar.ready"
+
+rm -f "${SIDECAR_READY_FILE}"
 
 if [ ! -f "${SIDECAR_ENV_FILE}" ] \
     || [ -L "${SIDECAR_ENV_FILE}" ] \
@@ -38,7 +41,7 @@ if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
     exec sleep infinity
 fi
 
-bashio::log.info "Starting authenticated OpenCode V2 Home Assistant sidecar on private loopback port 8765 (${OPENCODE_MCP_TOOL_PROFILE} profile)"
+bashio::log.info "Starting authenticated OpenCode V2 Home Assistant sidecar on root-only Unix socket ${V2_RUNTIME_ROOT}/mcp-sidecar.sock (${OPENCODE_MCP_TOOL_PROFILE} profile)"
 ulimit -c 0
 
 exec env -i \
@@ -66,5 +69,6 @@ exec env -i \
     OPENCODE_MCP_SIDECAR_SOCKET="${V2_RUNTIME_ROOT}/mcp-sidecar.sock" \
     OPENCODE_MCP_SIDECAR_PUBLIC_HOST=127.0.0.1:8765 \
     OPENCODE_MCP_SIDECAR_SECRET_FILE="${SIDECAR_SECRET_FILE}" \
+    OPENCODE_MCP_SIDECAR_READY_FILE="${SIDECAR_READY_FILE}" \
     LD_PRELOAD=/usr/local/lib/opencode-v2-non-dumpable.so \
     node /opt/ha-mcp-server/index.js
