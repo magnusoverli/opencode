@@ -34,10 +34,6 @@ jobs:
         working-directory: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
         run: npm ci --no-audit --no-fund
 
-      - name: Install MCP runtime dependencies for integrated contracts
-        working-directory: ha_opencode_beta/rootfs/opt/ha-mcp-server
-        run: npm install --omit=dev --no-audit --no-fund
-
       - name: Beta add-on contract tests
         run: node --test "ha_opencode_beta/test/*.test.js"
 
@@ -108,10 +104,6 @@ jobs:
 
       - name: Install exact V2 beta dependency set
         run: npm ci --no-audit --no-fund
-
-      - name: Install MCP runtime dependencies
-        working-directory: ha_opencode_beta/rootfs/opt/ha-mcp-server
-        run: npm install --omit=dev --no-audit --no-fund
 
       - name: Verify matching CLI and plugin pins
         run: npm run verify:versions
