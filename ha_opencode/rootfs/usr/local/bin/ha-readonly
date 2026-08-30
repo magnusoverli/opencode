@@ -118,9 +118,13 @@ fi
 # agent therefore exists only here, and its prompt is injected from the file.
 # ---------------------------------------------------------------------------
 if [ -f "${AGENT_FILE}" ]; then
-    AGENT_PROMPT=$(awk 'BEGIN { fence = 0 }
+    AGENT_PROMPT=$(awk 'BEGIN { fence = 0; body = 0 }
         /^---$/ && fence < 2 { fence += 1; next }
-        fence >= 2 { print }' "${AGENT_FILE}")
+        fence >= 2 {
+            if (!body && $0 ~ /^[[:space:]]*$/) next
+            body = 1
+            print
+        }' "${AGENT_FILE}")
     if [ -n "${AGENT_PROMPT}" ]; then
         CONFIG_CONTENT=$(printf '%s' "${CONFIG_CONTENT}" \
             | jq --arg name "${AGENT_NAME}" --arg prompt "${AGENT_PROMPT}" \

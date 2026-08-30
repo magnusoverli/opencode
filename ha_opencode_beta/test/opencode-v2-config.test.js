@@ -8,6 +8,7 @@ import {
   buildManagedConfig,
   DEFAULT_MCP_ENDPOINT,
   DEFAULT_PLUGIN_PACKAGE,
+  DEFAULT_RUNTIME_GUARD_PACKAGE,
 } from "../rootfs/opt/opencode-v2-homeassistant/managed-config.js";
 
 const ADDON_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -25,7 +26,7 @@ describe("OpenCode V2 managed configuration", () => {
 
     assert.equal(config.snapshots, false);
     assert.equal(config.share, "disabled");
-    assert.deepEqual(config.plugins, []);
+    assert.deepEqual(config.plugins, [{ package: DEFAULT_RUNTIME_GUARD_PACKAGE }]);
     assert.deepEqual(config.permissions.slice(0, 3), [
       { action: "read", resource: "*", effect: "allow" },
       { action: "edit", resource: "*", effect: "ask" },
@@ -51,14 +52,17 @@ describe("OpenCode V2 managed configuration", () => {
     const disabled = buildManagedConfig();
     const enabled = buildManagedConfig({ pluginEnabled: true });
 
-    assert.deepEqual(disabled.plugins, []);
-    assert.deepEqual(enabled.plugins, [{
-      package: DEFAULT_PLUGIN_PACKAGE,
-      options: {
-        endpoint: DEFAULT_MCP_ENDPOINT,
-        timeouts: { startup: 30_000, catalog: 60_000, execution: 60_000 },
+    assert.deepEqual(disabled.plugins, [{ package: DEFAULT_RUNTIME_GUARD_PACKAGE }]);
+    assert.deepEqual(enabled.plugins, [
+      { package: DEFAULT_RUNTIME_GUARD_PACKAGE },
+      {
+        package: DEFAULT_PLUGIN_PACKAGE,
+        options: {
+          endpoint: DEFAULT_MCP_ENDPOINT,
+          timeouts: { startup: 30_000, catalog: 60_000, execution: 60_000 },
+        },
       },
-    }]);
+    ]);
   });
 
   it("can disable sensitive-read rules without changing the base policy", () => {

@@ -194,7 +194,7 @@ describe(`${CHANNEL} read-only launcher`, { skip: !hasTool("jq") && "jq is not i
   it("injects the agent prompt from the markdown, frontmatter stripped", () => {
     const prompt = effective.agent["home-assistant-read-only"].prompt;
     assert.equal(typeof prompt, "string");
-    assert.ok(prompt.includes("# Home Assistant read-only session"));
+    assert.ok(prompt.startsWith("# Home Assistant read-only session"));
     assert.ok(prompt.includes("home-assistant-troubleshooting"));
     assert.ok(!prompt.includes("mode: primary"), "frontmatter leaked into the prompt");
     assert.ok(!prompt.startsWith("---"), "frontmatter leaked into the prompt");

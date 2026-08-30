@@ -42,6 +42,27 @@ describe("OpenCode V2 state isolation", () => {
     "ha-opencode-v2-server",
     "run",
   );
+  const v2Sidecar = read(
+    ROOTFS,
+    "etc",
+    "s6-overlay",
+    "s6-rc.d",
+    "ha-opencode-v2-mcp-sidecar",
+    "run",
+  );
+  const v2Plugin = read(ROOTFS, "opt", "opencode-v2-homeassistant", "plugin.js");
+  const runtimeGuard = read(ROOTFS, "opt", "opencode-v2-homeassistant", "runtime-guard.js");
+  const nonDumpable = read(ROOTFS, "opt", "opencode-v2-homeassistant", "non-dumpable.c");
+  const secureLauncher = read(ROOTFS, "opt", "opencode-v2-homeassistant", "secure-launcher.c");
+  const credentialBroker = read(ROOTFS, "opt", "opencode-v2-homeassistant", "credential-broker.c");
+  const v2Proxy = read(
+    ROOTFS,
+    "etc",
+    "s6-overlay",
+    "s6-rc.d",
+    "ha-opencode-v2-mcp-proxy",
+    "run",
+  );
 
   it("assigns persistent V2 state to one atomically selected generation", () => {
     assert.match(environment, /OPENCODE_V2_GENERATIONS_ROOT="\$\{OPENCODE_V2_ROOT\}\/generations"/);
@@ -85,6 +106,10 @@ describe("OpenCode V2 state isolation", () => {
       "OPENCODE_V2_WORK_ROOT",
       "XDG_STATE_HOME",
       "XDG_CACHE_HOME",
+      "LD_PRELOAD",
+      "LD_LIBRARY_PATH",
+      "BASH_ENV",
+      "IFS",
     ]) {
       assert.match(init, new RegExp(`"${name}"`));
     }
@@ -141,7 +166,9 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(init, /V2_STATE_READY=true/);
     assert.match(init, /V2_RUNTIME_ROOT=\/run\/opencode-v2/);
     assert.match(init, /managed-config\.js/);
-    assert.match(init, /--plugin-enabled false/);
+    assert.match(init, /--plugin-enabled "\$\{V2_PLUGIN_ENABLED\}"/);
+    assert.match(init, /V2_PLUGIN_ENABLED=.*MCP_ENABLED/);
+    assert.match(init, /sidecar-secret/);
     assert.match(init, /cp \/opt\/ha-mcp-server\/AGENTS\.md/);
     assert.match(init, /mkdir -p "\$\{V2_RUNTIME_ROOT\}\/config\/opencode" "\$\{V2_RUNTIME_ROOT\}\/home" "\$\{V2_RUNTIME_ROOT\}\/workspace"/);
     assert.match(init, /bashio::config 'restrict_sensitive_files' 'true'/);
@@ -150,20 +177,32 @@ describe("OpenCode V2 state isolation", () => {
 
   it("supervises V2 on loopback under uid 60000 with a scrubbed environment", () => {
     assert.match(v2Server, /opencode_v2_select_generation/);
-    assert.match(v2Server, /exec setpriv/);
-    assert.match(v2Server, /--reuid=60000/);
-    assert.match(v2Server, /--regid=60000/);
-    assert.match(v2Server, /--clear-groups/);
-    assert.match(v2Server, /--no-new-privs/);
-    assert.match(v2Server, /env -i/);
-    assert.match(v2Server, /cd "\$\{V2_RUNTIME_ROOT\}\/workspace"/);
-    assert.match(v2Server, /HOME="\$\{V2_RUNTIME_ROOT\}\/home"/);
-    assert.match(v2Server, /OPENCODE_DISABLE_PROJECT_CONFIG=1/);
-    assert.match(v2Server, /OPENCODE_DISABLE_EXTERNAL_SKILLS=1/);
-    assert.match(v2Server, /OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1/);
-    assert.match(v2Server, /OPENCODE_CONFIG="\$\{V2_RUNTIME_ROOT\}\/managed\.json"/);
-    assert.match(v2Server, /--hostname 127\.0\.0\.1/);
-    assert.match(v2Server, /--port 4100/);
+    assert.match(v2Server, /exec \/usr\/local\/bin\/opencode-v2-launch/);
+    assert.doesNotMatch(v2Server, /SERVER_PASSWORD=/);
+    assert.doesNotMatch(v2Server, /exec 3</);
+    assert.match(secureLauncher, /#define RUNTIME_UID 60000/);
+    assert.match(secureLauncher, /setgroups\(0, NULL\)/);
+    assert.match(secureLauncher, /setresgid\(RUNTIME_GID/);
+    assert.match(secureLauncher, /setresuid\(RUNTIME_UID/);
+    assert.match(secureLauncher, /PR_SET_NO_NEW_PRIVS/);
+    assert.match(secureLauncher, /PR_CAPBSET_DROP/);
+    assert.match(secureLauncher, /PR_SET_DUMPABLE, 0/);
+    assert.match(secureLauncher, /setrlimit\(RLIMIT_CORE/);
+    assert.match(secureLauncher, /clearenv\(\)/);
+    assert.match(secureLauncher, /OPENCODE_DISABLE_PROJECT_CONFIG/);
+    assert.match(secureLauncher, /OPENCODE_DISABLE_EXTERNAL_SKILLS/);
+    assert.match(secureLauncher, /OPENCODE_DISABLE_CLAUDE_CODE_SKILLS/);
+    assert.doesNotMatch(secureLauncher, /OPENCODE_SERVER_PASSWORD/);
+    assert.match(secureLauncher, /publish_expected_pid/);
+    assert.match(secureLauncher, /OPENCODE_V2_CREDENTIAL_SOCKET/);
+    assert.match(nonDumpable, /setenv\("OPENCODE_SERVER_PASSWORD"/);
+    assert.match(nonDumpable, /pipe2\(descriptors, O_CLOEXEC\)/);
+    assert.match(credentialBroker, /SO_PEERCRED/);
+    assert.match(credentialBroker, /expected != peer\.pid/);
+    assert.match(secureLauncher, /execve\(child_argv\[0\], child_argv, environ\)/);
+    assert.match(v2Server, /http:\/\/127\.0\.0\.1:8765\/mcp/);
+    assert.match(v2Server, /sidecar is not ready"\n        exit 1/);
+    assert.match(v2Server, /4100/);
     assert.doesNotMatch(v2Server, /source \/data\/\.env_vars/);
     assert.doesNotMatch(v2Server, /SUPERVISOR_TOKEN|HA_TOKEN|HA_ACCESS_TOKEN|PPQ_API_KEY/);
     assert.ok(fs.existsSync(path.join(
@@ -175,6 +214,45 @@ describe("OpenCode V2 state isolation", () => {
       "contents.d",
       "ha-opencode-v2-server",
     )));
+  });
+
+  it("isolates the authenticated Home Assistant sidecar from V2 shell subprocesses", () => {
+    assert.match(v2Sidecar, /OPENCODE_MCP_TRANSPORT=streamable-http/);
+    assert.match(v2Sidecar, /OPENCODE_MCP_SIDECAR_SOCKET="\$\{V2_RUNTIME_ROOT\}\/mcp-sidecar\.sock"/);
+    assert.match(v2Sidecar, /OPENCODE_MCP_SIDECAR_PUBLIC_HOST=127\.0\.0\.1:8765/);
+    assert.match(v2Sidecar, /OPENCODE_MCP_SIDECAR_SECRET_FILE="\$\{SIDECAR_SECRET_FILE\}"/);
+    assert.match(v2Sidecar, /source "\$\{SIDECAR_ENV_FILE\}"/);
+    assert.doesNotMatch(v2Sidecar, /source \/data\/\.env_vars/);
+    assert.match(v2Sidecar, /ulimit -c 0/);
+    assert.match(v2Sidecar, /LD_PRELOAD=\/usr\/local\/lib\/opencode-v2-non-dumpable\.so/);
+    assert.match(init, /V2_SIDECAR_ENV_TEMP/);
+    assert.match(init, /"\$\{V2_RUNTIME_ROOT\}\/sidecar-env"/);
+    assert.match(v2Sidecar, /exec env -i/);
+    assert.match(v2Sidecar, /SUPERVISOR_TOKEN="\$\{SUPERVISOR_TOKEN\}"/);
+    assert.doesNotMatch(v2Sidecar, /OPENCODE_SERVER_PASSWORD/);
+    assert.match(v2Plugin, /CALLER_SECRET_FD = 3/);
+    assert.match(runtimeGuard, /import\("bun:ffi"\)/);
+    assert.match(runtimeGuard, /PR_SET_DUMPABLE = 4/);
+    assert.match(runtimeGuard, /prctl\(PR_SET_DUMPABLE, 0/);
+    assert.match(runtimeGuard, /scrubParentEnvironment\(\)/);
+    assert.match(runtimeGuard, /ctx\.shell\.hook\("create\.before"/);
+    assert.match(v2Plugin, /delete input\.env\[name\]/);
+    assert.match(nonDumpable, /prctl\(PR_SET_DUMPABLE, 0/);
+    assert.match(nonDumpable, /unsetenv\("LD_PRELOAD"\)/);
+    assert.match(secureLauncher, /LD_PRELOAD.*opencode-v2-non-dumpable\.so/);
+    assert.match(dockerfile, /cat "\/proc\/\$\{SECURE_PID\}\/environ"/);
+    assert.match(v2Proxy, /s6-tcpserver -q -c 64 127\.0\.0\.1 8765/);
+    assert.match(v2Proxy, /s6-ipcclient "\$\{V2_RUNTIME_ROOT\}\/mcp-sidecar\.sock" s6-ioconnect/);
+    for (const marker of [
+      ["user", "contents.d", "ha-opencode-v2-mcp-sidecar"],
+      ["ha-opencode-v2-server", "dependencies.d", "ha-opencode-v2-mcp-sidecar"],
+      ["user", "contents.d", "ha-opencode-v2-mcp-proxy"],
+      ["ha-opencode-v2-server", "dependencies.d", "ha-opencode-v2-mcp-proxy"],
+      ["user", "contents.d", "ha-opencode-v2-credential-broker"],
+      ["ha-opencode-v2-server", "dependencies.d", "ha-opencode-v2-credential-broker"],
+    ]) {
+      assert.ok(fs.existsSync(path.join(ROOTFS, "etc", "s6-overlay", "s6-rc.d", ...marker)));
+    }
   });
 
   it("validates every selected generation leaf before exporting it", () => {

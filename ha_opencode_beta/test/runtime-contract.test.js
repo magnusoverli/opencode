@@ -118,13 +118,20 @@ describe(`${CHANNEL} runtime pin`, () => {
   });
 
   it("exercises the staged V2 Linux privilege boundary during the image build", () => {
-    assert.match(dockerfile, /--reuid=60000/);
-    assert.match(dockerfile, /--regid=60000/);
-    assert.match(dockerfile, /--clear-groups/);
-    assert.match(dockerfile, /--no-new-privs/);
-    assert.match(dockerfile, /--bounding-set=-all/);
+    assert.match(dockerfile, /opencode-v2-launch/);
+    assert.match(dockerfile, /secure-launcher\.c/);
     assert.match(dockerfile, /NoNewPrivs:/);
     assert.match(dockerfile, /CapBnd:/);
+    assert.match(dockerfile, /managed-config\.js --plugin-enabled true/);
+    assert.match(
+      read(ROOTFS, "opt", "opencode-v2-homeassistant", "secure-launcher.c"),
+      /"\/usr\/local\/bin\/opencode2", "serve"/,
+    );
+    assert.match(dockerfile, /cc -shared -fPIC/);
+    assert.match(dockerfile, /opencode-v2-non-dumpable\.so/);
+    assert.match(dockerfile, /test ! -e "\/proc\/\$\{SECURE_PID\}\/fd\/3"/);
+    assert.match(dockerfile, /StreamableHTTPClientTransport/);
+    assert.match(dockerfile, /await client\.listTools\(\)/);
   });
 
   it("bounds every process in the in-image migration fixture", () => {
@@ -195,7 +202,6 @@ describe(`${CHANNEL} bundled runtime precedence`, () => {
     const mustDisable = [
       path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "init-opencode", "run"),
       path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "ha-opencode", "run"),
-      path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "ha-opencode-v2-server", "run"),
       path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "ha-opencode-server", "run"),
       path.join("rootfs", "etc", "s6-overlay", "s6-rc.d", "ha-openchamber", "run"),
       path.join("rootfs", "usr", "local", "bin", "opencode-session.sh"),
@@ -208,6 +214,10 @@ describe(`${CHANNEL} bundled runtime precedence`, () => {
         `${relative} does not disable OpenCode auto-update`,
       );
     }
+    assert.match(
+      read(ROOTFS, "opt", "opencode-v2-homeassistant", "secure-launcher.c"),
+      /OPENCODE_DISABLE_AUTOUPDATE.*true/,
+    );
   });
 
   it("tells OpenChamber the certified runtime cannot be upgraded in place", () => {

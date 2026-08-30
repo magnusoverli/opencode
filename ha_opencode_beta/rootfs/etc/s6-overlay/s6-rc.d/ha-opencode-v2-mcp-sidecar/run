@@ -1,0 +1,70 @@
+#!/command/with-contenv bashio
+# Credential-bearing Home Assistant MCP boundary for the staged V2 runtime.
+
+V2_RUNTIME_ROOT=/run/opencode-v2
+SIDECAR_SECRET_FILE="${V2_RUNTIME_ROOT}/sidecar-secret"
+SIDECAR_ENV_FILE="${V2_RUNTIME_ROOT}/sidecar-env"
+
+if [ ! -f "${SIDECAR_ENV_FILE}" ] \
+    || [ -L "${SIDECAR_ENV_FILE}" ] \
+    || [ "$(stat -c '%u:%g:%a:%h' "${SIDECAR_ENV_FILE}" 2>/dev/null || true)" != "0:0:600:1" ]; then
+    bashio::log.warning "OpenCode V2 Home Assistant sidecar is inactive because its allowlisted environment is unavailable"
+    exec sleep infinity
+fi
+# shellcheck disable=SC1090
+source "${SIDECAR_ENV_FILE}"
+
+if [ "${OPENCODE_MCP_ENABLED:-false}" != "true" ]; then
+    exec sleep infinity
+fi
+
+if [ ! -f "${SIDECAR_SECRET_FILE}" ] \
+    || [ -L "${SIDECAR_SECRET_FILE}" ] \
+    || [ "$(stat -c '%u:%g:%a:%h' "${SIDECAR_SECRET_FILE}" 2>/dev/null || true)" != "0:0:600:1" ]; then
+    bashio::log.warning "OpenCode V2 Home Assistant sidecar is inactive because its caller boundary is unavailable"
+    exec sleep infinity
+fi
+
+case "${OPENCODE_MCP_TOOL_PROFILE:-}" in
+    compact|configuration|full) ;;
+    *)
+        bashio::log.warning "OpenCode V2 Home Assistant sidecar is inactive because its tool profile is invalid"
+        exec sleep infinity
+        ;;
+esac
+
+if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
+    bashio::log.warning "OpenCode V2 Home Assistant sidecar is inactive because Supervisor credentials are unavailable"
+    exec sleep infinity
+fi
+
+bashio::log.info "Starting authenticated OpenCode V2 Home Assistant sidecar on private loopback port 8765 (${OPENCODE_MCP_TOOL_PROFILE} profile)"
+ulimit -c 0
+
+exec env -i \
+    HOME=/data \
+    USER=root \
+    LOGNAME=root \
+    SHELL=/bin/bash \
+    PATH=/usr/local/bin:/usr/bin:/bin \
+    LANG=C.UTF-8 \
+    NODE_OPTIONS=--max-old-space-size=512 \
+    TMPDIR=/data/.cache/opencode-tmp \
+    ADDON_CHANNEL=beta \
+    SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}" \
+    HA_ACCESS_TOKEN="${HA_ACCESS_TOKEN:-}" \
+    HA_NATIVE_MCP_API_ID="${HA_NATIVE_MCP_API_ID:-assist}" \
+    OPENCODE_MCP_TOOL_PROFILE="${OPENCODE_MCP_TOOL_PROFILE}" \
+    OPENCODE_NATIVE_HA_MCP_ENABLED=false \
+    OPENCODE_DECISION_NOTES="${OPENCODE_DECISION_NOTES:-false}" \
+    OPENCODE_DECISION_NOTES_DIR="${OPENCODE_DECISION_NOTES_DIR:-/homeassistant/opencode_beta}" \
+    SCREENSHOT_ENABLED="${SCREENSHOT_ENABLED:-false}" \
+    PUPPETEER_EXECUTABLE_PATH="${PUPPETEER_EXECUTABLE_PATH:-/usr/bin/chromium}" \
+    Z2M_URL="${Z2M_URL:-}" \
+    Z2M_MQTT_TOPIC="${Z2M_MQTT_TOPIC:-}" \
+    OPENCODE_MCP_TRANSPORT=streamable-http \
+    OPENCODE_MCP_SIDECAR_SOCKET="${V2_RUNTIME_ROOT}/mcp-sidecar.sock" \
+    OPENCODE_MCP_SIDECAR_PUBLIC_HOST=127.0.0.1:8765 \
+    OPENCODE_MCP_SIDECAR_SECRET_FILE="${SIDECAR_SECRET_FILE}" \
+    LD_PRELOAD=/usr/local/lib/opencode-v2-non-dumpable.so \
+    node /opt/ha-mcp-server/index.js

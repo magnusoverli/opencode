@@ -1,0 +1,8 @@
+#!/command/with-contenv bashio
+
+V2_RUNTIME_ROOT=/run/opencode-v2
+if [ ! -f "${V2_RUNTIME_ROOT}/ready" ] || [ ! -x /usr/local/bin/opencode-v2-credential-broker ]; then
+    exec sleep infinity
+fi
+
+exec /usr/local/bin/opencode-v2-credential-broker "${V2_RUNTIME_ROOT}"

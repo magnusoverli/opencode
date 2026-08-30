@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
+import { closeSync, openSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { createServer as createHttpServer } from "node:http";
 import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { after, before, describe, it } from "node:test";
+import { Server as McpServer } from "../rootfs/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js";
+import { ListToolsRequestSchema } from "../rootfs/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js";
+import { startAuthenticatedStreamableHttp } from "../rootfs/opt/ha-mcp-server/lib/authenticated-streamable-http.js";
 
 import { buildManagedConfig } from "../rootfs/opt/opencode-v2-homeassistant/managed-config.js";
 
@@ -16,9 +19,11 @@ const ADDON_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGE_ROOT = join(ADDON_ROOT, "rootfs", "opt", "opencode-v2-homeassistant");
 const CLI = join(PACKAGE_ROOT, "node_modules", "@opencode-ai", "cli", "bin", "opencode2.exe");
 const PLUGIN = join(PACKAGE_ROOT, "plugin.js");
+const RUNTIME_GUARD = join(PACKAGE_ROOT, "runtime-guard.js");
 const PLUGIN_API = join(PACKAGE_ROOT, "node_modules", "@opencode-ai", "plugin", "dist", "promise", "index.js");
 const HOME_PLUGIN_ID = "home.plugin.must-not-load";
 const SENTINEL = "supervisor-token-must-not-appear";
+const SIDECAR_SECRET = "a".repeat(64);
 const SERVER_PASSWORD = "v2-beta-test-server-password";
 const AUTHORIZATION = `Basic ${Buffer.from(`opencode:${SERVER_PASSWORD}`).toString("base64")}`;
 const HOME_ASSISTANT_SECRET_KEYS = Object.freeze([
@@ -257,20 +262,25 @@ describe("real OpenCode V2 plugin loader", () => {
       ].join("\n")),
     ]);
 
-    sidecarServer = createHttpServer((_request, response) => {
-      response.writeHead(404, { "Content-Type": "application/json" });
-      response.end('{"error":"test sidecar has no MCP transport"}');
+    const sidecarSecretPath = join(sandbox, "sidecar-secret");
+    await writeFile(sidecarSecretPath, SIDECAR_SECRET, { mode: 0o600 });
+    const mcpServer = new McpServer(
+      { name: "ha-v2-runtime-test", version: "1.0.0" },
+      { capabilities: { tools: { listChanged: false } } },
+    );
+    mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
+    sidecarServer = await startAuthenticatedStreamableHttp(mcpServer, {
+      secretFile: sidecarSecretPath,
+      host: "127.0.0.1",
+      port: 0,
     });
-    sidecarServer.listen(0, "127.0.0.1");
-    await once(sidecarServer, "listening");
-    const sidecarAddress = sidecarServer.address();
-    assert.ok(typeof sidecarAddress === "object" && sidecarAddress);
-    const sidecarEndpoint = `http://127.0.0.1:${sidecarAddress.port}/mcp`;
+    const sidecarEndpoint = `http://${sidecarServer.host}:${sidecarServer.port}/mcp`;
 
     const configPath = join(sandbox, "managed-opencode.json");
     await writeFile(configPath, JSON.stringify(buildManagedConfig({
       pluginEnabled: true,
       pluginPackage: pathToFileURL(PLUGIN).href,
+      runtimeGuardPackage: pathToFileURL(RUNTIME_GUARD).href,
       mcpEndpoint: sidecarEndpoint,
     }), null, 2));
 
@@ -292,6 +302,7 @@ describe("real OpenCode V2 plugin loader", () => {
 
     const port = await availablePort();
     baseUrl = `http://127.0.0.1:${port}`;
+    const callerSecretFd = openSync(sidecarSecretPath, "r");
     serverProcess = spawn(CLI, [
       "serve",
       "--hostname",
@@ -305,8 +316,9 @@ describe("real OpenCode V2 plugin loader", () => {
       cwd: workspace,
       env,
       detached: globalThis.process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", callerSecretFd],
     });
+    closeSync(callerSecretFd);
     serverProcess.stdout.on("data", (chunk) => { output += chunk; });
     serverProcess.stderr.on("data", (chunk) => { output += chunk; });
 
@@ -323,9 +335,7 @@ describe("real OpenCode V2 plugin loader", () => {
     await stopProcessTree(serverProcess);
     assert.ok(hasExited(serverProcess), `OpenCode V2 server did not stop\n${output}`);
     if (sidecarServer) {
-      sidecarServer.closeAllConnections();
-      sidecarServer.close();
-      await once(sidecarServer, "close");
+      await sidecarServer.close();
     }
     await rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -339,7 +349,7 @@ describe("real OpenCode V2 plugin loader", () => {
     const mcpResponse = await pollJson(
       `${baseUrl}/api/mcp`,
       (body) => body.data?.some(
-        (item) => item.name === "homeassistant" && item.status.status === "failed",
+        (item) => item.name === "homeassistant" && item.status.status === "connected",
       ),
       () => output,
     );
@@ -348,11 +358,18 @@ describe("real OpenCode V2 plugin loader", () => {
       pluginResponse.data.filter((item) => item.id === "homeassistant.mcp").length,
       1,
     );
+    assert.equal(
+      pluginResponse.data.filter((item) => item.id === "homeassistant.runtime-guard").length,
+      1,
+    );
     assert.equal(pluginResponse.data.some((item) => item.id === HOME_PLUGIN_ID), false);
-    assert.equal(mcpResponse.data.find((item) => item.name === "homeassistant").status.status, "failed");
-    assert.equal((output.match(/loading plugin/g) ?? []).length, 1, output);
+    assert.equal(mcpResponse.data.find((item) => item.name === "homeassistant").status.status, "connected");
+    assert.equal((output.match(/loading plugin/g) ?? []).length, 2, output);
     assert.doesNotMatch(output, new RegExp(SENTINEL));
     assert.doesNotMatch(output, new RegExp(SERVER_PASSWORD));
+    assert.doesNotMatch(output, new RegExp(SIDECAR_SECRET));
+    assert.doesNotMatch(JSON.stringify(pluginResponse), new RegExp(SIDECAR_SECRET));
+    assert.doesNotMatch(JSON.stringify(mcpResponse), new RegExp(SIDECAR_SECRET));
   });
 
   it("loads the ordered native V2 policy only from the managed document", async () => {

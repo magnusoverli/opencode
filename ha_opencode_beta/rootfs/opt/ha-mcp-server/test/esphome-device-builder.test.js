@@ -205,6 +205,25 @@ describe("ESPHome Device Builder WebSocket client", () => {
     await expect(client.command("devices/list")).rejects.toThrow(/timed out/);
     await socketClosed;
   });
+
+  it("closes an active WebSocket when the MCP request is cancelled", async () => {
+    let connected;
+    let closed;
+    const socketConnected = new Promise((resolve) => { connected = resolve; });
+    const socketClosed = new Promise((resolve) => { closed = resolve; });
+    const baseUrl = await startWebSocketServer((socket) => {
+      connected();
+      socket.on("close", closed);
+    });
+    const controller = new AbortController();
+    const client = new ESPHomeDeviceBuilderClient({ baseUrl, signal: controller.signal });
+    const command = client.command("devices/list");
+    await socketConnected;
+    controller.abort("cancelled WebSocket");
+
+    await expect(command).rejects.toThrow(/cancelled WebSocket/);
+    await socketClosed;
+  });
 });
 
 describe("ESPHome source workflow", () => {

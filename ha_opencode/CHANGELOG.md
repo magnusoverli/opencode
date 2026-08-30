@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Fixed the read-only session prompt normalization so the in-add-on smoke test no longer reports a false failure.
+
 ## 2.5.3
 
 - **Certified OpenCode 1.18.25** — adds Azure/Microsoft Entra ID authentication through Azure CLI without an API key or Bun, and V1 support for compatible V2 configuration fields.

@@ -177,19 +177,48 @@ amd64 and emulated arm64.
 
 After successful migration, s6 supervises one staged V2 server on
 `127.0.0.1:4100`. It is not exposed through Home Assistant Network settings and
-is not used by the terminal, LAN server, OpenChamber, or MCP yet.
+is not used by the terminal, LAN server, or OpenChamber. When MCP is enabled,
+the staged V2 process connects to a separately supervised Home Assistant MCP
+sidecar on authenticated loopback; user-facing clients still remain on V1.
 
 The launcher:
 
 - verifies the root-owned readiness files and selected generation;
-- drops to UID/GID `60000` with no supplementary groups, capabilities, or new
-  privileges;
+- uses one target-native launcher to publish the expected V2 PID, construct a
+  credential-free allowlisted environment, drop to UID/GID `60000`, clear
+  supplementary groups and capabilities, disable core dumps, set
+  `no_new_privs` and non-dumpability, and directly `execve` V2;
 - starts from root-owned `/run/opencode-v2/workspace`;
 - uses an empty allowlisted environment and root-owned config/home paths;
 - exposes only authenticated loopback;
 - disables project config and external skill discovery;
 - loads no Home Assistant, PPQ, discovery, or user environment credentials;
-- leaves the Home Assistant MCP plugin disabled.
+- enters the final executable with a target-native preload constructor that
+  disables same-UID process inspection before asking a root broker for the
+  server password and optional sidecar secret; the broker authorizes the
+  kernel-reported peer UID and exact root-published PID;
+- always loads a runtime guard that reasserts the process boundary and strips
+  server and sidecar credentials from parent and shell-child environments;
+- when MCP is enabled, receives one root-owned boot secret through FD 3, closes
+  it after read, and uses it only as an in-memory bearer for the sidecar.
+
+The sidecar owns the Supervisor and optional Home Assistant credentials through
+a root-owned allowlisted environment rather than user environment files. It is
+non-dumpable with core dumps disabled and listens on a root-only Unix socket. A
+separate root-retained listener owns `127.0.0.1:8765`, preventing UID `60000`
+from impersonating a restarted sidecar, and proxies to that socket. The stateful
+Streamable HTTP endpoint rejects calls without the boot bearer, supports
+long-running calls, and propagates cancellation into HTTP, WebSocket, and
+process-group operations. A restarted V2 client can replace the previous
+session, and sidecar-readiness failures make the supervised V2 process exit and
+retry instead of sleeping permanently.
+
+The integrated image fixture starts the real sidecar and plugin-enabled V2
+through the native launcher. On amd64 and arm64 it proves Basic authentication,
+an authenticated MCP request, UID/GID and capability boundaries, FD 3 closure,
+and denial of the final process environment before and after plugin activation.
+A hostile UID-60000 poller also scans the launch transition and must not recover
+either credential.
 
 V2 currently discovers project plugins independently of the project-config
 disable flag. Consequently, the staged server remains private and starts only
@@ -223,17 +252,12 @@ Until V2 is separately approved for stable:
 Removing `/data/v2` is not an automatic rollback step. It may contain V2-only
 sessions once user-facing activation begins and must be treated as user data.
 
-## Remaining Release Gates
+## Remaining V2 Activation Gates
 
-- Build and run the image fixture on amd64 and aarch64.
-- Exercise the exact s6 launcher, effective UID/GID/capabilities, authenticated
-  health endpoint, supervised shutdown, and V1-root denial in Linux.
-- Design an authenticated Home Assistant MCP sidecar credential that shell
-  subprocesses cannot recover or replay.
 - Provide approved `/homeassistant` writes without exposing retained V1 or
   sidecar credentials.
 - Enforce project/plugin discovery restrictions for every client-selected
   working directory.
 - Connect ttyd/TUI only after those boundaries pass.
-- Run the real Home Assistant migration and rollback smoke test before tagging
-  `3.0.0b0`.
+- Exercise sidecar and V2 restart behavior under the exact s6 supervision tree
+  in a Home Assistant runtime.

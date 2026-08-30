@@ -20,8 +20,8 @@ args:
   # OpenCode V2 becomes the beta runtime in 3.0.0b0. V1 remains installed only
   # as an untouched migration/rollback source until V2 activation is complete.
   OPENCODE_V2_VERSION: "0.0.0-beta-18684"
-  # The other genuine per-channel pin: beta builds from dev, so this can lead
-  # stable while a new OpenChamber soaks.
+  # The other genuine per-channel pin: beta can lead stable while a new
+  # OpenChamber soaks.
   OPENCHAMBER_VERSION: "1.21.0"
   PPQ_PROXY_VERSION: "0.1.0"
   TSX_VERSION: "4.20.6"

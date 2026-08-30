@@ -167,7 +167,7 @@ OPTIONS_FILE="/data/options.json"
 ENV_VARS_COUNT=$(jq -r '.env_vars // [] | length' "${OPTIONS_FILE}")
 
 # Reserved names that would break the add-on if overridden
-ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","OPENCODE_MCP_TOOL_PROFILE","OPENCODE_NATIVE_HA_MCP_ENABLED","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","XDG_STATE_HOME","XDG_CACHE_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_CONFIG","OPENCODE_CONFIG_CONTENT","OPENCODE_CONFIG_DIR","OPENCODE_DISABLE_PROJECT_CONFIG","OPENCODE_SERVER_USERNAME","OPENCODE_SERVER_PASSWORD","OPENCODE_V2_ROOT","OPENCODE_V2_HOME","OPENCODE_V2_CONFIG_HOME","OPENCODE_V2_DATA_HOME","OPENCODE_V2_STATE_HOME","OPENCODE_V2_CACHE_HOME","OPENCODE_V2_WORK_ROOT","SHELL","USER","PWD"'
+ENV_VARS_RESERVED='"HOME","PATH","SUPERVISOR_TOKEN","HA_TOKEN","HA_NATIVE_MCP_API_ID","OPENCODE_MCP_TOOL_PROFILE","OPENCODE_NATIVE_HA_MCP_ENABLED","TMPDIR","XDG_DATA_HOME","XDG_CONFIG_HOME","XDG_STATE_HOME","XDG_CACHE_HOME","NPM_CONFIG_PREFIX","npm_config_prefix","NODE_OPTIONS","OPENCODE_DISABLE_AUTOUPDATE","OPENCODE_CONFIG","OPENCODE_CONFIG_CONTENT","OPENCODE_CONFIG_DIR","OPENCODE_DISABLE_PROJECT_CONFIG","OPENCODE_SERVER_USERNAME","OPENCODE_SERVER_PASSWORD","OPENCODE_V2_ROOT","OPENCODE_V2_HOME","OPENCODE_V2_CONFIG_HOME","OPENCODE_V2_DATA_HOME","OPENCODE_V2_STATE_HOME","OPENCODE_V2_CACHE_HOME","OPENCODE_V2_WORK_ROOT","LD_PRELOAD","LD_LIBRARY_PATH","BASH_ENV","ENV","CDPATH","GLOBIGNORE","BASHOPTS","SHELLOPTS","IFS","SHELL","USER","PWD"'
 
 if [ "${ENV_VARS_COUNT}" -gt 0 ]; then
     bashio::log.info "Processing ${ENV_VARS_COUNT} user-defined environment variable(s)..."
@@ -595,16 +595,19 @@ else
 fi
 
 # Stage one authenticated V2 server behind a private loopback endpoint. Its
-# managed policy and global AGENTS.md live under root-owned /run, not in the
-# runtime-writable generation, so the unprivileged process cannot replace its
-# own startup policy. MCP stays disabled until the separate credential boundary
-# is ready; the user-facing terminal and LAN services continue to run V1.
+# managed policy, global AGENTS.md, and sidecar caller secret live under
+# root-owned /run, not in the runtime-writable generation. The secret reaches
+# the bundled plugin only through an inherited descriptor; it is never written
+# to config or environment. User-facing terminal and LAN services remain V1.
 V2_RUNTIME_ROOT=/run/opencode-v2
 rm -rf -- "${V2_RUNTIME_ROOT}"
 if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
     V2_RESTRICT_BOOL=$([ "${RESTRICT_SENSITIVE_FILES}" = "true" ] && echo "true" || echo "false")
+    V2_PLUGIN_ENABLED=$([ "${MCP_ENABLED}" = "true" ] && echo "true" || echo "false")
     V2_CONFIG_TEMP=""
     V2_PASSWORD_TEMP=""
+    V2_SIDECAR_SECRET_TEMP=""
+    V2_SIDECAR_ENV_TEMP=""
     if mkdir -p "${V2_RUNTIME_ROOT}/config/opencode" "${V2_RUNTIME_ROOT}/home" "${V2_RUNTIME_ROOT}/workspace" \
         && chmod 755 "${V2_RUNTIME_ROOT}" "${V2_RUNTIME_ROOT}/config" "${V2_RUNTIME_ROOT}/config/opencode" \
             "${V2_RUNTIME_ROOT}/home" "${V2_RUNTIME_ROOT}/workspace" \
@@ -612,23 +615,46 @@ if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
         && chmod 644 "${V2_RUNTIME_ROOT}/config/opencode/AGENTS.md"; then
         V2_CONFIG_TEMP=$(mktemp "${V2_RUNTIME_ROOT}/.managed.XXXXXX")
         V2_PASSWORD_TEMP=$(mktemp "${V2_RUNTIME_ROOT}/.password.XXXXXX")
+        if [ "${V2_PLUGIN_ENABLED}" = "true" ]; then
+            V2_SIDECAR_SECRET_TEMP=$(mktemp "${V2_RUNTIME_ROOT}/.sidecar.XXXXXX")
+        fi
         if node /opt/opencode-v2-homeassistant/managed-config.js \
                 --restrict-sensitive-files "${V2_RESTRICT_BOOL}" \
-                --plugin-enabled false > "${V2_CONFIG_TEMP}" \
+                --plugin-enabled "${V2_PLUGIN_ENABLED}" > "${V2_CONFIG_TEMP}" \
             && chmod 644 "${V2_CONFIG_TEMP}" \
-            && mv -f "${V2_CONFIG_TEMP}" "${V2_RUNTIME_ROOT}/managed.json" \
             && { od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "${V2_PASSWORD_TEMP}"; } \
             && test "$(wc -c < "${V2_PASSWORD_TEMP}")" -eq 64 \
             && chmod 600 "${V2_PASSWORD_TEMP}" \
-            && mv -f "${V2_PASSWORD_TEMP}" "${V2_RUNTIME_ROOT}/server-password"; then
+            && { [ "${V2_PLUGIN_ENABLED}" != "true" ] \
+                || { od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "${V2_SIDECAR_SECRET_TEMP}" \
+                    && test "$(wc -c < "${V2_SIDECAR_SECRET_TEMP}")" -eq 64 \
+                    && chmod 600 "${V2_SIDECAR_SECRET_TEMP}"; }; } \
+            && mv -f "${V2_CONFIG_TEMP}" "${V2_RUNTIME_ROOT}/managed.json" \
+            && mv -f "${V2_PASSWORD_TEMP}" "${V2_RUNTIME_ROOT}/server-password" \
+            && { [ "${V2_PLUGIN_ENABLED}" != "true" ] \
+                || { mv -f "${V2_SIDECAR_SECRET_TEMP}" "${V2_RUNTIME_ROOT}/sidecar-secret" \
+                    && V2_SIDECAR_ENV_TEMP=$(mktemp "${V2_RUNTIME_ROOT}/.sidecar-env.XXXXXX") \
+                    && { \
+                        printf 'export OPENCODE_MCP_ENABLED=true\n'; \
+                        printf 'export OPENCODE_MCP_TOOL_PROFILE=%q\n' "${MCP_TOOL_PROFILE}"; \
+                        printf 'export SUPERVISOR_TOKEN=%q\n' "${SUPERVISOR_TOKEN}"; \
+                        printf 'export HA_ACCESS_TOKEN=%q\n' "${ACCESS_TOKEN}"; \
+                        printf 'export HA_NATIVE_MCP_API_ID=%q\n' "${HA_NATIVE_MCP_API_ID:-assist}"; \
+                        printf 'export OPENCODE_DECISION_NOTES=%q\n' "${DECISION_NOTES_ENABLED}"; \
+                        printf 'export SCREENSHOT_ENABLED=%q\n' "${SCREENSHOT_ENABLED}"; \
+                        printf 'export Z2M_URL=%q\n' "${Z2M_URL:-}"; \
+                        printf 'export Z2M_MQTT_TOPIC=%q\n' "${Z2M_TOPIC_CONFIG:-}"; \
+                    } > "${V2_SIDECAR_ENV_TEMP}" \
+                    && chmod 600 "${V2_SIDECAR_ENV_TEMP}" \
+                    && mv -f "${V2_SIDECAR_ENV_TEMP}" "${V2_RUNTIME_ROOT}/sidecar-env"; }; }; then
             printf '%s\n' "${OPENCODE_V2_GENERATION_ROOT}" > "${V2_RUNTIME_ROOT}/ready"
             chmod 600 "${V2_RUNTIME_ROOT}/ready"
             bashio::log.info "OpenCode V2 managed configuration and private loopback server are staged"
             if [ "${MCP_ENABLED}" = "true" ]; then
-                bashio::log.info "OpenCode V2 MCP remains disabled until the credential-isolated sidecar is ready"
+                bashio::log.info "OpenCode V2 Home Assistant MCP is staged behind a credential-isolated sidecar"
             fi
         else
-            rm -f -- "${V2_CONFIG_TEMP}" "${V2_PASSWORD_TEMP}"
+            rm -f -- "${V2_CONFIG_TEMP}" "${V2_PASSWORD_TEMP}" "${V2_SIDECAR_SECRET_TEMP}" "${V2_SIDECAR_ENV_TEMP}"
             bashio::log.warning "OpenCode V2 managed configuration could not be secured; its staged server is disabled for this boot"
         fi
     else

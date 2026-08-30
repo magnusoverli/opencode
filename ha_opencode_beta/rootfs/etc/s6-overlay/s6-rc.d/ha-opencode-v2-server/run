@@ -6,6 +6,8 @@
 source /usr/local/lib/opencode/v2-environment.sh
 
 V2_RUNTIME_ROOT=/run/opencode-v2
+SIDECAR_SECRET_FILE="${V2_RUNTIME_ROOT}/sidecar-secret"
+BROKER_SOCKET="${V2_RUNTIME_ROOT}/credential.sock"
 if [ ! -f "${V2_RUNTIME_ROOT}/ready" ] \
     || [ -L "${V2_RUNTIME_ROOT}/ready" ] \
     || [ ! -f "${V2_RUNTIME_ROOT}/managed.json" ] \
@@ -22,50 +24,50 @@ if ! opencode_v2_select_generation; then
 fi
 
 EXPECTED_GENERATION_ROOT=$(cat "${V2_RUNTIME_ROOT}/ready" 2>/dev/null || true)
-SERVER_PASSWORD=$(cat "${V2_RUNTIME_ROOT}/server-password" 2>/dev/null || true)
-if [ "${EXPECTED_GENERATION_ROOT}" != "${OPENCODE_V2_GENERATION_ROOT}" ] \
-    || [[ ! "${SERVER_PASSWORD}" =~ ^[a-f0-9]{64}$ ]]; then
+if [ "${EXPECTED_GENERATION_ROOT}" != "${OPENCODE_V2_GENERATION_ROOT}" ]; then
     bashio::log.warning "OpenCode V2 staged server is inactive because its secured runtime metadata is invalid"
     exec sleep infinity
 fi
 
-if ! command -v setpriv >/dev/null 2>&1; then
-    bashio::log.warning "OpenCode V2 staged server is inactive because privilege demotion is unavailable"
+if [ ! -x /usr/local/bin/opencode-v2-launch ]; then
+    bashio::log.warning "OpenCode V2 staged server is inactive because its secure launcher is unavailable"
     exec sleep infinity
+fi
+if [ ! -S "${BROKER_SOCKET}" ]; then
+    bashio::log.warning "OpenCode V2 staged server is restarting because its credential broker is not ready"
+    exit 1
+fi
+if [ -f "${V2_RUNTIME_ROOT}/sidecar-env" ] && [ ! -f "${SIDECAR_SECRET_FILE}" ]; then
+    bashio::log.warning "OpenCode V2 staged server is restarting because its configured sidecar secret is unavailable"
+    exit 1
+fi
+
+if [ -f "${SIDECAR_SECRET_FILE}" ]; then
+    if [ ! -f "${SIDECAR_SECRET_FILE}" ] \
+        || [ -L "${SIDECAR_SECRET_FILE}" ] \
+        || [ "$(stat -c '%u:%g:%a:%h' "${SIDECAR_SECRET_FILE}" 2>/dev/null || true)" != "0:0:600:1" ]; then
+        bashio::log.warning "OpenCode V2 staged server is inactive because its sidecar caller boundary is invalid"
+        exec sleep infinity
+    fi
+
+    SIDECAR_READY=false
+    for _attempt in $(seq 1 100); do
+        if [ "$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -X POST -w '%{http_code}' http://127.0.0.1:8765/mcp 2>/dev/null || true)" = "401" ]; then
+            SIDECAR_READY=true
+            break
+        fi
+        sleep 0.1
+    done
+    if [ "${SIDECAR_READY}" != "true" ]; then
+        bashio::log.warning "OpenCode V2 staged server is restarting because its authenticated Home Assistant sidecar is not ready"
+        exit 1
+    fi
+
 fi
 
 bashio::log.info "Starting staged OpenCode V2 server as uid 60000 on private loopback port 4100"
-cd "${V2_RUNTIME_ROOT}/workspace"
-exec setpriv \
-    --reuid=60000 \
-    --regid=60000 \
-    --clear-groups \
-    --no-new-privs \
-    --inh-caps=-all \
-    --ambient-caps=-all \
-    --bounding-set=-all \
-    env -i \
-        HOME="${V2_RUNTIME_ROOT}/home" \
-        USER=opencode-v2 \
-        LOGNAME=opencode-v2 \
-        SHELL=/bin/bash \
-        PATH=/usr/local/bin:/usr/bin:/bin \
-        LANG=C.UTF-8 \
-        NODE_OPTIONS=--max-old-space-size=512 \
-        TMPDIR="${OPENCODE_V2_CACHE_HOME}" \
-        XDG_CONFIG_HOME="${V2_RUNTIME_ROOT}/config" \
-        XDG_DATA_HOME="${OPENCODE_V2_DATA_HOME}" \
-        XDG_STATE_HOME="${OPENCODE_V2_STATE_HOME}" \
-        XDG_CACHE_HOME="${OPENCODE_V2_CACHE_HOME}" \
-        OPENCODE_CONFIG="${V2_RUNTIME_ROOT}/managed.json" \
-        OPENCODE_DISABLE_PROJECT_CONFIG=1 \
-        OPENCODE_DISABLE_EXTERNAL_SKILLS=1 \
-        OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 \
-        OPENCODE_DISABLE_AUTOUPDATE=true \
-        OPENCODE_SERVER_USERNAME=opencode \
-        OPENCODE_SERVER_PASSWORD="${SERVER_PASSWORD}" \
-        /usr/local/bin/opencode2 serve \
-            --hostname 127.0.0.1 \
-            --port 4100 \
-            --print-logs \
-            --log-level info
+exec /usr/local/bin/opencode-v2-launch \
+    "${V2_RUNTIME_ROOT}" \
+    "${OPENCODE_V2_GENERATION_ROOT}" \
+    "${OPENCODE_V2_CACHE_HOME}" \
+    4100

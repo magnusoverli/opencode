@@ -37,11 +37,12 @@ export function buildDeviceBuilderWebSocketUrl(baseUrl) {
 }
 
 export class ESPHomeDeviceBuilderClient {
-  constructor({ baseUrl, ingressSession = "", token = "", timeoutMs = 30000, WebSocketImpl = WebSocket }) {
+  constructor({ baseUrl, ingressSession = "", token = "", timeoutMs = 30000, signal, WebSocketImpl = WebSocket }) {
     this.url = buildDeviceBuilderWebSocketUrl(baseUrl);
     this.ingressSession = ingressSession;
     this.token = token;
     this.timeoutMs = timeoutMs;
+    this.signal = signal;
     this.WebSocketImpl = WebSocketImpl;
     this.nextMessageId = 1;
   }
@@ -61,6 +62,7 @@ export class ESPHomeDeviceBuilderClient {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
+        this.signal?.removeEventListener("abort", onAbort);
         if (ws.readyState === this.WebSocketImpl.OPEN) {
           ws.close();
         } else if (ws.readyState !== this.WebSocketImpl.CLOSED && typeof ws.terminate === "function") {
@@ -68,10 +70,15 @@ export class ESPHomeDeviceBuilderClient {
         }
         callback(value);
       };
+      const onAbort = () => finish(reject, this.signal.reason instanceof Error
+        ? this.signal.reason
+        : Object.assign(new Error(String(this.signal.reason || "Operation cancelled")), { name: "AbortError" }));
 
       const timeout = setTimeout(() => {
         finish(reject, new Error(`ESPHome Device Builder command ${command} timed out`));
       }, this.timeoutMs);
+      this.signal?.addEventListener("abort", onAbort, { once: true });
+      if (this.signal?.aborted) onAbort();
 
       ws.on("unexpected-response", (_request, response) => {
         response.resume();
@@ -142,6 +149,7 @@ export class ESPHomeDeviceBuilderClient {
         settled = true;
         clearTimeout(timeout);
         if (stopTimer) clearTimeout(stopTimer);
+        this.signal?.removeEventListener("abort", onAbort);
         if (ws.readyState === this.WebSocketImpl.OPEN) {
           ws.close();
         } else if (ws.readyState !== this.WebSocketImpl.CLOSED && typeof ws.terminate === "function") {
@@ -149,6 +157,9 @@ export class ESPHomeDeviceBuilderClient {
         }
         callback(value);
       };
+      const onAbort = () => finish(reject, this.signal.reason instanceof Error
+        ? this.signal.reason
+        : Object.assign(new Error(String(this.signal.reason || "Operation cancelled")), { name: "AbortError" }));
 
       const finishStream = (result = null, truncated = false) => finish(resolve, {
         result,
@@ -174,6 +185,8 @@ export class ESPHomeDeviceBuilderClient {
       };
 
       const timeout = setTimeout(() => requestStop("timeout"), timeoutMs);
+      this.signal?.addEventListener("abort", onAbort, { once: true });
+      if (this.signal?.aborted) onAbort();
 
       ws.on("unexpected-response", (_request, response) => {
         response.resume();

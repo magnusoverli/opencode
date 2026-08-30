@@ -1,0 +1,12 @@
+#!/command/with-contenv bashio
+
+V2_RUNTIME_ROOT=/run/opencode-v2
+if [ ! -f "${V2_RUNTIME_ROOT}/sidecar-secret" ]; then
+    exec sleep infinity
+fi
+
+# This root-owned listener retains the public loopback port across sidecar
+# worker restarts. UID 60000 can neither replace it nor create the backend Unix
+# socket in the root-owned runtime directory.
+exec s6-tcpserver -q -c 64 127.0.0.1 8765 \
+    s6-ipcclient "${V2_RUNTIME_ROOT}/mcp-sidecar.sock" s6-ioconnect

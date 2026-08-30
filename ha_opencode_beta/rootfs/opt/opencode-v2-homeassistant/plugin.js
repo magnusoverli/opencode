@@ -1,7 +1,20 @@
+import { closeSync, readFileSync } from "node:fs";
 import { Plugin } from "@opencode-ai/plugin";
 
 export const PLUGIN_ID = "homeassistant.mcp";
 export const MCP_SERVER_NAME = "homeassistant";
+export const CALLER_SECRET_FD = 3;
+
+const SENSITIVE_SHELL_ENV = new Set([
+  "OPENCODE_SERVER_PASSWORD",
+  "SUPERVISOR_TOKEN",
+  "HA_TOKEN",
+  "HA_ACCESS_TOKEN",
+  "LD_PRELOAD",
+]);
+
+const SIDECAR_NAMESPACE = /(?:^|_)(?:MCP|SIDECAR)(?:_|$)/;
+const CREDENTIAL_NAME = /(?:^|_)(?:AUTH(?:ORIZATION)?|BEARER|CALLER|CREDENTIALS?|KEY|PASSWORD|SECRET|TOKEN)(?:_|$)/;
 
 const DEFAULT_TIMEOUTS = Object.freeze({
   startup: 30_000,
@@ -76,10 +89,32 @@ export function parseOptions(value) {
   };
 }
 
-export function createServerConfig(options) {
+function requireCallerSecret(value) {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
+    throw new TypeError("Home Assistant sidecar caller secret must be exactly 64 lowercase hexadecimal characters");
+  }
+  return value;
+}
+
+export function readCallerSecret({
+  fd = CALLER_SECRET_FD,
+  read = readFileSync,
+  close = closeSync,
+} = {}) {
+  let value;
+  try {
+    value = read(fd, "utf8");
+  } finally {
+    close(fd);
+  }
+  return requireCallerSecret(value);
+}
+
+export function createServerConfig(options, callerSecret) {
   return {
     type: "remote",
     url: options.endpoint,
+    headers: { Authorization: `Bearer ${requireCallerSecret(callerSecret)}` },
     oauth: false,
     disabled: false,
     codemode: false,
@@ -87,17 +122,50 @@ export function createServerConfig(options) {
   };
 }
 
-export default Plugin.define({
-  id: PLUGIN_ID,
-  async setup(ctx) {
+export function scrubShellEnvironment(input) {
+  for (const name of Object.keys(input.env)) {
+    const normalized = name.toUpperCase();
+    if (SENSITIVE_SHELL_ENV.has(normalized)
+      || (SIDECAR_NAMESPACE.test(normalized) && CREDENTIAL_NAME.test(normalized))) {
+      delete input.env[name];
+    }
+  }
+}
+
+export function scrubParentEnvironment(environment = process.env) {
+  scrubShellEnvironment({ env: environment });
+}
+
+async function disposeRegistrations(registrations) {
+  const errors = [];
+  for (const registration of [...registrations].reverse()) {
+    try {
+      await registration.dispose();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, "Failed to dispose Home Assistant plugin registrations");
+}
+
+export function createSetup({ readSecret = readCallerSecret } = {}) {
+  return async function setup(ctx) {
+    const callerSecret = readSecret();
     const options = parseOptions(ctx.options);
-    const server = createServerConfig(options);
-    const registration = await ctx.mcp.transform((draft) => {
+    const server = createServerConfig(options, callerSecret);
+    const registrations = [await ctx.mcp.transform((draft) => {
       draft.set(MCP_SERVER_NAME, server);
-    });
+    })];
 
     return async () => {
-      await registration.dispose();
+      await disposeRegistrations(registrations);
     };
-  },
+  };
+}
+
+export default Plugin.define({
+  id: PLUGIN_ID,
+  setup: createSetup(),
 });

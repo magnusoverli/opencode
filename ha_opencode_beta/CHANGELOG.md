@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.0b1
+
+- Fixed the read-only session prompt normalization so the in-add-on smoke test no longer reports a false failure.
+- Connected staged V2 to a separately supervised, authenticated Home Assistant MCP sidecar with boot-time process-inspection hardening and no caller secret in config, environment, logs, or shell subprocesses.
+- Hardened staged V2 with a peer-validated credential broker, a root-retained sidecar listener, cancellable Home Assistant operations, redacted tool logging, and allowlisted non-dumpable process environments.
+
 ## 3.0.0b0
 
 - Began the OpenCode V2 beta transition with an exact matched CLI/plugin build, isolated `/data/v2` state roots, and preserved V1 rollback data; stable remains on OpenCode V1 while parity work continues.

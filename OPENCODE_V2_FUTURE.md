@@ -267,19 +267,37 @@ The V2 package and tests live directly under
 - one exact local plugin loads through the real V2 loader and appears active;
 - the plugin's MCP transform registers a direct-tool (`codemode: false`) remote
   Home Assistant server without accepting caller-controlled profile selection;
+- s6 runs the credential-bearing Home Assistant integration as a separate root
+  process on a root-only Unix socket, while a root-retained TCP listener exposes
+  only authenticated loopback Streamable HTTP;
+- a target-native launcher publishes the expected V2 PID, constructs a
+  credential-free allowlisted environment, drops privileges and capabilities,
+  disables core dumps and process inspection, then directly executes V2;
+- a target-native preload constructor restores non-dumpability before obtaining
+  credentials from a root broker that validates the kernel-reported peer PID;
+  the boot secret reaches V2 only through inherited FD 3 and is closed after
+  read, while an always-loaded runtime guard reasserts the boundary and strips
+  credentials from the parent and shell-child environments;
+- the stateful sidecar transport supports long-running calls and replacement
+  client sessions without the former 15-second socket cutoff, while MCP
+  cancellation reaches HA HTTP, WebSocket, and process-group operations;
 - one explicit managed config document is loaded while project config is
   disabled;
-- the test launcher strips Home Assistant credentials from the V2 environment,
-  and its sentinel is absent from plugin config and server logs;
+- the root sidecar consumes only an init-generated allowlist, arbitrary tool
+  arguments are absent from logs, and V2 receives no Home Assistant credential;
+- the integrated Linux image fixture starts the real sidecar and plugin-enabled
+  V2, exercises authenticated Basic and MCP calls, closes FD 3, and runs a
+  hostile same-UID poller across the native launch transition;
 - the foreground process tree is terminated in the Linux CI harness; graceful
   image shutdown and non-Linux development hosts remain lifecycle gates.
 
-The integrated foundation does not yet solve sidecar authentication,
-unprivileged filesystem access, dynamic context injection, or a real Home
-Assistant MCP exchange. V2 activation remains gated on those boundaries.
+The integrated foundation now solves sidecar authentication and a real V2 MCP
+exchange. User-facing V2 activation remains gated on approved unprivileged
+filesystem writes, dynamic context injection, and enforceable project-plugin
+discovery restrictions.
 
-`3.0.0b0` should be an explicitly experimental, terminal-first V2 beta. It must
-not be promoted mechanically from 2.5 or treated as stable-ready.
+`3.0.0b1` remains an explicitly experimental staged V2 foundation. It must not
+be promoted mechanically from 2.5 or treated as stable-ready.
 
 ### Required vertical slice
 

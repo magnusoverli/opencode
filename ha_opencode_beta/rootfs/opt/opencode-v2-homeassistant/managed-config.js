@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 
 export const DEFAULT_PLUGIN_PACKAGE = "file:///opt/opencode-v2-homeassistant/plugin.js";
+export const DEFAULT_RUNTIME_GUARD_PACKAGE = "file:///opt/opencode-v2-homeassistant/runtime-guard.js";
 export const DEFAULT_MCP_ENDPOINT = "http://127.0.0.1:8765/mcp";
 
 const WATCHER_IGNORES = Object.freeze([
@@ -30,6 +31,7 @@ export function buildManagedConfig({
   restrictSensitiveFiles = true,
   pluginEnabled = false,
   pluginPackage = DEFAULT_PLUGIN_PACKAGE,
+  runtimeGuardPackage = DEFAULT_RUNTIME_GUARD_PACKAGE,
   mcpEndpoint = DEFAULT_MCP_ENDPOINT,
 } = {}) {
   const permissions = [
@@ -51,15 +53,18 @@ export function buildManagedConfig({
     }
   }
 
-  const plugins = pluginEnabled
-    ? [{
+  const plugins = [
+    { package: runtimeGuardPackage },
+    ...(pluginEnabled
+      ? [{
         package: pluginPackage,
         options: {
           endpoint: mcpEndpoint,
           timeouts: { startup: 30_000, catalog: 60_000, execution: 60_000 },
         },
       }]
-    : [];
+      : []),
+  ];
 
   return {
     $schema: "https://opencode.ai/config.json",

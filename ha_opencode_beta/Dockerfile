@@ -136,8 +136,18 @@ RUN python3 -m venv /opt/zigporter-venv \
 # otherwise publish an image whose runtime nobody tested, and the mismatch would
 # surface for the first time on a user's machine. The version is also recorded
 # on disk so runtime code can name the certified build without shelling out.
+COPY rootfs/opt/opencode-v2-homeassistant/non-dumpable.c /tmp/opencode-v2-non-dumpable.c
+COPY rootfs/opt/opencode-v2-homeassistant/secure-launcher.c /tmp/opencode-v2-secure-launcher.c
+COPY rootfs/opt/opencode-v2-homeassistant/credential-broker.c /tmp/opencode-v2-credential-broker.c
 RUN apt-get update \
     && apt-get install -y --no-install-recommends g++ make \
+    && cc -shared -fPIC -O2 -Wall -Werror \
+        -o /usr/local/lib/opencode-v2-non-dumpable.so /tmp/opencode-v2-non-dumpable.c \
+    && cc -O2 -Wall -Wextra -Werror \
+        -o /usr/local/bin/opencode-v2-launch /tmp/opencode-v2-secure-launcher.c \
+    && cc -O2 -Wall -Wextra -Werror \
+        -o /usr/local/bin/opencode-v2-credential-broker /tmp/opencode-v2-credential-broker.c \
+    && rm -f /tmp/opencode-v2-non-dumpable.c /tmp/opencode-v2-secure-launcher.c /tmp/opencode-v2-credential-broker.c \
     && npm install -g --omit=dev --omit=peer --no-audit --no-fund \
         opencode-ai@${OPENCODE_VERSION} \
         @openchamber/web@${OPENCHAMBER_VERSION} \
@@ -212,6 +222,9 @@ RUN chmod +x /usr/local/bin/* \
     && chmod +x /etc/s6-overlay/s6-rc.d/init-opencode/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-v2-server/run \
+    && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-sidecar/run \
+    && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-v2-credential-broker/run \
+    && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-proxy/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-openchamber/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-openchamber-ingress/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-openchamber-lan/run \
@@ -297,21 +310,88 @@ RUN set -eu; \
 # effective IDs, capability sets, no_new_privs, or root-owned path denial.
 RUN set -eu; \
     BOUNDARY_ROOT=$(mktemp -d); \
-    mkdir -p "${BOUNDARY_ROOT}/private" "${BOUNDARY_ROOT}/workspace"; \
+    RUNTIME_ROOT="${BOUNDARY_ROOT}/runtime"; \
+    GENERATION_ROOT="${BOUNDARY_ROOT}/generation"; \
+    CACHE_ROOT="${BOUNDARY_ROOT}/cache"; \
+    mkdir -p "${BOUNDARY_ROOT}/private" "${RUNTIME_ROOT}/home" "${RUNTIME_ROOT}/config/opencode" "${RUNTIME_ROOT}/workspace" "${GENERATION_ROOT}/data" "${GENERATION_ROOT}/state" "${CACHE_ROOT}"; \
     chmod 711 "${BOUNDARY_ROOT}"; \
     chmod 700 "${BOUNDARY_ROOT}/private"; \
-    chmod 755 "${BOUNDARY_ROOT}/workspace"; \
+    chmod 755 "${RUNTIME_ROOT}" "${RUNTIME_ROOT}/home" "${RUNTIME_ROOT}/config" "${RUNTIME_ROOT}/config/opencode" "${RUNTIME_ROOT}/workspace"; \
+    chown -R 60000:60000 "${GENERATION_ROOT}" "${CACHE_ROOT}"; \
     printf '%s\n' private > "${BOUNDARY_ROOT}/private/sentinel"; \
-    setpriv \
-        --reuid=60000 \
-        --regid=60000 \
-        --clear-groups \
-        --no-new-privs \
-        --inh-caps=-all \
-        --ambient-caps=-all \
-        --bounding-set=-all \
-        env -i PATH=/usr/local/bin:/usr/bin:/bin BOUNDARY_ROOT="${BOUNDARY_ROOT}" \
-            sh -eu -c 'test "$(id -u)" = 60000; test "$(id -g)" = 60000; test "$(id -G)" = 60000; ! test -r "${BOUNDARY_ROOT}/private/sentinel"; ! touch "${BOUNDARY_ROOT}/workspace/blocked"; grep -q "^NoNewPrivs:[[:space:]]*1" /proc/self/status; grep -q "^CapBnd:[[:space:]]*0000000000000000" /proc/self/status; test -z "${SUPERVISOR_TOKEN:-}"'; \
+    printf '%064d' 0 > "${RUNTIME_ROOT}/sidecar-secret"; \
+    printf '%064d' 1 > "${RUNTIME_ROOT}/server-password"; \
+    chmod 600 "${RUNTIME_ROOT}/sidecar-secret" "${RUNTIME_ROOT}/server-password"; \
+    cp /opt/ha-mcp-server/AGENTS.md "${RUNTIME_ROOT}/config/opencode/AGENTS.md"; \
+    node /opt/opencode-v2-homeassistant/managed-config.js --plugin-enabled true > "${RUNTIME_ROOT}/managed.json"; \
+    env -i HOME=/data USER=root LOGNAME=root PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
+        SUPERVISOR_TOKEN=image-fixture-token OPENCODE_MCP_TOOL_PROFILE=compact \
+        OPENCODE_MCP_TRANSPORT=streamable-http OPENCODE_MCP_SIDECAR_SOCKET="${RUNTIME_ROOT}/mcp-sidecar.sock" OPENCODE_MCP_SIDECAR_PUBLIC_HOST=127.0.0.1:18765 \
+        OPENCODE_MCP_SIDECAR_SECRET_FILE="${RUNTIME_ROOT}/sidecar-secret" LD_PRELOAD=/usr/local/lib/opencode-v2-non-dumpable.so \
+        node /opt/ha-mcp-server/index.js >"${BOUNDARY_ROOT}/sidecar.log" 2>&1 & \
+    SIDECAR_PID=$!; \
+    s6-tcpserver -q -c 16 127.0.0.1 18765 s6-ipcclient "${RUNTIME_ROOT}/mcp-sidecar.sock" s6-ioconnect >"${BOUNDARY_ROOT}/proxy.log" 2>&1 & \
+    PROXY_PID=$!; \
+    SIDECAR_READY=false; \
+    for _attempt in $(seq 1 100); do \
+        if [ "$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -X POST -w '%{http_code}' http://127.0.0.1:18765/mcp 2>/dev/null || true)" = "401" ]; then SIDECAR_READY=true; break; fi; \
+        sleep 0.1; \
+    done; \
+    if [ "${SIDECAR_READY}" != true ]; then cat "${BOUNDARY_ROOT}/sidecar.log" "${BOUNDARY_ROOT}/proxy.log"; kill "${SIDECAR_PID}" 2>/dev/null || true; exit 1; fi; \
+    PROC_CAPTURE="${CACHE_ROOT}/proc-capture"; \
+    PROC_STOP="${CACHE_ROOT}/proc-stop"; \
+    : > "${PROC_CAPTURE}"; \
+    chown 60000:60000 "${PROC_CAPTURE}"; \
+    runuser -u opencode-v2 -- env -i PATH=/usr/local/bin:/usr/bin:/bin PROC_CAPTURE="${PROC_CAPTURE}" PROC_STOP="${PROC_STOP}" \
+        sh -c 'while [ ! -e "${PROC_STOP}" ]; do for status in /proc/[0-9]*/status; do pid=${status#/proc/}; pid=${pid%/status}; [ "$(awk '\''/^Uid:/ {print $2}'\'' "${status}" 2>/dev/null || true)" = 60000 ] || continue; cat "/proc/${pid}/cmdline" "/proc/${pid}/environ" "/proc/${pid}/fd/3" >> "${PROC_CAPTURE}" 2>/dev/null || true; done; done' & \
+    POLLER_PID=$!; \
+    /usr/local/bin/opencode-v2-credential-broker "${RUNTIME_ROOT}" >"${BOUNDARY_ROOT}/broker.log" 2>&1 & \
+    BROKER_PID=$!; \
+    for _attempt in $(seq 1 100); do [ -S "${RUNTIME_ROOT}/credential.sock" ] && break; sleep 0.1; done; \
+    test -S "${RUNTIME_ROOT}/credential.sock"; \
+    if runuser -u opencode-v2 -- python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",18765))'; then exit 1; fi; \
+    /usr/local/bin/opencode-v2-launch "${RUNTIME_ROOT}" "${GENERATION_ROOT}" "${CACHE_ROOT}" 18101 >"${BOUNDARY_ROOT}/v2.log" 2>&1 & \
+    SECURE_PID=$!; \
+    HTTP_READY=false; \
+    for _attempt in $(seq 1 100); do \
+        if [ "$(curl -sS -o /dev/null --connect-timeout 1 --max-time 2 -w '%{http_code}' -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:18101/global/health 2>/dev/null || true)" = "200" ]; then HTTP_READY=true; break; fi; \
+        sleep 0.1; \
+    done; \
+    if [ "${HTTP_READY}" != "true" ]; then cat "${BOUNDARY_ROOT}/v2.log"; kill "${SECURE_PID}" || true; exit 1; fi; \
+    kill -0 "${BROKER_PID}"; \
+    test ! -e "${RUNTIME_ROOT}/v2.pid"; \
+    test "$(awk '/^Uid:/ {print $2":"$3":"$4}' "/proc/${SECURE_PID}/status")" = "60000:60000:60000"; \
+    test "$(awk '/^Gid:/ {print $2":"$3":"$4}' "/proc/${SECURE_PID}/status")" = "60000:60000:60000"; \
+    grep -q '^NoNewPrivs:[[:space:]]*1' "/proc/${SECURE_PID}/status"; \
+    grep -q '^CapBnd:[[:space:]]*0000000000000000' "/proc/${SECURE_PID}/status"; \
+    if runuser -u opencode-v2 -- cat "/proc/${SECURE_PID}/environ" >/dev/null 2>&1; then cat "${BOUNDARY_ROOT}/v2.log"; kill "${SECURE_PID}" || true; exit 1; fi; \
+    if runuser -u opencode-v2 -- test -r "${BOUNDARY_ROOT}/private/sentinel"; then exit 1; fi; \
+    V2_READY=false; \
+    PLUGIN_RESPONSE=; \
+    for _attempt in $(seq 1 100); do \
+        PLUGIN_RESPONSE=$(curl -fsS --connect-timeout 1 --max-time 2 -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:18101/api/plugin 2>/dev/null || true); \
+        if printf '%s' "${PLUGIN_RESPONSE}" | jq -e '.data[] | select(.id == "homeassistant.runtime-guard" and .status == "active")' >/dev/null 2>&1; then V2_READY=true; break; fi; \
+        sleep 0.1; \
+    done; \
+    if [ "${V2_READY}" != "true" ]; then cat "${BOUNDARY_ROOT}/v2.log"; kill "${SECURE_PID}" || true; exit 1; fi; \
+    curl -fsS --max-time 2 -u opencode:$(cat "${RUNTIME_ROOT}/server-password") http://127.0.0.1:18101/api/health >/dev/null; \
+    touch "${PROC_STOP}"; \
+    wait "${POLLER_PID}"; \
+    if grep -F -f "${RUNTIME_ROOT}/server-password" "${PROC_CAPTURE}"; then exit 1; fi; \
+    if grep -F -f "${RUNTIME_ROOT}/sidecar-secret" "${PROC_CAPTURE}"; then exit 1; fi; \
+    test ! -e "/proc/${SECURE_PID}/fd/3"; \
+    if tr '\0' '\n' < "/proc/${SECURE_PID}/cmdline" | grep -F -f "${RUNTIME_ROOT}/server-password"; then exit 1; fi; \
+    SIDECAR_SECRET_FILE="${RUNTIME_ROOT}/sidecar-secret" node --input-type=module -e 'import { readFileSync } from "node:fs"; import { Client } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js"; import { StreamableHTTPClientTransport } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js"; const secret=readFileSync(process.env.SIDECAR_SECRET_FILE,"utf8").trim(); const client=new Client({name:"image-fixture",version:"1"}); const transport=new StreamableHTTPClientTransport(new URL("http://127.0.0.1:18765/mcp"),{requestInit:{headers:{authorization:`Bearer ${secret}`}}}); await client.connect(transport); const tools=await client.listTools(); if (!tools.tools.some((tool)=>tool.name==="get_states")) process.exit(1); await client.close();'; \
+    if ! kill -0 "${PROXY_PID}" 2>/dev/null; then cat "${BOUNDARY_ROOT}/proxy.log"; exit 1; fi; \
+    if runuser -u opencode-v2 -- cat "/proc/${SECURE_PID}/environ" >/dev/null 2>&1; then cat "${BOUNDARY_ROOT}/v2.log"; kill "${SECURE_PID}" || true; exit 1; fi; \
+    kill "${SECURE_PID}" 2>/dev/null || true; \
+    wait "${SECURE_PID}" || true; \
+    kill "${SIDECAR_PID}" 2>/dev/null || true; \
+    wait "${SIDECAR_PID}" || true; \
+    kill "${PROXY_PID}" 2>/dev/null || true; \
+    kill "${BROKER_PID}" 2>/dev/null || true; \
+    wait "${PROXY_PID}" || true; \
+    wait "${BROKER_PID}" || true; \
     rm -rf "${BOUNDARY_ROOT}"
 
 # Build the custom ttyd index page (served via -I at runtime): ttyd's page is

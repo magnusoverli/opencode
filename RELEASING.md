@@ -5,7 +5,7 @@ Two channels, two folders.
 | | Folder | Runtime | Tag | Image | Add-on shown in HA |
 |---|---|---|---|---|---|
 | **Stable** | `ha_opencode/` | OpenCode V1 | `v2.5.3` | `ghcr.io/magnusoverli/ha_opencode` | OpenCode |
-| **Beta** | `ha_opencode_beta/` | OpenCode V2 beta | `beta-v3.0.0b0` | `ghcr.io/magnusoverli/ha_opencode_beta` | OpenCode Beta |
+| **Beta** | `ha_opencode_beta/` | OpenCode V2 beta | `beta-v3.0.0b1` | `ghcr.io/magnusoverli/ha_opencode_beta` | OpenCode Beta |
 
 Each folder is a complete add-on: its own `Dockerfile`, its own `rootfs/`, its
 own `config.yaml`. Both live on `main`, and both release from `main`.
@@ -47,9 +47,9 @@ migration and rollback gates.
 git checkout main
 git pull
 # ...edit ha_opencode_beta/rootfs/... , add a section to ha_opencode_beta/CHANGELOG.md...
-git commit -am "feat: the thing"
+git add ha_opencode_beta/ && git commit -m "feat: the thing"
 git push
-git tag beta-v3.0.0b0 && git push origin beta-v3.0.0b0
+git tag beta-v3.0.0b1 && git push origin beta-v3.0.0b1
 ```
 
 The code only exists in `ha_opencode_beta/`, so a stable release physically
