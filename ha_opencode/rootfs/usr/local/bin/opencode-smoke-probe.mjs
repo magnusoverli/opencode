@@ -22,6 +22,12 @@ const MCP_SERVER = process.env.SMOKE_PROBE_MCP || "/opt/ha-mcp-server/index.js";
 const LSP_SERVER = process.env.SMOKE_PROBE_LSP || "/opt/ha-lsp-server/server.js";
 
 function withChild(command, args, env, drive) {
+  // Only ever spawn the current, trusted Node binary: this closes off any
+  // possibility of command injection even if a future caller passes an
+  // untrusted `command` value.
+  if (command !== process.execPath) {
+    throw new Error(`withChild: refusing to spawn untrusted command ${command}`);
+  }
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       env: { ...process.env, ...env },
