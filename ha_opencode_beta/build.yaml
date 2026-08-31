@@ -13,6 +13,7 @@ build_from:
   aarch64: ghcr.io/home-assistant/base-debian:trixie
   amd64: ghcr.io/home-assistant/base-debian:trixie
 args:
+  NODE_VERSION: "24.15.0"
   # The certified OpenCode runtime for this channel. Must be an exact version —
   # never "latest" or a range — and must match the OPENCODE_VERSION ARG default
   # in Dockerfile. test/runtime-contract.test.js asserts both.

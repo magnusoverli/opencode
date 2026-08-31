@@ -1,8 +1,13 @@
 # Global ARGs (available in FROM instructions)
 ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
 ARG BUILD_ARCH
+ARG NODE_VERSION=24.15.0
 
-## Stage 1: Build hab CLI from source (pinned release)
+# Home Assistant does not publish a Node-specific Debian base. Keep its s6 and
+# Bashio runtime as the final base, and copy an exact official Node toolchain in.
+FROM node:${NODE_VERSION}-trixie-slim AS node-runtime
+
+## Build hab CLI from source (pinned release)
 # Pinned to the build host's platform — Go cross-compiles via GOARCH below,
 # so this stage never needs to run under emulation
 FROM --platform=$BUILDPLATFORM golang:1.24-trixie AS hab-builder
@@ -22,6 +27,7 @@ FROM $BUILD_FROM AS runtime
 # Build arguments
 ARG BUILD_VERSION
 ARG BUILD_ARCH
+ARG NODE_VERSION
 # Release-channel identity for paths shared through /homeassistant. Stable and
 # beta now contain different OpenCode generations, but still use this one value
 # rather than scattering channel-specific paths through the image.
@@ -51,8 +57,15 @@ ENV NODE_ENV=production \
 # /usr/local/lib/opencode/channel.sh; Node code reads process.env.ADDON_CHANNEL.
 ENV ADDON_CHANNEL=${ADDON_CHANNEL}
 
+# Install the exact supported Node runtime without replacing Home Assistant's
+# Supervisor-compatible base image. npm is shipped with the official Node image.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s node /usr/local/bin/nodejs
+
 # Install system dependencies in a single layer
-# - nodejs/npm: Required for OpenCode
 # - git: Required by OpenCode for version control operations
 # - openssh-client: Provides ssh, ssh-keygen, and ssh-keyscan for Git SSH remotes
 # - jq: JSON processing for helper scripts
@@ -70,9 +83,8 @@ RUN apt-get update \
         curl \
         git \
         jq \
-        nodejs \
+        libatomic1 \
         openssh-client \
-        npm \
         passwd \
         procps \
         python3 \
@@ -82,6 +94,9 @@ RUN apt-get update \
     && command -v ssh-keygen >/dev/null \
     && command -v ssh-keyscan >/dev/null \
     && command -v setpriv >/dev/null \
+    && test "$(command -v node)" = /usr/local/bin/node \
+    && test "$(node --version)" = "v${NODE_VERSION}" \
+    && npm --version >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
 # OpenCode V2 conversion runs without root access to retained V1 state or

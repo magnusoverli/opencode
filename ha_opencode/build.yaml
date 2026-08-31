@@ -15,6 +15,7 @@ build_from:
   aarch64: ghcr.io/home-assistant/base-debian:trixie
   amd64: ghcr.io/home-assistant/base-debian:trixie
 args:
+  NODE_VERSION: "24.15.0"
   # Must match the exact certified version in the Dockerfile.
   OPENCODE_VERSION: "1.18.25"
   OPENCHAMBER_VERSION: "1.21.0"

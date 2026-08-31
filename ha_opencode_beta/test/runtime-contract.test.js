@@ -47,6 +47,8 @@ describe(`${CHANNEL} runtime pin`, () => {
 
   const dockerfilePin = /^ARG OPENCODE_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
   const buildYamlPin = /^\s*OPENCODE_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
+  const dockerfileNodePin = /^ARG NODE_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
+  const buildYamlNodePin = /^\s*NODE_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
   const dockerfileV2Pin = /^ARG OPENCODE_V2_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
   const buildYamlV2Pin = /^\s*OPENCODE_V2_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
   const v2Package = JSON.parse(
@@ -67,6 +69,14 @@ describe(`${CHANNEL} runtime pin`, () => {
   it("pins the same version in build.yaml, which is what CI reads", () => {
     assert.ok(buildYamlPin, "build.yaml has no OPENCODE_VERSION");
     assert.equal(buildYamlPin, dockerfilePin);
+  });
+
+  it("copies one exact supported Node runtime into the Home Assistant base", () => {
+    assert.match(dockerfileNodePin, /^24\.\d+\.\d+$/);
+    assert.equal(buildYamlNodePin, dockerfileNodePin);
+    assert.match(dockerfile, /FROM node:\$\{NODE_VERSION\}-trixie-slim AS node-runtime/);
+    assert.match(dockerfile, /test "\$\(node --version\)" = "v\$\{NODE_VERSION\}"/);
+    assert.doesNotMatch(dockerfile, /^[ \t]+nodejs \\/m);
   });
 
   it("pins the same exact OpenChamber version in the Dockerfile and build.yaml", () => {

@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Standardized the container runtime on Node 24.15.0 while retaining Home Assistant's Supervisor-compatible Debian base.
 - Fixed the read-only session prompt normalization so the in-add-on smoke test no longer reports a false failure.
 
 ## 2.5.3
