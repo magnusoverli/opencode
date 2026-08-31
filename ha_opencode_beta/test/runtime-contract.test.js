@@ -43,6 +43,7 @@ function shellSources() {
 describe(`${CHANNEL} runtime pin`, () => {
   const dockerfile = read(ADDON_DIR, "Dockerfile");
   const buildYaml = read(ADDON_DIR, "build.yaml");
+  const v2BoundaryFixture = read(ADDON_DIR, "test", "v2-boundary-fixture.sh");
 
   const dockerfilePin = /^ARG OPENCODE_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
   const buildYamlPin = /^\s*OPENCODE_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
@@ -129,19 +130,44 @@ describe(`${CHANNEL} runtime pin`, () => {
   it("exercises the staged V2 Linux privilege boundary during the image build", () => {
     assert.match(dockerfile, /opencode-v2-launch/);
     assert.match(dockerfile, /secure-launcher\.c/);
-    assert.match(dockerfile, /NoNewPrivs:/);
-    assert.match(dockerfile, /CapBnd:/);
-    assert.match(dockerfile, /managed-config\.js --plugin-enabled true/);
+    assert.match(v2BoundaryFixture, /NoNewPrivs:/);
+    assert.match(v2BoundaryFixture, /CapBnd:/);
+    assert.match(v2BoundaryFixture, /managed-config\.js --plugin-enabled true/);
     assert.match(
       read(ROOTFS, "opt", "opencode-v2-homeassistant", "secure-launcher.c"),
       /"\/usr\/local\/bin\/opencode2", "serve"/,
     );
     assert.match(dockerfile, /cc -shared -fPIC/);
     assert.match(dockerfile, /opencode-v2-non-dumpable\.so/);
-    assert.match(dockerfile, /test ! -e "\/proc\/\$\{SECURE_PID\}\/fd\/3"/);
-    assert.match(dockerfile, /StreamableHTTPClientTransport/);
-    assert.match(dockerfile, /await client\.listTools\(\)/);
-    assert.match(dockerfile, /Skipping architecture-neutral V2 boundary fixture on arm64/);
+    assert.match(dockerfile, /source=test\/v2-boundary-fixture\.sh/);
+    assert.match(dockerfile, /FROM runtime AS boundary-test/);
+    assert.match(dockerfile, /FROM runtime AS final/);
+    assert.match(dockerfile, /timeout --signal=TERM --kill-after=10s 240s/);
+    assert.doesNotMatch(dockerfile, /Skipping architecture-neutral V2 boundary fixture/);
+  });
+
+  it("declares a complete s6 service graph", () => {
+    const graph = path.join(ROOTFS, "etc", "s6-overlay", "s6-rc.d");
+    const services = fs
+      .readdirSync(graph, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== "user")
+      .map((entry) => entry.name);
+
+    for (const service of services) {
+      assert.ok(fs.existsSync(path.join(graph, service, "type")), `${service} has no type`);
+      const dependencies = path.join(graph, service, "dependencies.d");
+      if (!fs.existsSync(dependencies)) continue;
+      for (const dependency of fs.readdirSync(dependencies)) {
+        assert.ok(
+          fs.existsSync(path.join(graph, dependency, "type")),
+          `${service} depends on missing service ${dependency}`,
+        );
+      }
+    }
+
+    for (const service of fs.readdirSync(path.join(graph, "user", "contents.d"))) {
+      assert.ok(fs.existsSync(path.join(graph, service, "type")), `user bundle includes missing service ${service}`);
+    }
   });
 
   it("bounds every process in the in-image migration fixture", () => {

@@ -166,12 +166,19 @@ content, source filenames, server passwords, environment values, or captured
 tool output. Diagnostic capture is bounded and keyword-checked before the
 candidate can activate.
 
-The local pinned-binary regression checks exact session, message, event-watermark,
-and credential projections while proving the source hashes remain unchanged. The
-in-image fixture additionally runs conversion as `opencode-v2` and checks Linux
-source inaccessibility and privilege boundaries. That Linux fixture must pass in
-CI or a local Docker build before release; it passes locally for both native
-amd64 and emulated arm64.
+The pinned-binary regression checks exact session, message, event-watermark, and
+credential projections while proving the source hashes remain unchanged. A
+bounded image-build fixture additionally runs conversion as `opencode-v2` and
+checks Linux source inaccessibility and privilege boundaries. Native amd64 CI
+runs that full fault-injection target; native arm64 CI compiles the launchers and
+starts the pinned conversion runtime. Local QEMU builds are useful diagnostics
+but are not a release gate.
+
+Supervisor, Ingress, mount, and s6 lifecycle acceptance runs separately in Home
+Assistant's official apps devcontainer. It starts real Supervisor and Home
+Assistant containers and installs this repository as local apps. The component
+fixture does not claim to reproduce that service graph, and the devcontainer is
+not a substitute for HAOS host-level acceptance.
 
 ## Staged V2 Runtime
 
@@ -216,12 +223,13 @@ process-group operations. A restarted V2 client can replace the previous
 session, and sidecar-readiness failures make the supervised V2 process exit and
 retry instead of sleeping permanently.
 
-The integrated image fixture starts the real sidecar and plugin-enabled V2
-through the native launcher. On amd64 and arm64 it proves Basic authentication,
-an authenticated MCP request, UID/GID and capability boundaries, FD 3 closure,
-and denial of the final process environment before and after plugin activation.
-A hostile UID-60000 poller also scans the launch transition and must not recover
-either credential.
+The native amd64 image fixture starts the real sidecar and plugin-enabled V2
+through the launcher. It proves Basic authentication, an authenticated MCP
+request, UID/GID and capability boundaries, FD 3 closure, and denial of the
+final process environment before and after plugin activation. A hostile
+UID-60000 poller also scans the launch transition and must not recover either
+credential. Native arm64 separately verifies target compilation, package
+selection, migration startup, and the production image build.
 
 V2 currently discovers project plugins independently of the project-config
 disable flag. Consequently, the staged server remains private and starts only

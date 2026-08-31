@@ -10,8 +10,10 @@
 .editorconfig
 .vscode
 
-# Test infrastructure (not needed in image)
-**/test/
+# Test infrastructure is excluded from image copies. The boundary fixture stays
+# in the build context for its read-only BuildKit bind mount.
+**/test/**
+!test/v2-boundary-fixture.sh
 **/vitest.config.*
 
 # Dependencies are installed from package-lock at build time; the checked-in

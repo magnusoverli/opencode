@@ -34,6 +34,10 @@ jobs:
         working-directory: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
         run: npm ci --no-audit --no-fund
 
+      - name: Verify matching CLI and plugin pins
+        working-directory: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
+        run: npm run verify:versions
+
       - name: Beta add-on contract tests
         run: node --test "ha_opencode_beta/test/*.test.js"
 
@@ -87,30 +91,6 @@ jobs:
       - name: Run tests
         run: npm test
 
-  opencode-v2-plugin:
-    name: OpenCode V2 beta runtime integration
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant/package-lock.json
-
-      - name: Install exact V2 beta dependency set
-        run: npm ci --no-audit --no-fund
-
-      - name: Verify matching CLI and plugin pins
-        run: npm run verify:versions
-
-      - name: Run plugin and real V2 server tests
-        run: npm test
-
   shell:
     name: Shell scripts and service definitions
     runs-on: ubuntu-latest
@@ -126,7 +106,7 @@ jobs:
               echo "::error file=${file}::bash syntax error"
               status=1
             fi
-          done < <(find ha_opencode ha_opencode_beta -type f \
+          done < <(find ha_opencode ha_opencode_beta scripts -type f \
               -not -path '*/node_modules/*' \
               \( -name '*.sh' -o -path '*/s6-rc.d/*/run' -o -path '*/s6-rc.d/*/connect' -o -path '*/usr/local/bin/*' \))
           exit "${status}"

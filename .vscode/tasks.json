@@ -1,0 +1,63 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Home Assistant",
+      "type": "shell",
+      "command": "supervisor_run",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Install App",
+      "type": "shell",
+      "command": "ha apps install \"local_${input:appName}\" && bash scripts/devcontainer-build-app.sh \"${input:appName}\"",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start App",
+      "type": "shell",
+      "command": "ha apps stop \"local_${input:appName}\"; ha apps start \"local_${input:appName}\"; ha apps logs -f \"local_${input:appName}\"",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": [],
+      "runOptions": {
+        "reevaluateOnRerun": false
+      }
+    },
+    {
+      "label": "Rebuild and Start App",
+      "type": "shell",
+      "command": "ha apps stop \"local_${input:appName}\" || true; bash scripts/devcontainer-build-app.sh \"${input:appName}\" && ha apps start \"local_${input:appName}\" && ha apps logs -f \"local_${input:appName}\"",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "appName",
+      "type": "pickString",
+      "description": "Home Assistant app folder",
+      "options": ["ha_opencode", "ha_opencode_beta"]
+    }
+  ]
+}

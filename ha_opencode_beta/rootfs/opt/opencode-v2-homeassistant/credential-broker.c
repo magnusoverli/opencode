@@ -103,11 +103,6 @@ static int validate_expected_identity(const char *path, pid_t pid) {
   return length > 0 && count == length && memcmp(actual, expected, (size_t)length) == 0 ? 0 : -1;
 }
 
-static int validate_expected_client(const char *runtime_root, pid_t pid, char path[256]) {
-  if (snprintf(path, 256, "%s/clients/%ld", runtime_root, (long)pid) >= 256) return -1;
-  return validate_expected_identity(path, pid);
-}
-
 static int write_all(int fd, const void *buffer, size_t length) {
   const char *cursor = buffer;
   while (length > 0) {
@@ -120,7 +115,7 @@ static int write_all(int fd, const void *buffer, size_t length) {
   return 0;
 }
 
-static void serve_client(int client, const char *runtime_root, int client_mode) {
+static void serve_client(int client, const char *runtime_root) {
   struct ucred peer;
   socklen_t peer_length = sizeof(peer);
   if (getsockopt(client, SOL_SOCKET, SO_PEERCRED, &peer, &peer_length) != 0 ||
@@ -136,15 +131,11 @@ static void serve_client(int client, const char *runtime_root, int client_mode) 
     return;
   }
 
-  if (client_mode) {
-    if (validate_expected_client(runtime_root, peer.pid, pid_path) != 0) return;
-  } else {
-    if (snprintf(pid_path, sizeof(pid_path), "%s/v2.pid", runtime_root) >= (int)sizeof(pid_path) ||
-        validate_expected_identity(pid_path, peer.pid) != 0) return;
-  }
+  if (snprintf(pid_path, sizeof(pid_path), "%s/v2.pid", runtime_root) >= (int)sizeof(pid_path) ||
+      validate_expected_identity(pid_path, peer.pid) != 0) return;
 
   int password_fd = open_root_secret(password_path, 0);
-  int sidecar_fd = client_mode ? -1 : open_root_secret(sidecar_path, 1);
+  int sidecar_fd = open_root_secret(sidecar_path, 1);
   if (password_fd < 0 || sidecar_fd == -2) {
     if (password_fd >= 0) close(password_fd);
     if (sidecar_fd >= 0) close(sidecar_fd);
@@ -174,12 +165,8 @@ static void serve_client(int client, const char *runtime_root, int client_mode) 
 }
 
 int main(int argc, char **argv) {
-  if (argc < 2 || argc > 3 || (argc == 3 && strcmp(argv[2], "client") != 0)) {
-    fail("expected secured runtime root and optional client mode");
-  }
-  int client_mode = argc == 3;
-  const char *socket_leaf = client_mode ? "client-credential.sock" : "credential.sock";
-  if (snprintf(socket_path, sizeof(socket_path), "%s/%s", argv[1], socket_leaf) >=
+  if (argc != 2) fail("expected one secured runtime root");
+  if (snprintf(socket_path, sizeof(socket_path), "%s/credential.sock", argv[1]) >=
       (int)sizeof(socket_path)) {
     fail("credential socket path is too long");
   }
@@ -210,7 +197,7 @@ int main(int argc, char **argv) {
     int client = accept4(listener, NULL, NULL, SOCK_CLOEXEC);
     if (client < 0 && errno == EINTR) continue;
     if (client < 0) fail("cannot accept credential client");
-    serve_client(client, argv[1], client_mode);
+    serve_client(client, argv[1]);
     close(client);
   }
 }

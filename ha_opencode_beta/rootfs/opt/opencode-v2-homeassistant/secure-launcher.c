@@ -34,8 +34,7 @@ static void join_path(char output[PATH_MAX], const char *root,
 
 static void set_environment(const char *runtime_root,
                             const char *generation_root,
-                            const char *cache_home,
-                            const char *credential_socket_leaf) {
+                            const char *cache_home) {
   char home[PATH_MAX];
   char config[PATH_MAX];
   char data[PATH_MAX];
@@ -47,7 +46,7 @@ static void set_environment(const char *runtime_root,
   join_path(data, generation_root, "data");
   join_path(state, generation_root, "state");
   join_path(managed, runtime_root, "managed.json");
-  join_path(credential_socket, runtime_root, credential_socket_leaf);
+  join_path(credential_socket, runtime_root, "credential.sock");
 
   if (clearenv() != 0) {
     fail("cannot clear the inherited environment");
@@ -66,8 +65,6 @@ static void set_environment(const char *runtime_root,
   SET_ENV("SHELL", "/bin/bash");
   SET_ENV("PATH", "/usr/local/bin:/usr/bin:/bin");
   SET_ENV("LANG", "C.UTF-8");
-  SET_ENV("TERM", "xterm-256color");
-  SET_ENV("COLORTERM", "truecolor");
   SET_ENV("NODE_OPTIONS", "--max-old-space-size=512");
   SET_ENV("TMPDIR", cache_home);
   SET_ENV("XDG_CONFIG_HOME", config);
@@ -132,26 +129,6 @@ static void publish_expected_pid(const char *runtime_root) {
   }
 }
 
-static void publish_expected_client(const char *runtime_root) {
-  char clients[PATH_MAX];
-  join_path(clients, runtime_root, "clients");
-  char temporary[PATH_MAX];
-  char destination[PATH_MAX];
-  if (snprintf(temporary, sizeof(temporary), "%s/.%ld", clients, (long)getpid()) >= PATH_MAX ||
-      snprintf(destination, sizeof(destination), "%s/%ld", clients, (long)getpid()) >= PATH_MAX) {
-    fail("client identity path is too long");
-  }
-  unlink(temporary);
-  int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
-  if (fd < 0 || fchmod(fd, 0600) != 0) fail("cannot publish the client process identity");
-  char text[96];
-  int length = snprintf(text, sizeof(text), "%ld %llu\n", (long)getpid(), process_start_time(getpid()));
-  if (length < 4 || write(fd, text, (size_t)length) != length || fsync(fd) != 0 ||
-      close(fd) != 0 || rename(temporary, destination) != 0) {
-    fail("cannot publish the client process identity");
-  }
-}
-
 static void drop_privileges(void) {
   struct rlimit no_core = {0, 0};
   if (setrlimit(RLIMIT_CORE, &no_core) != 0 ||
@@ -184,57 +161,28 @@ static void drop_privileges(void) {
 }
 
 int main(int argc, char **argv) {
-  int client_mode = argc >= 2 && strcmp(argv[1], "--client") == 0;
-  int client_probe = client_mode && argc == 6 && strcmp(argv[5], "--probe") == 0;
-  if ((!client_mode && argc != 5) ||
-      (client_mode && !((argc == 5) || client_probe))) {
-    fail("expected server launch arguments or --client runtime-root generation-root cache-home [--probe]");
+  if (argc != 5) {
+    fail("expected runtime-root, generation-root, cache-home, and port");
   }
 
-  const char *runtime_root = client_mode ? argv[2] : argv[1];
-  const char *generation_root = client_mode ? argv[3] : argv[2];
-  const char *cache_home = client_mode ? argv[4] : argv[3];
-
   char *end = NULL;
-  long port = 0;
-  if (!client_mode) {
-    errno = 0;
-    port = strtol(argv[4], &end, 10);
-    if (errno != 0 || end == argv[4] || *end != '\0' || port < 1 ||
-        port > 65535) {
-      fail("server port is invalid");
-    }
+  errno = 0;
+  long port = strtol(argv[4], &end, 10);
+  if (errno != 0 || end == argv[4] || *end != '\0' || port < 1 ||
+      port > 65535) {
+    fail("server port is invalid");
   }
 
   char workspace[PATH_MAX];
-  join_path(workspace, runtime_root, "workspace");
+  join_path(workspace, argv[1], "workspace");
   close(3);
   if (chdir(workspace) != 0) {
     fail("cannot enter the secured runtime workspace");
   }
 
-  if (client_mode) publish_expected_client(runtime_root);
-  else publish_expected_pid(runtime_root);
-  set_environment(runtime_root, generation_root, cache_home,
-                  client_mode ? "client-credential.sock" : "credential.sock");
+  publish_expected_pid(argv[1]);
+  set_environment(argv[1], argv[2], argv[3]);
   drop_privileges();
-
-  if (client_mode) {
-    if (client_probe) {
-      char *child_argv[] = {
-          "/usr/local/bin/opencode2", "api", "--server",
-          "http://127.0.0.1:4100", "GET", "/api/health", NULL,
-      };
-      execve(child_argv[0], child_argv, environ);
-    } else {
-      char *child_argv[] = {
-          "/usr/local/bin/opencode2", "--server", "http://127.0.0.1:4100",
-          workspace, NULL,
-      };
-      execve(child_argv[0], child_argv, environ);
-    }
-    fail("cannot execute the pinned OpenCode V2 client");
-  }
 
   char port_text[6];
   snprintf(port_text, sizeof(port_text), "%ld", port);

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Moved staged V2 boundary checks into a bounded native-CI fixture, removed dormant preview-client credential paths, and added the official Home Assistant Supervisor devcontainer workflow.
+
 ## 3.0.0b2
 
 - Kept the root MCP proxy bound during sidecar startup while returning a clean 503 until backend readiness, and made startup logs and the terminal banner distinguish the active V1 TUI from staged V2.

@@ -117,6 +117,25 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Run native amd64 V2 boundary fixture
+        if: matrix.ha_arch == 'amd64'
+        uses: docker/build-push-action@v7
+        with:
+          context: ha_opencode_beta
+          file: ha_opencode_beta/Dockerfile
+          platforms: ${{ matrix.platform }}
+          target: boundary-test
+          push: false
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
+            BUILD_VERSION=${{ steps.version.outputs.version }}
+            BUILD_ARCH=${{ matrix.ha_arch }}
+            ADDON_CHANNEL=beta
+            OPENCODE_VERSION=${{ steps.beta_build_args.outputs.opencode_version }}
+            OPENCODE_V2_VERSION=${{ steps.beta_build_args.outputs.opencode_v2_version }}
+            OPENCHAMBER_VERSION=${{ steps.beta_build_args.outputs.openchamber_version }}
+          cache-from: type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
         with:
@@ -238,7 +257,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          for attempt in {1..30}; do
+          for _attempt in {1..30}; do
             if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
               gh release upload "${RELEASE_TAG}" \
                 --repo "${GITHUB_REPOSITORY}" \

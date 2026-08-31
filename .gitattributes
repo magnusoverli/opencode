@@ -1,0 +1,6 @@
+* text=auto
+
+*.sh text eol=lf
+Dockerfile text eol=lf
+*/rootfs/etc/s6-overlay/** text eol=lf
+*/rootfs/usr/local/bin/** text eol=lf

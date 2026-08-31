@@ -608,10 +608,9 @@ if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
     V2_PASSWORD_TEMP=""
     V2_SIDECAR_SECRET_TEMP=""
     V2_SIDECAR_ENV_TEMP=""
-    if mkdir -p "${V2_RUNTIME_ROOT}/config/opencode" "${V2_RUNTIME_ROOT}/home" "${V2_RUNTIME_ROOT}/workspace" "${V2_RUNTIME_ROOT}/clients" \
+    if mkdir -p "${V2_RUNTIME_ROOT}/config/opencode" "${V2_RUNTIME_ROOT}/home" "${V2_RUNTIME_ROOT}/workspace" \
         && chmod 755 "${V2_RUNTIME_ROOT}" "${V2_RUNTIME_ROOT}/config" "${V2_RUNTIME_ROOT}/config/opencode" \
             "${V2_RUNTIME_ROOT}/home" "${V2_RUNTIME_ROOT}/workspace" \
-        && chmod 700 "${V2_RUNTIME_ROOT}/clients" \
         && cp /opt/ha-mcp-server/AGENTS.md "${V2_RUNTIME_ROOT}/config/opencode/AGENTS.md" \
         && chmod 644 "${V2_RUNTIME_ROOT}/config/opencode/AGENTS.md"; then
         V2_CONFIG_TEMP=$(mktemp "${V2_RUNTIME_ROOT}/.managed.XXXXXX")

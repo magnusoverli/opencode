@@ -1,0 +1,66 @@
+---
+name: Beta Image Checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/beta-image-checks.yaml"
+      - "ha_opencode_beta/Dockerfile"
+      - "ha_opencode_beta/.dockerignore"
+      - "ha_opencode_beta/build.yaml"
+      - "ha_opencode_beta/rootfs/**"
+      - "ha_opencode_beta/test/v2-boundary-fixture.sh"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/beta-image-checks.yaml"
+      - "ha_opencode_beta/Dockerfile"
+      - "ha_opencode_beta/.dockerignore"
+      - "ha_opencode_beta/build.yaml"
+      - "ha_opencode_beta/rootfs/**"
+      - "ha_opencode_beta/test/v2-boundary-fixture.sh"
+  workflow_dispatch:
+
+concurrency:
+  group: beta-image-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ha_arch: amd64
+            name: Native amd64 boundary
+            platform: linux/amd64
+            runner: ubuntu-latest
+            target: boundary-test
+          - ha_arch: aarch64
+            name: Native arm64 image
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            target: final
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build target-native beta image
+        uses: docker/build-push-action@v7
+        with:
+          context: ha_opencode_beta
+          file: ha_opencode_beta/Dockerfile
+          platforms: ${{ matrix.platform }}
+          target: ${{ matrix.target }}
+          push: false
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
+            BUILD_VERSION=ci
+            BUILD_ARCH=${{ matrix.ha_arch }}
+            ADDON_CHANNEL=beta
+          cache-from: type=gha,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
+          cache-to: type=gha,mode=max,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
