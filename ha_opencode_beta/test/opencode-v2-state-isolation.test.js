@@ -286,7 +286,7 @@ describe("OpenCode V2 state isolation", () => {
     assert.doesNotMatch(dockerfile, /Skipping architecture-neutral V2 boundary fixture|BOUNDARY_ROOT=/);
     assert.match(v2BoundaryFixture, /wait_for_status 503/);
     assert.match(v2BoundaryFixture, /wait_for_status 401/);
-    assert.match(v2BoundaryFixture, /kill -KILL "\$\{SIDECAR_PID\}"/);
+    assert.doesNotMatch(v2BoundaryFixture, /kill -KILL "\$\{SIDECAR_PID\}"/);
     assert.match(v2BoundaryFixture, /NoNewPrivs/);
     assert.match(v2BoundaryFixture, /CapBnd/);
     assert.match(v2BoundaryFixture, /StreamableHTTPClientTransport/);

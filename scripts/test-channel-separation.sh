@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Marker searches intentionally contain literal shell expressions.
 # Functional test for the per-channel AGENTS.md deployment logic.
 #
 # Extracts the real AGENTS block out of init-opencode/run and channel.sh,
@@ -30,8 +31,8 @@ build_runner() { # channel, addon_dir -> writes $SB/runner.sh
     {
         echo '#!/usr/bin/env bash'
         # Stubs for the pieces the block leans on but does not own.
-        echo 'bashio::log.info() { printf "      log: %s\n" "$*"; }'
-        echo 'bashio::log.warning() { printf "      warn: %s\n" "$*"; }'
+        printf '%s\n' 'bashio::log.info() { printf "      log: %s\n" "$*"; }'
+        printf '%s\n' 'bashio::log.warning() { printf "      warn: %s\n" "$*"; }'
         echo 'HELP_STAMP_FRESH=false'
         echo 'HAB_VERSION=1.6.4'
         echo 'ZIGPORTER_VERSION=0.1.0'
@@ -49,7 +50,8 @@ build_runner() { # channel, addon_dir -> writes $SB/runner.sh
 
 scenario() { # name, channel, addon_dir, setup_fn
     local name="$1" channel="$2" addon="$3" setup="$4"
-    local sb="${WORK}/$(echo "$name" | tr ' /' '__')"
+    local sb
+    sb="${WORK}/$(echo "$name" | tr ' /' '__')"
     rm -rf "$sb"; mkdir -p "$sb/homeassistant" "$sb/data" "$sb/opt/ha-mcp-server"
 
     # The in-image instruction file this channel would deploy.

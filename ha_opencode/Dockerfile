@@ -1,6 +1,5 @@
 # Global ARGs (available in FROM instructions)
 ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
-ARG BUILD_ARCH
 ARG NODE_VERSION=24.15.0
 
 # Home Assistant does not publish a Node-specific Debian base. Keep its s6 and
@@ -18,7 +17,8 @@ RUN git clone --depth 1 --branch "${HAB_VERSION}" https://github.com/balloob/hom
 WORKDIR /src
 
 # Cross-compile for the target architecture
-RUN GOARCH=$([ "$BUILD_ARCH" = "aarch64" ] && echo "arm64" || echo "amd64") \
+RUN case "${BUILD_ARCH}" in amd64|aarch64) ;; *) echo "Unsupported BUILD_ARCH: ${BUILD_ARCH:-unset}" >&2; exit 1;; esac \
+    && GOARCH=$([ "$BUILD_ARCH" = "aarch64" ] && echo "arm64" || echo "amd64") \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /hab .
 
 ## Stage 2: Main add-on image
@@ -53,6 +53,8 @@ ENV NODE_ENV=production \
 # Carried into every process in the container. Shell code reads it via
 # /usr/local/lib/opencode/channel.sh; Node code reads process.env.ADDON_CHANNEL.
 ENV ADDON_CHANNEL=${ADDON_CHANNEL}
+
+RUN case "${BUILD_ARCH}" in amd64|aarch64) ;; *) echo "Unsupported BUILD_ARCH: ${BUILD_ARCH:-unset}" >&2; exit 1;; esac
 
 # Install the exact supported Node runtime without replacing Home Assistant's
 # Supervisor-compatible base image. npm is shipped with the official Node image.
@@ -177,7 +179,8 @@ RUN (cd /opt/ha-mcp-server && npm install --omit=dev --no-audit --no-fund) & \
             ! -name "opencode-linux-x64" ! -name "opencode-linux-x64-baseline" -exec rm -rf {} +; \
     fi \
     && rm -rf /usr/local/lib/node_modules/ppq-private-mode/node_modules/openclaw \
-    && find /usr/local/lib/node_modules -type f \( -name '*.d.ts' -o -name '*.map' -o -name '*.pdb' \) -delete
+    && find /usr/local/lib/node_modules -type f \( -name '*.d.ts' -o -name '*.map' -o -name '*.pdb' \) -delete \
+    && test "$(opencode --version)" = "${OPENCODE_VERSION}"
 
 # Copy root filesystem (server code, scripts, etc.)
 COPY rootfs /

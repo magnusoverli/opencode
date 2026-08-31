@@ -101,11 +101,14 @@ Tagging is the trigger for everything.
 | `check-hab-update.yaml` | weekly | Reports the `HAB_VERSION` pin in both Dockerfiles against the latest hab release |
 | `check-opencode-update.yaml` | weekly | Reports stable's V1 pin and beta's V2 beta pin against their separate npm streams. Read-only — it never bumps a pin |
 | `pr-checks.yaml` | pull request, push to main | Runs the add-on contract tests, the MCP server and YAML LSP suites, and syntax checks every shipped script |
+| `beta-image-checks.yaml` | relevant pull request, push to main | Builds the beta boundary target on native amd64 and arm64 runners without publishing |
+| `stable-image-checks.yaml` | relevant pull request, push to main | Builds the stable image on native amd64 and arm64 runners without publishing |
 
-The image itself is not built on a pull request. It is built by the release
-workflows and then verified on a real Home Assistant instance with
-`opencode-smoke-test`, which is what
-[`OPENCODE_UPGRADE_CHECKLIST.md`](OPENCODE_UPGRADE_CHECKLIST.md) walks through.
+Relevant stable and beta changes build target-native images on pull requests and
+pushes to `main`; release workflows separately publish tagged images.
+Lifecycle changes are verified in the official Home Assistant devcontainer with
+`scripts/devcontainer-acceptance.sh`; HAOS acceptance remains the manual process
+in [`OPENCODE_UPGRADE_CHECKLIST.md`](OPENCODE_UPGRADE_CHECKLIST.md).
 
 ### Changing the OpenCode runtime
 

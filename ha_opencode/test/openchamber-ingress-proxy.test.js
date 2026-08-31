@@ -1,7 +1,6 @@
-// Integration tests for the OpenChamber ingress proxy's provider OAuth loopback
-// bridge (issue #54). The proxy is spawned exactly as the s6 service runs it and
-// driven over real HTTP against a fake OpenChamber upstream and a fake
-// in-container OAuth callback listener.
+// Component tests for the OpenChamber ingress proxy's provider OAuth loopback
+// bridge (issue #54). They spawn the proxy directly with fake upstream and OAuth
+// listeners; the devcontainer acceptance harness covers Home Assistant Core Ingress.
 //
 // Run with: node --test ha_opencode/test/openchamber-ingress-proxy.test.js
 //

@@ -38,10 +38,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Test OpenChamber service ownership
-        shell: bash
-        run: node --test ha_opencode/test/openchamber-s6-services.test.js
-
       - name: Get version
         id: version
         shell: bash
@@ -218,7 +214,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          for attempt in {1..30}; do
+          for _attempt in {1..30}; do
             if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
               gh release upload "${RELEASE_TAG}" \
                 --repo "${GITHUB_REPOSITORY}" \

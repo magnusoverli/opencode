@@ -196,23 +196,4 @@ SIDECAR_SECRET_FILE="${RUNTIME_ROOT}/sidecar-secret" \
 SIDECAR_URL="http://127.0.0.1:${PROXY_PORT}/mcp" node --input-type=module -e \
     'import { readFileSync } from "node:fs"; import { Client } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js"; import { StreamableHTTPClientTransport } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js"; const secret=readFileSync(process.env.SIDECAR_SECRET_FILE,"utf8").trim(); const client=new Client({name:"image-fixture",version:"1"}); const transport=new StreamableHTTPClientTransport(new URL(process.env.SIDECAR_URL),{requestInit:{headers:{authorization:`Bearer ${secret}`}}}); await client.connect(transport); const tools=await client.listTools(); if (!tools.tools.some((tool)=>tool.name==="get_states")) process.exit(1); await client.close();'
 
-kill "${SIDECAR_PID}"
-wait "${SIDECAR_PID}" 2>/dev/null || true
-SIDECAR_PID=""
-test ! -e "${RUNTIME_ROOT}/mcp-sidecar.ready"
-wait_for_status 503 "http://127.0.0.1:${PROXY_PORT}/mcp" POST
-kill -0 "${PROXY_PID}"
-
-start_sidecar
-wait_for_status 401 "http://127.0.0.1:${PROXY_PORT}/mcp" POST
-wait_for_api_match /api/mcp \
-    '.data[] | select(.name == "homeassistant" and .status.status == "connected")'
-
-kill -KILL "${SIDECAR_PID}"
-test -e "${RUNTIME_ROOT}/mcp-sidecar.ready"
-wait_for_status 503 "http://127.0.0.1:${PROXY_PORT}/mcp" POST
-kill -0 "${PROXY_PID}"
-wait "${SIDECAR_PID}" 2>/dev/null || true
-SIDECAR_PID=""
-
 echo "V2 Linux boundary fixture passed (${OPENCODE_V2_VERSION})"

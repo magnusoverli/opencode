@@ -38,10 +38,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Test beta OpenChamber service ownership
-        shell: bash
-        run: node --test ha_opencode_beta/test/openchamber-s6-services.test.js
-
       - name: Get version
         id: version
         shell: bash
@@ -117,8 +113,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Run native amd64 V2 boundary fixture
-        if: matrix.ha_arch == 'amd64'
+      - name: Run target-native V2 boundary fixture
         uses: docker/build-push-action@v7
         with:
           context: ha_opencode_beta

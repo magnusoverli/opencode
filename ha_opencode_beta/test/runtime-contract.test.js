@@ -44,6 +44,7 @@ describe(`${CHANNEL} runtime pin`, () => {
   const dockerfile = read(ADDON_DIR, "Dockerfile");
   const buildYaml = read(ADDON_DIR, "build.yaml");
   const v2BoundaryFixture = read(ADDON_DIR, "test", "v2-boundary-fixture.sh");
+  const devcontainerAcceptance = read(ADDON_DIR, "..", "scripts", "devcontainer-acceptance.sh");
 
   const dockerfilePin = /^ARG OPENCODE_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
   const buildYamlPin = /^\s*OPENCODE_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
@@ -77,6 +78,12 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(dockerfile, /FROM node:\$\{NODE_VERSION\}-trixie-slim AS node-runtime/);
     assert.match(dockerfile, /test "\$\(node --version\)" = "v\$\{NODE_VERSION\}"/);
     assert.doesNotMatch(dockerfile, /^[ \t]+nodejs \\/m);
+  });
+
+  it("fails closed on architecture selection and executes both target runtimes", () => {
+    assert.match(dockerfile, /Unsupported BUILD_ARCH: \$\{BUILD_ARCH:-unset\}/);
+    assert.match(dockerfile, /test "\$\(opencode --version\)" = "\$\{OPENCODE_VERSION\}"/);
+    assert.match(dockerfile, /opencode2 --version/);
   });
 
   it("pins the same exact OpenChamber version in the Dockerfile and build.yaml", () => {
@@ -178,6 +185,14 @@ describe(`${CHANNEL} runtime pin`, () => {
     for (const service of fs.readdirSync(path.join(graph, "user", "contents.d"))) {
       assert.ok(fs.existsSync(path.join(graph, service, "type")), `user bundle includes missing service ${service}`);
     }
+  });
+
+  it("reserves supervised lifecycle and Ingress checks for the devcontainer", () => {
+    assert.doesNotMatch(v2BoundaryFixture, /kill -KILL "\$\{SIDECAR_PID\}"/);
+    assert.match(devcontainerAcceptance, /s6-svc -k \/run\/service\/ha-opencode-v2-mcp-sidecar/);
+    assert.doesNotMatch(devcontainerAcceptance, /s6-svc -d \/run\/service\/ha-opencode-v2-mcp-sidecar/);
+    assert.match(devcontainerAcceptance, /new_sidecar_pid.*old_sidecar_pid/);
+    assert.match(devcontainerAcceptance, /http:\/\/127\.0\.0\.1:8123\/api\/hassio_ingress\/\$\{INGRESS_TOKEN\}\//);
   });
 
   it("bounds every process in the in-image migration fixture", () => {

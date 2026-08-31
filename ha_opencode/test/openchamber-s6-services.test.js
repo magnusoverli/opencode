@@ -1,5 +1,5 @@
-// Regression coverage for issue #95. These are s6-rc definitions, so inspect
-// the shipped service graph rather than attempting to emulate s6 on the host.
+// Static graph regression coverage for issue #95. The devcontainer acceptance
+// harness separately exercises these definitions under real s6 and Supervisor.
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");

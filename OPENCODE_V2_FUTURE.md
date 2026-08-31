@@ -9,7 +9,7 @@ User-data migration and rollback are specified separately in
 
 ## Status Snapshot
 
-Updated on 2026-08-30:
+Updated on 2026-08-31:
 
 - Stable OpenCode is `opencode-ai@1.18.25` and remains the certified runtime in
   stable add-on 2.5.3.
@@ -32,14 +32,15 @@ Updated on 2026-08-30:
   [openchamber/openchamber#3007](https://github.com/openchamber/openchamber/pull/3007).
   OpenChamber must not be pointed at V2 until compatible support is released and
   its Home Assistant Ingress behavior is revalidated.
-- The deployed `3.0.0b1` image passed a bounded live Home Assistant self-check:
+- The deployed `3.0.0b2` image passed bounded Home Assistant checks under the
+  official Supervisor devcontainer:
   V2 ran as UID/GID 60000 with no capabilities or readable process environment,
   the root proxy retained port 8765, both unauthenticated endpoints returned
   401, the sidecar MCP completed a read-only call, and no service restarted.
-- That live check found one non-blocking startup-order issue: two early proxy
-  connections reached `s6-ipcclient` before the sidecar Unix socket existed.
-  The backend recovered immediately, but the race and misleading sidecar port
-  log belong in the next beta cleanup.
+- The b1 startup-order race is resolved: the root proxy retains its listener and
+  returns 503 until the sidecar is ready. Repeatable devcontainer acceptance now
+  verifies the Home Assistant Core Ingress route, s6 state, smoke tests, and
+  automatic sidecar crash recovery.
 
 Sources:
 
@@ -54,7 +55,7 @@ Sources:
 
 ### Why the TUI still reports 1.18.25
 
-This is intentional in `3.0.0b1`, not a stale upgrade. The terminal service
+This is intentional through `3.0.0b2`, not a stale upgrade. The terminal service
 still runs `opencode-session.sh`, which executes `/usr/local/bin/opencode`: the
 certified V1 `1.18.25` runtime. V2 currently runs only as the independently
 supervised, authenticated server on `127.0.0.1:4100`; ttyd, LAN, and
@@ -62,10 +63,10 @@ OpenChamber are not connected to it. Keeping the TUI on V1 preserves a working
 rollback while the remaining workspace and plugin-discovery boundaries are
 closed.
 
-### Next beta: stabilization and truthful status
+### Completed in 3.0.0b2: stabilization and truthful status
 
-The next beta should remain user-facing on V1 while it makes the staged V2
-foundation quieter and easier to verify:
+Beta 2 remained user-facing on V1 while making the staged V2 foundation quieter
+and repeatably verifiable:
 
 1. Bind the root TCP proxy to port 8765 immediately, then gate accepted
    connections on a root-owned sidecar-ready marker. Early callers receive a
@@ -80,8 +81,9 @@ foundation quieter and easier to verify:
 4. Add focused contracts for readiness-before-bind ordering and the corrected
    log ownership language; run only shell syntax and the V2 state-isolation
    contract during development.
-5. Exercise sidecar, proxy, broker, and V2 restart ordering under the exact s6
-   tree, preserving the root listener and reconnecting V2 without a crash loop.
+5. Exercise sidecar and proxy restart ordering under the exact s6 tree,
+   preserving the root listener and recovering the MCP endpoint without a crash
+   loop.
 6. Repeat the bounded live checks on the release candidate and confirm that the
    startup log contains no expected backend-connect errors.
 

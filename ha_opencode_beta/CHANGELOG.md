@@ -2,8 +2,9 @@
 
 ## [Unreleased]
 
+- Made the official Home Assistant Supervisor devcontainer the default workflow and added repeatable app, s6, smoke-test, Home Assistant Core Ingress, and automatic sidecar crash-recovery acceptance.
 - Standardized the container runtime on Node 24.15.0 while retaining Home Assistant's Supervisor-compatible Debian base.
-- Moved staged V2 boundary checks into a bounded native-CI fixture, removed dormant preview-client credential paths, and added the official Home Assistant Supervisor devcontainer workflow.
+- Moved staged V2 process-boundary checks into a bounded native amd64/arm64 CI fixture and removed dormant preview-client credential paths.
 
 ## 3.0.0b2
 

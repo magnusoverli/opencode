@@ -73,6 +73,11 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.doesNotMatch(dockerfile, /^[ \t]+nodejs \\/m);
   });
 
+  it("fails closed on architecture selection and executes the target runtime", () => {
+    assert.match(dockerfile, /Unsupported BUILD_ARCH: \$\{BUILD_ARCH:-unset\}/);
+    assert.match(dockerfile, /test "\$\(opencode --version\)" = "\$\{OPENCODE_VERSION\}"/);
+  });
+
   it("pins the same exact OpenChamber version in the Dockerfile and build.yaml", () => {
     assert.ok(dockerfileOpenchamberPin, "Dockerfile has no ARG OPENCHAMBER_VERSION");
     assert.ok(buildYamlOpenchamberPin, "build.yaml has no OPENCHAMBER_VERSION");

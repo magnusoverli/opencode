@@ -1,0 +1,59 @@
+---
+name: Stable Image Checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/stable-image-checks.yaml"
+      - "ha_opencode/.dockerignore"
+      - "ha_opencode/Dockerfile"
+      - "ha_opencode/build.yaml"
+      - "ha_opencode/rootfs/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/stable-image-checks.yaml"
+      - "ha_opencode/.dockerignore"
+      - "ha_opencode/Dockerfile"
+      - "ha_opencode/build.yaml"
+      - "ha_opencode/rootfs/**"
+  workflow_dispatch:
+
+concurrency:
+  group: stable-image-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Native ${{ matrix.ha_arch }} image
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ha_arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - ha_arch: aarch64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build target-native stable image
+        uses: docker/build-push-action@v7
+        with:
+          context: ha_opencode
+          file: ha_opencode/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: false
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
+            BUILD_VERSION=ci
+            BUILD_ARCH=${{ matrix.ha_arch }}
+            ADDON_CHANNEL=stable
+          cache-from: type=gha,scope=ha-opencode-stable-check-${{ matrix.ha_arch }}
+          cache-to: type=gha,mode=max,scope=ha-opencode-stable-check-${{ matrix.ha_arch }}

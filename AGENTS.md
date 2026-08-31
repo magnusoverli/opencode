@@ -1,5 +1,35 @@
 # Repository Agent Guidance
 
+## Default Development Environment
+
+The official Home Assistant Apps devcontainer is the default environment for
+developing this repository. It runs real Supervisor and Home Assistant
+containers and exposes this repository as local apps.
+
+- Start runtime-affecting work from `.devcontainer/devcontainer.json`. Do not
+  install or approximate Supervisor directly on the host.
+- Use the canonical VS Code task sequence in `.vscode/tasks.json`: **Start Home
+  Assistant**, **Install App**, then **Start App** for the first run. Use
+  **Rebuild and Start App** while iterating, **Run App Acceptance** after
+  runtime/lifecycle changes, and **Show App Logs** for diagnostics.
+- Select `ha_opencode` for stable or `ha_opencode_beta` for beta. Do not infer a
+  channel from the current branch; both channels live on `main`.
+- Build working-tree images with `scripts/devcontainer-build-app.sh`, as the
+  tasks do. Do not use `ha apps rebuild --force`: because production
+  `config.yaml` declares `image:`, Supervisor can re-pull the published image
+  instead of building the checkout.
+- Treat successful Supervisor install/start, s6 service state, Home Assistant
+  Core Ingress routing, and `scripts/devcontainer-acceptance.sh` results from
+  this environment as local lifecycle evidence. The
+  devcontainer is not HAOS and does not prove host-level HAOS behavior.
+- Host-side reads, edits, and focused static/unit tests are acceptable when they
+  do not need the app runtime. Do not substitute host Docker or local QEMU for
+  the devcontainer when validating Supervisor/s6 behavior.
+- Arm64 acceptance runs on GitHub's native ARM runner. Local emulated arm64
+  builds are optional diagnostics and never a release gate.
+- If the devcontainer cannot run, report that limitation and the unverified
+  lifecycle behavior instead of silently using a lower-fidelity substitute.
+
 ## Verification Budget
 
 Use the smallest verification step that provides direct evidence for the change.
