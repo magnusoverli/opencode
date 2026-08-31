@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Added a default-deny V2 read-only agent that permits ordinary file reads, path globbing, and compact diagnostic MCP tools while blocking content search, sensitive reads, mutations, and unknown actions.
 - Made the official Home Assistant Supervisor devcontainer the default workflow and added repeatable app, s6, smoke-test, Home Assistant Core Ingress, and automatic sidecar crash-recovery acceptance.
 - Standardized the container runtime on Node 24.15.0 while retaining Home Assistant's Supervisor-compatible Debian base.
 - Moved staged V2 process-boundary checks into a bounded native amd64/arm64 CI fixture and removed dormant preview-client credential paths.

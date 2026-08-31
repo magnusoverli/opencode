@@ -5,11 +5,15 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import {
+  buildReadOnlyPermissions,
   buildManagedConfig,
   DEFAULT_MCP_ENDPOINT,
   DEFAULT_PLUGIN_PACKAGE,
   DEFAULT_RUNTIME_GUARD_PACKAGE,
+  READ_ONLY_AGENT_ID,
+  READ_ONLY_AGENT_SYSTEM,
 } from "../rootfs/opt/opencode-v2-homeassistant/managed-config.js";
+import { TOOL_PROFILES } from "../rootfs/opt/ha-mcp-server/lib/tool-profiles.js";
 
 const ADDON_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const GENERATOR = join(
@@ -63,6 +67,56 @@ describe("OpenCode V2 managed configuration", () => {
         },
       },
     ]);
+  });
+
+  it("defines a V2-native read-only agent whose final rules fail closed", () => {
+    const config = buildManagedConfig();
+    const agent = config.agents[READ_ONLY_AGENT_ID];
+
+    assert.equal(agent.mode, "primary");
+    assert.equal(agent.system, READ_ONLY_AGENT_SYSTEM);
+    assert.deepEqual(agent.permissions, buildReadOnlyPermissions());
+    assert.deepEqual(agent.permissions.slice(0, 5), [
+      { action: "*", resource: "*", effect: "deny" },
+      { action: "read", resource: "*", effect: "allow" },
+      { action: "glob", resource: "*", effect: "allow" },
+      { action: "external_directory", resource: "/homeassistant", effect: "allow" },
+      { action: "external_directory", resource: "/homeassistant/**", effect: "allow" },
+    ]);
+    for (const action of ["edit", "shell", "subagent", "lsp", "grep", "future_native_action"]) {
+      assert.equal(agent.permissions.some((rule) => rule.action === action && rule.effect === "allow"), false);
+    }
+
+    const mcpRules = agent.permissions.filter((rule) => rule.action.startsWith("homeassistant_"));
+    assert.deepEqual(mcpRules[0], { action: "homeassistant_*", resource: "*", effect: "deny" });
+    assert.deepEqual(
+      mcpRules.slice(1).map((rule) => rule.action),
+      [...TOOL_PROFILES.compact.toolNames].map((name) => `homeassistant_${name}`),
+    );
+    assert.ok(mcpRules.slice(1).every((rule) => rule.effect === "allow" && rule.resource === "*"));
+    for (const action of [
+      "homeassistant_call_service",
+      "homeassistant_write_config_safe",
+      "homeassistant_remember_decision",
+      "homeassistant_future_mutation",
+    ]) {
+      assert.equal(mcpRules.some((rule) => rule.action === action && rule.effect === "allow"), false);
+    }
+    assert.deepEqual(agent.permissions.slice(-6), [
+      "*secrets.yaml",
+      "*.storage/*",
+      "*.cloud/*",
+      "*ssl/*",
+      "*.key",
+      "*.pem",
+    ].map((resource) => ({ action: "read", resource, effect: "deny" })));
+
+    const unrestrictedGlobal = buildManagedConfig({ restrictSensitiveFiles: false });
+    assert.equal(unrestrictedGlobal.permissions.some((rule) => rule.action === "read" && rule.effect === "deny"), false);
+    assert.deepEqual(
+      unrestrictedGlobal.agents[READ_ONLY_AGENT_ID].permissions.slice(-6),
+      agent.permissions.slice(-6),
+    );
   });
 
   it("can disable sensitive-read rules without changing the base policy", () => {

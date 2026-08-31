@@ -232,11 +232,11 @@ hostile UID-60000 poller also scans the launch transition and must not recover
 either credential. Supervised restart behavior is verified separately by the
 devcontainer acceptance harness.
 
-V2 currently discovers project plugins independently of the project-config
-disable flag. Consequently, the staged server remains private and starts only
-from a root-owned empty workspace. User-facing clients must not be connected
-until plugin discovery is enforceably disabled for every client-selected
-directory.
+The staged server disables project config and project plugin discovery and
+starts only from a root-owned empty workspace. The V2 TUI performs its own
+project-plugin discovery independently, however, so user-facing clients must
+not be connected until that client-side discovery is enforceably disabled for
+every selected directory.
 
 ## Failure and Restart Behavior
 

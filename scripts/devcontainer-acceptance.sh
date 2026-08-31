@@ -54,6 +54,33 @@ wait_for_sidecar_replacement() {
     fail "s6 did not replace the crashed sidecar process"
 }
 
+wait_for_v2_read_only_policy() {
+    for _attempt in $(seq 1 100); do
+        if docker exec "${container}" sh -c '
+            curl -fsS --connect-timeout 1 --max-time 2 \
+                -u "opencode:$(cat /run/opencode-v2/server-password)" \
+                http://127.0.0.1:4100/api/agent/home-assistant-read-only \
+                | jq -e '\''
+                    .data as $agent
+                    | ($agent.id == "home-assistant-read-only" and $agent.mode == "primary")
+                      and ([ $agent.permissions[] | select(.action == "*" and .resource == "*") ] | last | .effect) == "deny"
+                      and ([ $agent.permissions[] | select(.action == "read" and .resource == "*") ] | last | .effect) == "allow"
+                      and ([ $agent.permissions[] | select(.action == "glob" and .resource == "*") ] | last | .effect) == "allow"
+                      and ([ $agent.permissions[] | select(.action == "homeassistant_*" and .resource == "*") ] | last | .effect) == "deny"
+                      and ([ $agent.permissions[] | select(.action == "homeassistant_get_states" and .resource == "*") ] | last | .effect) == "allow"
+                      and ([ $agent.permissions[] | select(.action == "read" and .resource == "*secrets.yaml") ] | last | .effect) == "deny"
+                      and (["homeassistant_call_service", "homeassistant_write_config_safe", "homeassistant_remember_decision"]
+                        | all(. as $action
+                          | all($agent.permissions[]; .action != $action or .effect != "allow")))
+                '\'' >/dev/null
+        ' 2>/dev/null; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    fail "V2 read-only agent policy is unavailable"
+}
+
 sidecar_recovery_pending=false
 restore_sidecar() {
     if [ "${sidecar_recovery_pending}" = true ]; then
@@ -92,6 +119,10 @@ for service in "${services[@]}"; do
     state=$(docker exec "${container}" s6-svstat "/run/service/${service}")
     [[ "${state}" == up* ]] || fail "s6 service ${service} is not up: ${state}"
 done
+
+if [ "${app}" = ha_opencode_beta ]; then
+    wait_for_v2_read_only_policy
+fi
 
 docker exec -e OPENCODE_DISABLE_AUTOUPDATE=true "${container}" \
     /usr/local/bin/opencode-smoke-test

@@ -113,6 +113,22 @@ in `opencode-session.sh` with a V2 client attached to port 4100:
    display the V2 version only after the V2 path passes the complete terminal
    smoke test.
 
+The root-owned managed policy now defines the selectable V2
+`home-assistant-read-only` agent. Its final rules default-deny every action,
+re-allow ordinary file reads and path globbing, then re-deny sensitive reads.
+Content search stays denied because V2 authorizes it by search expression rather
+than by each matched file. The complete `homeassistant_*` MCP namespace is also
+denied before only the centrally defined compact diagnostic profile is
+re-allowed. With the sidecar's full catalog active and global sensitive-read
+rules disabled, the target-native boundary fixture asks V2's own permission
+evaluator to deny generic mutations, content search, unknown/future native and
+MCP actions, known mutating MCP tools, and sensitive reads while allowing normal
+reads, path globbing, and a compact diagnostic tool. The compact-profile suite
+separately proves stale direct mutating calls are rejected before sidecar
+dispatch. This closes the managed policy and deterministic evaluator portion of
+gate 4; model-driven tool invocation and the real TUI remain part of terminal
+acceptance.
+
 ### Parity after terminal cutover
 
 OpenChamber is not the first V2 client. After the terminal preview is reliable,
@@ -475,8 +491,9 @@ visual and irrelevant. The initial target is:
 - Configuration mode preserves its current safe configuration catalog and
   rejects control/administration tools.
 - Full mode preserves the current feature-gated catalog.
-- Native V2 permission denies block sensitive reads, edits, shell, subagents,
-  and denied MCP actions before dispatch where applicable.
+- Native V2 permission denies block sensitive reads, content search, edits,
+  shell, subagents, unknown actions, and denied MCP actions before dispatch
+  where applicable.
 - The server-side MCP profile still rejects a stale direct call.
 - Static Home Assistant safety rules and dynamic bounded context reach every
   applicable model request.

@@ -149,7 +149,9 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(dockerfile, /secure-launcher\.c/);
     assert.match(v2BoundaryFixture, /NoNewPrivs:/);
     assert.match(v2BoundaryFixture, /CapBnd:/);
-    assert.match(v2BoundaryFixture, /managed-config\.js --plugin-enabled true/);
+    assert.match(v2BoundaryFixture, /managed-config\.js --restrict-sensitive-files false --plugin-enabled true/);
+    assert.match(v2BoundaryFixture, /OPENCODE_MCP_TOOL_PROFILE=full/);
+    assert.match(v2BoundaryFixture, /api\/session\/\$\{session_id\}\/permission/);
     assert.match(
       read(ROOTFS, "opt", "opencode-v2-homeassistant", "secure-launcher.c"),
       /"\/usr\/local\/bin\/opencode2", "serve"/,
@@ -193,6 +195,7 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.doesNotMatch(devcontainerAcceptance, /s6-svc -d \/run\/service\/ha-opencode-v2-mcp-sidecar/);
     assert.match(devcontainerAcceptance, /new_sidecar_pid.*old_sidecar_pid/);
     assert.match(devcontainerAcceptance, /http:\/\/127\.0\.0\.1:8123\/api\/hassio_ingress\/\$\{INGRESS_TOKEN\}\//);
+    assert.match(devcontainerAcceptance, /api\/agent\/home-assistant-read-only/);
   });
 
   it("bounds every process in the in-image migration fixture", () => {

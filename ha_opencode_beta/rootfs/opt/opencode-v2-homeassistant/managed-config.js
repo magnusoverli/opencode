@@ -1,8 +1,15 @@
 import { pathToFileURL } from "node:url";
+import { TOOL_PROFILES } from "../ha-mcp-server/lib/tool-profiles.js";
 
 export const DEFAULT_PLUGIN_PACKAGE = "file:///opt/opencode-v2-homeassistant/plugin.js";
 export const DEFAULT_RUNTIME_GUARD_PACKAGE = "file:///opt/opencode-v2-homeassistant/runtime-guard.js";
 export const DEFAULT_MCP_ENDPOINT = "http://127.0.0.1:8765/mcp";
+export const READ_ONLY_AGENT_ID = "home-assistant-read-only";
+export const READ_ONLY_AGENT_SYSTEM = [
+  "Investigate and diagnose Home Assistant without changing it.",
+  "Runtime policy allows file reads, path globbing, and the compact Home Assistant diagnostic tools only; content search, edits, shell commands, subagents, LSP, and every unknown action are denied.",
+  "End with findings and recommendations rather than attempting a fix.",
+].join(" ");
 
 const WATCHER_IGNORES = Object.freeze([
   ".git/**",
@@ -26,6 +33,23 @@ const SENSITIVE_READ_PATTERNS = Object.freeze([
   "*.key",
   "*.pem",
 ]);
+
+export function buildReadOnlyPermissions() {
+  return [
+    { action: "*", resource: "*", effect: "deny" },
+    { action: "read", resource: "*", effect: "allow" },
+    { action: "glob", resource: "*", effect: "allow" },
+    { action: "external_directory", resource: "/homeassistant", effect: "allow" },
+    { action: "external_directory", resource: "/homeassistant/**", effect: "allow" },
+    { action: "homeassistant_*", resource: "*", effect: "deny" },
+    ...[...TOOL_PROFILES.compact.toolNames].map((name) => ({
+      action: `homeassistant_${name}`,
+      resource: "*",
+      effect: "allow",
+    })),
+    ...SENSITIVE_READ_PATTERNS.map((resource) => ({ action: "read", resource, effect: "deny" })),
+  ];
+}
 
 export function buildManagedConfig({
   restrictSensitiveFiles = true,
@@ -76,6 +100,14 @@ export function buildManagedConfig({
     formatter: false,
     lsp: false,
     skills: ["/opt/ha-mcp-server/skills"],
+    agents: {
+      [READ_ONLY_AGENT_ID]: {
+        description: "Investigate and diagnose Home Assistant with no ability to change anything.",
+        mode: "primary",
+        system: READ_ONLY_AGENT_SYSTEM,
+        permissions: buildReadOnlyPermissions(),
+      },
+    },
     plugins,
   };
 }

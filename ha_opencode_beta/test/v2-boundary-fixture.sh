@@ -84,10 +84,30 @@ wait_for_api_match() {
     return 1
 }
 
+assert_permission_effect() {
+    local session_id=$1
+    local action=$2
+    local resource=$3
+    local expected=$4
+    local payload response
+    payload=$(jq -cn --arg action "${action}" --arg resource "${resource}" \
+        '{action:$action,resources:[$resource],agent:"home-assistant-read-only"}')
+    response=$(curl -fsS --connect-timeout 1 --max-time 5 \
+        -u "opencode:$(cat "${RUNTIME_ROOT}/server-password")" \
+        -H 'Content-Type: application/json' -d "${payload}" \
+        "http://127.0.0.1:${SERVER_PORT}/api/session/${session_id}/permission")
+    if ! printf '%s' "${response}" | jq -e --arg expected "${expected}" \
+        '.data.effect == $expected' >/dev/null; then
+        printf 'Expected %s permission for %s %s, got: %s\n' \
+            "${expected}" "${action}" "${resource}" "${response}" >&2
+        return 1
+    fi
+}
+
 start_sidecar() {
     rm -f "${RUNTIME_ROOT}/mcp-sidecar.ready"
     env -i HOME=/data USER=root LOGNAME=root PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
-        SUPERVISOR_TOKEN=image-fixture-token OPENCODE_MCP_TOOL_PROFILE=compact \
+        SUPERVISOR_TOKEN=image-fixture-token OPENCODE_MCP_TOOL_PROFILE=full \
         OPENCODE_MCP_TRANSPORT=streamable-http \
         OPENCODE_MCP_SIDECAR_SOCKET="${RUNTIME_ROOT}/mcp-sidecar.sock" \
         OPENCODE_MCP_SIDECAR_PUBLIC_HOST="127.0.0.1:${PROXY_PORT}" \
@@ -111,7 +131,7 @@ printf '%064d' 0 > "${RUNTIME_ROOT}/sidecar-secret"
 printf '%064d' 1 > "${RUNTIME_ROOT}/server-password"
 chmod 600 "${RUNTIME_ROOT}/sidecar-secret" "${RUNTIME_ROOT}/server-password"
 cp /opt/ha-mcp-server/AGENTS.md "${RUNTIME_ROOT}/config/opencode/AGENTS.md"
-node /opt/opencode-v2-homeassistant/managed-config.js --plugin-enabled true \
+node /opt/opencode-v2-homeassistant/managed-config.js --restrict-sensitive-files false --plugin-enabled true \
     --mcp-endpoint "http://127.0.0.1:${PROXY_PORT}/mcp" > "${RUNTIME_ROOT}/managed.json"
 
 V2_RUNTIME_ROOT="${RUNTIME_ROOT}" s6-tcpserver -q -c 16 127.0.0.1 "${PROXY_PORT}" \
@@ -176,6 +196,44 @@ fi
 
 wait_for_api_match /api/plugin \
     '.data[] | select(.id == "homeassistant.runtime-guard" and .status == "active")'
+wait_for_api_match /api/plugin \
+    '.data[] | select(.id == "homeassistant.mcp" and .status == "active")'
+wait_for_api_match /api/agent/home-assistant-read-only \
+    '.data as $agent
+     | ($agent.id == "home-assistant-read-only" and $agent.mode == "primary")
+       and any($agent.permissions[]; .action == "*" and .resource == "*" and .effect == "deny")
+       and any($agent.permissions[]; .action == "read" and .resource == "*" and .effect == "allow")
+       and any($agent.permissions[]; .action == "glob" and .resource == "*" and .effect == "allow")
+       and any($agent.permissions[]; .action == "homeassistant_*" and .resource == "*" and .effect == "deny")
+       and any($agent.permissions[]; .action == "homeassistant_get_states" and .resource == "*" and .effect == "allow")
+       and (["homeassistant_call_service", "homeassistant_write_config_safe", "homeassistant_remember_decision"]
+         | all(. as $action
+           | all($agent.permissions[]; .action != $action or .effect != "allow")))
+       and any($agent.permissions[]; .action == "read" and .resource == "*secrets.yaml" and .effect == "deny")'
+
+SESSION_RESPONSE=$(curl -fsS --connect-timeout 1 --max-time 5 \
+    -u "opencode:$(cat "${RUNTIME_ROOT}/server-password")" \
+    -H 'Content-Type: application/json' \
+    -d '{"title":"V2 read-only permission fixture","agent":"home-assistant-read-only"}' \
+    "http://127.0.0.1:${SERVER_PORT}/api/session")
+SESSION_ID=$(printf '%s' "${SESSION_RESPONSE}" | jq -r '.data.id // empty')
+case "${SESSION_ID}" in ses_*) ;; *) echo "V2 permission fixture did not create a session" >&2; exit 1 ;; esac
+for action in edit shell subagent lsp grep future_native_action homeassistant_call_service homeassistant_write_config_safe homeassistant_future_mutation; do
+    assert_permission_effect "${SESSION_ID}" "${action}" "*" deny
+done
+assert_permission_effect "${SESSION_ID}" read /homeassistant/configuration.yaml allow
+assert_permission_effect "${SESSION_ID}" glob '**/*.yaml' allow
+assert_permission_effect "${SESSION_ID}" external_directory /homeassistant/configuration.yaml allow
+assert_permission_effect "${SESSION_ID}" homeassistant_get_states "*" allow
+for resource in \
+    /homeassistant/secrets.yaml \
+    /homeassistant/.storage/core.config \
+    /homeassistant/.cloud/account \
+    /homeassistant/ssl/certificate \
+    /homeassistant/private.key \
+    /homeassistant/private.pem; do
+    assert_permission_effect "${SESSION_ID}" read "${resource}" deny
+done
 curl -fsS --max-time 2 -u "opencode:$(cat "${RUNTIME_ROOT}/server-password")" \
     "http://127.0.0.1:${SERVER_PORT}/api/health" >/dev/null
 if runuser -u opencode-v2 -- cat "/proc/${SECURE_PID}/environ" >/dev/null 2>&1; then
@@ -194,6 +252,6 @@ if tr '\0' '\n' < "/proc/${SECURE_PID}/cmdline" \
 
 SIDECAR_SECRET_FILE="${RUNTIME_ROOT}/sidecar-secret" \
 SIDECAR_URL="http://127.0.0.1:${PROXY_PORT}/mcp" node --input-type=module -e \
-    'import { readFileSync } from "node:fs"; import { Client } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js"; import { StreamableHTTPClientTransport } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js"; const secret=readFileSync(process.env.SIDECAR_SECRET_FILE,"utf8").trim(); const client=new Client({name:"image-fixture",version:"1"}); const transport=new StreamableHTTPClientTransport(new URL(process.env.SIDECAR_URL),{requestInit:{headers:{authorization:`Bearer ${secret}`}}}); await client.connect(transport); const tools=await client.listTools(); if (!tools.tools.some((tool)=>tool.name==="get_states")) process.exit(1); await client.close();'
+    'import { readFileSync } from "node:fs"; import { Client } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js"; import { StreamableHTTPClientTransport } from "/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js"; const secret=readFileSync(process.env.SIDECAR_SECRET_FILE,"utf8").trim(); const client=new Client({name:"image-fixture",version:"1"}); const transport=new StreamableHTTPClientTransport(new URL(process.env.SIDECAR_URL),{requestInit:{headers:{authorization:`Bearer ${secret}`}}}); await client.connect(transport); const tools=await client.listTools(); if (!tools.tools.some((tool)=>tool.name==="get_states")) process.exit(1); if (!tools.tools.some((tool)=>tool.name==="call_service")) process.exit(1); await client.close();'
 
 echo "V2 Linux boundary fixture passed (${OPENCODE_V2_VERSION})"
