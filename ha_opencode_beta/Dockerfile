@@ -107,7 +107,12 @@ RUN groupadd --gid 60000 opencode-v2 \
     && useradd --uid 60000 --gid opencode-v2 --no-create-home --no-log-init \
         --home-dir /nonexistent --shell /usr/sbin/nologin opencode-v2 \
     && test "$(id -u opencode-v2)" = 60000 \
-    && test "$(id -g opencode-v2)" = 60000
+    && test "$(id -g opencode-v2)" = 60000 \
+    && groupadd --gid 60001 opencode-v2-tui \
+    && useradd --uid 60001 --gid opencode-v2-tui --no-create-home --no-log-init \
+        --home-dir /nonexistent --shell /usr/sbin/nologin opencode-v2-tui \
+    && test "$(id -u opencode-v2-tui)" = 60001 \
+    && test "$(id -g opencode-v2-tui)" = 60001
 
 # Chromium path for puppeteer-core (used by screenshot MCP tool)
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
@@ -156,6 +161,8 @@ RUN python3 -m venv /opt/zigporter-venv \
 COPY rootfs/opt/opencode-v2-homeassistant/non-dumpable.c /tmp/opencode-v2-non-dumpable.c
 COPY rootfs/opt/opencode-v2-homeassistant/secure-launcher.c /tmp/opencode-v2-secure-launcher.c
 COPY rootfs/opt/opencode-v2-homeassistant/credential-broker.c /tmp/opencode-v2-credential-broker.c
+COPY rootfs/opt/opencode-v2-homeassistant/container-init.c /tmp/opencode-container-init.c
+COPY rootfs/opt/opencode-v2-homeassistant/tui-launcher.c /tmp/opencode-v2-tui-launcher.c
 RUN apt-get update \
     && apt-get install -y --no-install-recommends g++ make \
     && cc -shared -fPIC -O2 -Wall -Werror \
@@ -164,7 +171,13 @@ RUN apt-get update \
         -o /usr/local/bin/opencode-v2-launch /tmp/opencode-v2-secure-launcher.c \
     && cc -O2 -Wall -Wextra -Werror \
         -o /usr/local/bin/opencode-v2-credential-broker /tmp/opencode-v2-credential-broker.c \
-    && rm -f /tmp/opencode-v2-non-dumpable.c /tmp/opencode-v2-secure-launcher.c /tmp/opencode-v2-credential-broker.c \
+    && cc -O2 -Wall -Wextra -Werror \
+        -o /usr/local/bin/opencode-container-init /tmp/opencode-container-init.c \
+    && cc -O2 -Wall -Wextra -Werror \
+        -o /usr/local/bin/opencode-v2-tui-launch /tmp/opencode-v2-tui-launcher.c \
+    && rm -f /tmp/opencode-v2-non-dumpable.c /tmp/opencode-v2-secure-launcher.c \
+        /tmp/opencode-v2-credential-broker.c /tmp/opencode-container-init.c \
+        /tmp/opencode-v2-tui-launcher.c \
     && npm install -g --omit=dev --omit=peer --no-audit --no-fund \
         opencode-ai@${OPENCODE_VERSION} \
         @openchamber/web@${OPENCHAMBER_VERSION} \
@@ -251,7 +264,7 @@ RUN chmod +x /usr/local/bin/* \
     && chmod +x /etc/s6-overlay/s6-rc.d/ppq-private-proxy/run \
     && chmod +x /etc/profile.d/hab-esphome.sh \
     && chmod +x /etc/profile.d/zigporter-z2m.sh \
-    && mkdir -p /data/.local/share/opencode /data/.config/opencode
+    && mkdir -p /data/.local/share/opencode /data/.config/opencode /mnt/opencode-v2-homeassistant
 
 # Exercise the exact in-image V1 -> V2 database and credential conversion. The
 # source hash assertion proves the coordinator only touches its private copy.
@@ -352,6 +365,8 @@ RUN --mount=type=bind,source=test/v2-boundary-fixture.sh,target=/tmp/v2-boundary
     bash /tmp/v2-boundary-fixture.sh
 
 FROM runtime AS final
+
+ENTRYPOINT ["/usr/local/bin/opencode-container-init"]
 
 # Set working directory to HA config (mounted at runtime)
 WORKDIR /homeassistant

@@ -1,5 +1,5 @@
 #!/command/with-contenv bashio
-# Credential-bearing Home Assistant MCP boundary for the staged V2 runtime.
+# Credential-bearing Home Assistant MCP boundary for the V2 runtime.
 
 V2_RUNTIME_ROOT=/run/opencode-v2
 SIDECAR_SECRET_FILE="${V2_RUNTIME_ROOT}/sidecar-secret"

@@ -36,7 +36,10 @@ bashio::log.info "  OpenCode Terminal (ttyd + ingress)"
 bashio::log.info "=============================================="
 
 INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
-if [ "${INTERFACE_MODE}" != "terminal" ]; then
+TERMINAL_RUNTIME=$(bashio::config 'terminal_runtime' 2>/dev/null || echo "v2")
+if [ "${INTERFACE_MODE}" != "terminal" ] && [ "${TERMINAL_RUNTIME}" = "v2" ]; then
+    bashio::log.warning "OpenChamber is not V2-compatible yet; serving the V2 terminal instead. Select V1 rollback to keep using OpenChamber."
+elif [ "${INTERFACE_MODE}" != "terminal" ]; then
     bashio::log.info "Interface mode is '${INTERFACE_MODE}'; terminal ingress service is inactive."
     exec sleep infinity
 fi

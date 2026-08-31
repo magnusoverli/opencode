@@ -3,6 +3,12 @@
 # OpenCode - OpenChamber Server Service
 # ==============================================================================
 
+TERMINAL_RUNTIME=$(bashio::config 'terminal_runtime' 2>/dev/null || echo "v2")
+if [ "${TERMINAL_RUNTIME}" != "v1" ]; then
+    bashio::log.info "OpenChamber remains inactive while V2 is the selected terminal runtime."
+    exec sleep infinity
+fi
+
 export HOME="/data"
 export XDG_DATA_HOME="/data/.local/share"
 export XDG_CONFIG_HOME="/data/.config"

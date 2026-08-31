@@ -129,6 +129,27 @@ static void publish_expected_pid(const char *runtime_root) {
   }
 }
 
+static void enter_workspace(const char *path) {
+  int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+  struct stat workspace;
+  struct stat project_config;
+  if (path[0] != '/' || fd < 0 || fstat(fd, &workspace) != 0 ||
+      workspace.st_uid != 0 || workspace.st_gid != 0 ||
+      (workspace.st_mode & 0777) != 0755) {
+    if (fd >= 0) close(fd);
+    fail("cannot open the root-owned V2 project workspace");
+  }
+  if (fstatat(fd, ".opencode", &project_config, AT_SYMLINK_NOFOLLOW) == 0) {
+    close(fd);
+    fail("project .opencode content is not allowed in the V2 server");
+  }
+  if (errno != ENOENT || fchdir(fd) != 0) {
+    close(fd);
+    fail("cannot verify project plugin isolation");
+  }
+  close(fd);
+}
+
 static void drop_privileges(void) {
   struct rlimit no_core = {0, 0};
   if (setrlimit(RLIMIT_CORE, &no_core) != 0 ||
@@ -161,8 +182,8 @@ static void drop_privileges(void) {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 5) {
-    fail("expected runtime-root, generation-root, cache-home, and port");
+  if (argc != 6) {
+    fail("expected runtime-root, generation-root, cache-home, port, and workspace");
   }
 
   char *end = NULL;
@@ -173,12 +194,8 @@ int main(int argc, char **argv) {
     fail("server port is invalid");
   }
 
-  char workspace[PATH_MAX];
-  join_path(workspace, argv[1], "workspace");
   close(3);
-  if (chdir(workspace) != 0) {
-    fail("cannot enter the secured runtime workspace");
-  }
+  enter_workspace(argv[5]);
 
   publish_expected_pid(argv[1]);
   set_environment(argv[1], argv[2], argv[3]);

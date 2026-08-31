@@ -7,7 +7,8 @@ import runtimeGuard, {
 } from "../rootfs/opt/opencode-v2-homeassistant/runtime-guard.js";
 
 const SENSITIVE_NAMES = [
-  "OPENCODE_SERVER_PASSWORD",
+    "OPENCODE_SERVER_PASSWORD",
+    "OPENCODE_PASSWORD",
   "SUPERVISOR_TOKEN",
   "HA_TOKEN",
   "HA_ACCESS_TOKEN",

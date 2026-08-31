@@ -23,7 +23,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 
 ## Current Beta Changes
 
-- **Staged OpenCode V2 foundation**: Beta `3.0.0b3` installs and supervises OpenCode V2 `0.0.0-beta-18684` privately alongside the retained V1 runtime, with isolated migrated state, an authenticated Home Assistant MCP sidecar, and a default-deny native read-only policy. The terminal and OpenChamber still deliberately use certified V1 `1.18.25`, so seeing that version in the TUI is expected rather than an update failure. V2 becomes user-facing only after safe `/homeassistant` writes, plugin-discovery enforcement, secure TUI attachment, and terminal lifecycle validation are complete.
+- **OpenCode V2 terminal cutover**: Beta `3.0.0b4` uses OpenCode V2 `0.0.0-beta-18684` for the terminal by default. The server edits the same Home Assistant configuration through an ID-mapped mount as unprivileged UID `60000`; its attached TUI runs separately as UID `60001`, with isolated managed plugins and no inherited Home Assistant credentials. Certified V1 `1.18.25` remains available only through the temporary **Terminal runtime** rollback option.
 - **ESPHome 2026.8 support**: Device Builder migrations can be previewed as validated, hash-guarded candidates; structured DNS/mDNS/ICMP troubleshooting and bounded crash decoding are available; naturally completed log and job streams now finish immediately.
 - **Startup hooks**: Your own `.sh` scripts, kept in your configuration directory, run once every time the add-on starts — the supported way to add a bridge or a small service without editing files inside the container, which never survives a restart. Off by default. See [Startup Hooks (Beta)](#startup-hooks-beta).
 - **Home context**: Sessions now start knowing your installation. A generated **Install briefing** describes your setup (version, areas, entity counts, configuration layout, integrations), **decision notes** carry lasting decisions between sessions once you approve them, and `AGENTS.local.md` holds your own instructions where add-on updates cannot overwrite them. Both options default on and switch off independently. See [Home Context (Beta)](#home-context-beta).
@@ -159,15 +159,17 @@ The add-on does no memory-heavy start-up install, so it runs on low-memory hosts
 
 ## OpenCode Updates
 
-The add-on ships one **certified OpenCode runtime**: an exact upstream version pinned in the image, installed at build time, and verified during the build to be the version the pin names. That build is the only OpenCode any session can run — the terminal banner shows which one it is.
+The beta add-on ships one certified runtime for each selectable terminal path: V2 is the default, while V1 is a temporary rollback. Both are exact upstream versions pinned in the image, installed at build time, and verified during the build. The terminal banner shows which one is active.
 
-There is no update policy to choose. OpenCode's own auto-updater is disabled (`OPENCODE_DISABLE_AUTOUPDATE=true`) and nothing in the add-on runs `npm install -g opencode-ai@latest`, so the runtime you get is the runtime that was tested against this add-on's MCP servers, YAML language server, Prettier formatting, OpenChamber build, and PPQ provider. **A new OpenCode arrives with an add-on update**, after it has been through the beta channel.
+There is no update policy to choose. OpenCode's own auto-updater is disabled (`OPENCODE_DISABLE_AUTOUPDATE=true`) and nothing in the add-on installs a rolling runtime, so either selectable path uses the exact build tested against this add-on. **A new OpenCode arrives with an add-on update**, after it has been through the beta channel.
 
 If you used the old `latest` policy, an OpenCode may still exist under `/data/.npm-global`. It is left untouched but is no longer on `PATH` and is never used; the add-on logs a one-line notice about this at start-up. You can remove the now-unknown `opencode_update_policy` line from the Configuration tab at your convenience.
 
 ### Checking the runtime yourself
 
-`opencode-smoke-test` verifies the whole chain in one go. Run it in the terminal, or — in `openchamber` mode, where there is no terminal — ask the OpenCode session to run it with its shell tool. It checks that the running OpenCode is the certified one and nothing is shadowing it, that the generated configuration still names the bundled MCP server, language server and formatter, that the MCP server and YAML language server actually start and answer, that the OpenChamber bundle carries its Ingress patch, and that the skills and the read-only overlay are in place. It exits non-zero if anything fails, and it is worth attaching to a bug report.
+`opencode-smoke-test` verifies the whole chain in one go. Run it in the terminal, or in OpenChamber ask the session to run it with its shell tool. It checks both runtime pins, the selected runtime boundary, generated configuration, MCP and YAML language servers, OpenChamber Ingress patch, skills, and read-only overlay. Under V2 it also verifies the ID-mapped workspace and authenticated native policy; under V1 rollback it verifies that the V2 mount and managed runtime stayed inactive. It exits non-zero if anything fails, and it is worth attaching to a bug report.
+
+The beta image also includes `opencode-v2-self-test`. It authenticates directly to the fixed private loopback V2 server inside one non-dumpable process without using proxy settings or following redirects, verifies the expected runtime guard and MCP state plus read-only permission outcomes, confirms that no approval prompt was created, and removes its temporary session even after a controlled cancellation. It never prints the server password or places it in a command argument or environment variable. The broader `opencode-smoke-test` runs this bounded check automatically when V2 is selected.
 
 ### CPU requirements
 
@@ -224,11 +226,17 @@ Modes:
 - `terminal`: default. Uses the existing ttyd terminal and tmux session.
 - `openchamber`: starts OpenChamber behind Home Assistant Ingress on the same sidebar entry.
 
+### Terminal runtime
+
+The terminal uses **OpenCode V2** by default. Its server runs as UID `60000` and accesses `/mnt/opencode-v2-homeassistant`, an internal ID-mapped view of the same files mounted at `/homeassistant`; the mapping changes process ownership, not the files' host ownership. Server and TUI both execute from a separate root-owned project directory that neither runtime user can modify, so `.opencode` content in your Home Assistant directory is not discovered as project plugins. The attached TUI has a separate UID `60001`, a root-owned managed plugin configuration, and no Home Assistant or user-provider environment variables.
+
+Choose **V1 rollback** only when the V2 terminal cannot start, then save and restart the add-on. Rollback bypasses the V2 mount and leaves the V2 server, sidecar, broker, and proxy inactive. It preserves the original V1 state and never copies V2 sessions back into it. V1 rollback is also required for OpenChamber and the LAN server in this beta; it is scheduled for removal in the next beta milestone.
+
 The two are exclusive: in `openchamber` mode no terminal is started, so the terminal commands (`ha-readonly`, `ha-logs`, `ha-mcp`, `ha-context`, `ha-hooks`, `hab`, `zigporter`, `opencode-smoke-test`) have no shell to run in. Most of them the OpenCode session can still run with its shell tool if you ask it to; [`ha-readonly`](#read-only-session) is the exception, because it replaces the session rather than running inside one.
 
 To test OpenChamber:
 
-1. In the add-on **Configuration** tab, set **Interface mode** to `openchamber`.
+1. In the add-on **Configuration** tab, set **Terminal runtime** to `v1` and **Interface mode** to `openchamber`.
 2. Save and restart the add-on.
 3. Open **OpenCode Beta** from the Home Assistant sidebar.
 
@@ -519,7 +527,7 @@ Put your own files under `/data/<name>/`. Never `/data/.cache` — it is deleted
 
 ### Ports and reachability
 
-Pick a port for your own service that the add-on is not already using. These are taken inside the container: `8099` (the interface behind Ingress), `3010` (OpenChamber), `4096` (OpenCode LAN server), `4097` (OpenChamber LAN), `4100` (staged V2 loopback server), `8787` (PPQ proxy). *Listening* on one of those from a hook breaks the add-on in a way that is hard to trace. **Connecting** to them is fine and expected — see below.
+Pick a port for your own service that the add-on is not already using. These are taken inside the container: `8099` (the interface behind Ingress), `3010` (OpenChamber), `4096` (OpenCode LAN server), `4097` (OpenChamber LAN), `4100` (private V2 server), `8787` (PPQ proxy). *Listening* on one of those from a hook breaks the add-on in a way that is hard to trace. **Connecting** to them is fine and expected — see below.
 
 Your service is **not** reachable from your LAN. No port is mapped for it, and that is deliberate: a mapped port would put a service the add-on did not write, with no authentication in front of it, on your network.
 

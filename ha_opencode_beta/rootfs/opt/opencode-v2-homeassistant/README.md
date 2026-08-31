@@ -13,8 +13,9 @@ Initial integration scope:
 - prove plugin cleanup and reject unsafe or credential-bearing options.
 
 It deliberately does not contain Home Assistant credentials, API clients, or
-tool handlers. Image activation, OpenChamber integration, and the production
-sidecar authentication design remain gated by
+tool handlers. The b4 terminal activation uses a credential-isolated sidecar,
+an ID-mapped workspace, separate server/TUI identities, and managed plugin
+discovery; remaining LAN, OpenChamber, and V1-removal gates are tracked in
 [`OPENCODE_V2_FUTURE.md`](../../../../OPENCODE_V2_FUTURE.md).
 
 Run:

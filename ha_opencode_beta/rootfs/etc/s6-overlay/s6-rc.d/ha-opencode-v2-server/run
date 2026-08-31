@@ -1,44 +1,52 @@
 #!/command/with-contenv bashio
-# Staged OpenCode V2 loopback server. V1 remains the user-facing rollback path
-# until the sidecar credential and /homeassistant write boundaries are complete.
+# Private OpenCode V2 loopback server. V1 remains the explicit rollback path.
 
 # shellcheck source=/usr/local/lib/opencode/v2-environment.sh
 source /usr/local/lib/opencode/v2-environment.sh
 
 V2_RUNTIME_ROOT=/run/opencode-v2
+V2_WORKSPACE=/mnt/opencode-v2-homeassistant
+V2_PROJECT_WORKSPACE="${V2_RUNTIME_ROOT}/workspace"
 SIDECAR_SECRET_FILE="${V2_RUNTIME_ROOT}/sidecar-secret"
 BROKER_SOCKET="${V2_RUNTIME_ROOT}/credential.sock"
+if [ ! -f /run/opencode-v2-homeassistant.ready ] \
+    || [ -L /run/opencode-v2-homeassistant.ready ] \
+    || [ "$(cat /run/opencode-v2-homeassistant.ready 2>/dev/null || true)" != "${V2_WORKSPACE}" ] \
+    || [ "$(stat -c '%u:%g' "${V2_WORKSPACE}" 2>/dev/null || true)" != "60000:60000" ]; then
+    bashio::log.warning "OpenCode V2 is inactive because its ID-mapped Home Assistant workspace is unavailable"
+    exec sleep infinity
+fi
 if [ ! -f "${V2_RUNTIME_ROOT}/ready" ] \
     || [ -L "${V2_RUNTIME_ROOT}/ready" ] \
     || [ ! -f "${V2_RUNTIME_ROOT}/managed.json" ] \
     || [ -L "${V2_RUNTIME_ROOT}/managed.json" ] \
     || [ ! -f "${V2_RUNTIME_ROOT}/server-password" ] \
     || [ -L "${V2_RUNTIME_ROOT}/server-password" ]; then
-    bashio::log.info "OpenCode V2 staged server is inactive because no secured runtime is ready"
+    bashio::log.info "OpenCode V2 server is inactive because no secured runtime is ready"
     exec sleep infinity
 fi
 
 if ! opencode_v2_select_generation; then
-    bashio::log.warning "OpenCode V2 staged server is inactive because its generation cannot be selected safely"
+    bashio::log.warning "OpenCode V2 server is inactive because its generation cannot be selected safely"
     exec sleep infinity
 fi
 
 EXPECTED_GENERATION_ROOT=$(cat "${V2_RUNTIME_ROOT}/ready" 2>/dev/null || true)
 if [ "${EXPECTED_GENERATION_ROOT}" != "${OPENCODE_V2_GENERATION_ROOT}" ]; then
-    bashio::log.warning "OpenCode V2 staged server is inactive because its secured runtime metadata is invalid"
+    bashio::log.warning "OpenCode V2 server is inactive because its secured runtime metadata is invalid"
     exec sleep infinity
 fi
 
 if [ ! -x /usr/local/bin/opencode-v2-launch ]; then
-    bashio::log.warning "OpenCode V2 staged server is inactive because its secure launcher is unavailable"
+    bashio::log.warning "OpenCode V2 server is inactive because its secure launcher is unavailable"
     exec sleep infinity
 fi
 if [ ! -S "${BROKER_SOCKET}" ]; then
-    bashio::log.warning "OpenCode V2 staged server is restarting because its credential broker is not ready"
+    bashio::log.warning "OpenCode V2 server is restarting because its credential broker is not ready"
     exit 1
 fi
 if [ -f "${V2_RUNTIME_ROOT}/sidecar-env" ] && [ ! -f "${SIDECAR_SECRET_FILE}" ]; then
-    bashio::log.warning "OpenCode V2 staged server is restarting because its configured sidecar secret is unavailable"
+    bashio::log.warning "OpenCode V2 server is restarting because its configured sidecar secret is unavailable"
     exit 1
 fi
 
@@ -46,7 +54,7 @@ if [ -f "${SIDECAR_SECRET_FILE}" ]; then
     if [ ! -f "${SIDECAR_SECRET_FILE}" ] \
         || [ -L "${SIDECAR_SECRET_FILE}" ] \
         || [ "$(stat -c '%u:%g:%a:%h' "${SIDECAR_SECRET_FILE}" 2>/dev/null || true)" != "0:0:600:1" ]; then
-        bashio::log.warning "OpenCode V2 staged server is inactive because its sidecar caller boundary is invalid"
+        bashio::log.warning "OpenCode V2 server is inactive because its sidecar caller boundary is invalid"
         exec sleep infinity
     fi
 
@@ -59,15 +67,16 @@ if [ -f "${SIDECAR_SECRET_FILE}" ]; then
         sleep 0.1
     done
     if [ "${SIDECAR_READY}" != "true" ]; then
-        bashio::log.warning "OpenCode V2 staged server is restarting because its authenticated Home Assistant sidecar is not ready"
+        bashio::log.warning "OpenCode V2 server is restarting because its authenticated Home Assistant sidecar is not ready"
         exit 1
     fi
 
 fi
 
-bashio::log.info "Starting staged OpenCode V2 server as uid 60000 on private loopback port 4100"
+bashio::log.info "Starting OpenCode V2 server as uid 60000 on private loopback port 4100"
 exec /usr/local/bin/opencode-v2-launch \
     "${V2_RUNTIME_ROOT}" \
     "${OPENCODE_V2_GENERATION_ROOT}" \
     "${OPENCODE_V2_CACHE_HOME}" \
-    4100
+    4100 \
+    "${V2_PROJECT_WORKSPACE}"

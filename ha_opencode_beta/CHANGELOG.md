@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## 3.0.0b4
+
+- Added a bounded, non-dumpable live V2 policy self-test for native image and Supervisor acceptance without exposing the private server password to arguments, environment variables, proxies, or redirects.
+- Made OpenCode V2 the default terminal runtime with an explicit V1 rollback option for this beta milestone.
+- Added an ID-mapped Home Assistant workspace and a native TUI launcher so V2 can edit configuration as an unprivileged user without exposing server credentials to project plugins or inherited shell environments.
+- Isolated the V2 TUI under a separate user, rejected project `.opencode` plugins in both launchers, and made V1 rollback bypass the V2 mount and services completely.
+
 ## 3.0.0b3
 
 - Added a default-deny V2 read-only agent that permits ordinary file reads, path globbing, and compact diagnostic MCP tools while blocking content search, sensitive reads, mutations, and unknown actions.

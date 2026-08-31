@@ -10,8 +10,10 @@ import {
   DEFAULT_MCP_ENDPOINT,
   DEFAULT_PLUGIN_PACKAGE,
   DEFAULT_RUNTIME_GUARD_PACKAGE,
+  DEFAULT_WORKSPACE,
   READ_ONLY_AGENT_ID,
   READ_ONLY_AGENT_SYSTEM,
+  WORKSPACE_INSTRUCTIONS,
 } from "../rootfs/opt/opencode-v2-homeassistant/managed-config.js";
 import { TOOL_PROFILES } from "../rootfs/opt/ha-mcp-server/lib/tool-profiles.js";
 
@@ -80,8 +82,8 @@ describe("OpenCode V2 managed configuration", () => {
       { action: "*", resource: "*", effect: "deny" },
       { action: "read", resource: "*", effect: "allow" },
       { action: "glob", resource: "*", effect: "allow" },
-      { action: "external_directory", resource: "/homeassistant", effect: "allow" },
-      { action: "external_directory", resource: "/homeassistant/**", effect: "allow" },
+      { action: "external_directory", resource: DEFAULT_WORKSPACE, effect: "allow" },
+      { action: "external_directory", resource: `${DEFAULT_WORKSPACE}/**`, effect: "allow" },
     ]);
     for (const action of ["edit", "shell", "subagent", "lsp", "grep", "future_native_action"]) {
       assert.equal(agent.permissions.some((rule) => rule.action === action && rule.effect === "allow"), false);
@@ -117,6 +119,26 @@ describe("OpenCode V2 managed configuration", () => {
       unrestrictedGlobal.agents[READ_ONLY_AGENT_ID].permissions.slice(-6),
       agent.permissions.slice(-6),
     );
+  });
+
+  it("loads bounded Home Assistant context from the activated workspace", () => {
+    const config = buildManagedConfig({
+      pluginEnabled: true,
+      mcpProfile: "configuration",
+      focusMode: true,
+      userHooks: true,
+    });
+
+    assert.deepEqual(config.instructions, [
+      WORKSPACE_INSTRUCTIONS,
+      "/opt/ha-mcp-server/FOCUS_MODE.md",
+      "/opt/ha-mcp-server/MCP_CORE_INSTRUCTIONS.md",
+      "/opt/ha-mcp-server/MCP_PROFILE_CONFIGURATION.md",
+      "/data/context/home-briefing.md",
+      "/data/context/decision-notes.md",
+      "/opt/ha-mcp-server/USER_HOOKS.md",
+      `${DEFAULT_WORKSPACE}/AGENTS.local.md`,
+    ]);
   });
 
   it("can disable sensitive-read rules without changing the base policy", () => {

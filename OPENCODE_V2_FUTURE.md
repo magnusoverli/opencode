@@ -127,7 +127,13 @@ reads, path globbing, and a compact diagnostic tool. The compact-profile suite
 separately proves stale direct mutating calls are rejected before sidecar
 dispatch. This closes the managed policy and deterministic evaluator portion of
 gate 4; model-driven tool invocation and the real TUI remain part of terminal
-acceptance.
+acceptance. A root-only `opencode-v2-self-test` now repeats those evaluator
+checks against the live private server in one non-dumpable process, leaves no
+pending approval or temporary session after success or controlled cancellation,
+and keeps the server password out of arguments, environment variables, output,
+proxies, and redirects. It also matches MCP activation to the root-owned boot
+configuration and applies an internal deadline. Native image and Supervisor
+acceptance both invoke it.
 
 ### Parity after terminal cutover
 
@@ -149,10 +155,9 @@ closed.
 - `3.0.0b3` is the final planned V1-default beta. It adds the default-deny native
   read-only policy and its target-native evaluator coverage so operators can test
   the staged V2 service before terminal activation.
-- `3.0.0b4` targets V2 as the default terminal runtime. No V1 terminal, LAN, or
-  OpenChamber service should run unless the operator explicitly selects the
-  temporary V1 rollback mode. If OpenChamber still lacks V2 support, b4 should
-  reject that interface mode clearly rather than silently start V1 for it.
+- `3.0.0b4` makes V2 the default terminal runtime. The V1 terminal, LAN, and
+  OpenChamber paths run only when the operator explicitly selects temporary V1
+  rollback; the V2 mount and services remain inactive in that mode.
 - `3.0.0b5` targets removal of the V1 `opencode-ai` package, V1 session/server
   launchers, V1 s6 service paths, and V1 config generation from the beta image.
   This happens only after b4 proves provider authentication, migrated sessions,
@@ -188,14 +193,16 @@ start successfully in the Home Assistant Debian Trixie images; the x64 baseline
 package must still be tested on a host without AVX2.
 
 V2 is daemon-first. Its shared daemon, client-owned `--standalone` server, and
-explicit `serve` process have different ownership models. The beta now stages
-one explicit authenticated `serve` process under s6 on private loopback as UID
-60000. User-facing activation remains blocked on safe `/homeassistant` access,
-enforceable plugin discovery, secure TUI attachment, and complete terminal
-lifecycle validation.
+explicit `serve` process have different ownership models. Beta b4 runs one
+authenticated `serve` process under s6 on private loopback as UID 60000 and
+attaches a separately isolated UID-60001 TUI. An ID-mapped external workspace
+provides safe Home Assistant configuration writes, while both processes execute
+from a root-owned project directory they cannot modify. This prevents project
+plugin injection despite the pinned client's independent `.opencode` discovery.
 The current V1 LAN service cannot be renamed mechanically:
 
-- V2 `serve` does not accept V1's `--cors` option.
+- V2 `serve` accepts repeatable `--cors` origins, but its authentication and
+  exposure model still differs from the V1 LAN service.
 - V2 has no top-level `attach` command; clients use `opencode2 --server URL`.
 - V2 service discovery and authentication require a new LAN threat model.
 
@@ -542,10 +549,10 @@ visual and irrelevant. The initial target is:
 - Both architecture builds and the live `3.0.0b1` boundary check passed; the
   staged runtime remains private while the terminal continues on V1.
 
-### Phase 2: terminal-first V2 activation and beta gaps
+### Phase 2: terminal-first V2 activation and beta gaps (activated in b4)
 
-- Complete the next-beta stabilization and first V2 terminal preview gates
-  above before changing the user-facing runtime.
+- Soak the activated V2 terminal, ID-mapped workspace, separate TUI identity,
+  managed plugin boundary, and explicit V1 rollback before removing V1.
 - Track working LSP and formatter execution upstream.
 - Revalidate PPQ/custom-provider configuration in native V2 form.
 - Test LAN authentication and replace V1 attach/CORS assumptions.

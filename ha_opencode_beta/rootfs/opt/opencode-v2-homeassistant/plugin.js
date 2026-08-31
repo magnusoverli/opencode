@@ -6,6 +6,7 @@ export const MCP_SERVER_NAME = "homeassistant";
 export const CALLER_SECRET_FD = 3;
 
 const SENSITIVE_SHELL_ENV = new Set([
+  "OPENCODE_PASSWORD",
   "OPENCODE_SERVER_PASSWORD",
   "SUPERVISOR_TOKEN",
   "HA_TOKEN",

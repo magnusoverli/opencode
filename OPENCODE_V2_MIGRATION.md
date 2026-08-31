@@ -181,16 +181,13 @@ the Home Assistant Core Ingress route, smoke tests, and automatic sidecar crash
 recovery. The component fixture does not reproduce that service graph, and the
 devcontainer is not a substitute for HAOS host-level acceptance.
 
-## Staged V2 Runtime
+## Active V2 Runtime
 
-After successful migration, s6 supervises one staged V2 server on
-`127.0.0.1:4100`. It is not exposed through Home Assistant Network settings and
-is not used by the terminal, LAN server, or OpenChamber. When MCP is enabled,
-the staged V2 process connects to a separately supervised Home Assistant MCP
-sidecar on authenticated loopback; user-facing clients still remain on V1.
-Consequently, seeing `1.18.25` in the ttyd TUI is expected through `3.0.0b3`:
-`opencode-session.sh` still launches the retained V1 binary until the terminal
-activation gates below pass.
+After successful migration, s6 supervises the active V2 server on
+`127.0.0.1:4100`. It is not exposed through Home Assistant Network settings.
+The default ttyd terminal attaches to it; LAN and OpenChamber remain available
+only through explicit V1 rollback. When MCP is enabled, V2 connects to a
+separately supervised Home Assistant MCP sidecar on authenticated loopback.
 
 The launcher:
 
@@ -199,10 +196,14 @@ The launcher:
   credential-free allowlisted environment, drop to UID/GID `60000`, clear
   supplementary groups and capabilities, disable core dumps, set
   `no_new_privs` and non-dumpability, and directly `execve` V2;
-- starts from root-owned `/run/opencode-v2/workspace`;
+- starts from a root-owned, non-writable project directory and accesses
+  `/mnt/opencode-v2-homeassistant` as an explicitly allowed external workspace;
+  that ID-mapped view is owned by UID `60000` while preserving the underlying
+  Home Assistant files and host IDs;
 - uses an empty allowlisted environment and root-owned config/home paths;
 - exposes only authenticated loopback;
-- disables project config and external skill discovery;
+- disables project config and external skill discovery, requires the project
+  root to remain root-owned and non-writable, and rejects `.opencode` there;
 - loads no Home Assistant, PPQ, discovery, or user environment credentials;
 - enters the final executable with a target-native preload constructor that
   disables same-UID process inspection before asking a root broker for the
@@ -232,11 +233,10 @@ hostile UID-60000 poller also scans the launch transition and must not recover
 either credential. Supervised restart behavior is verified separately by the
 devcontainer acceptance harness.
 
-The staged server disables project config and project plugin discovery and
-starts only from a root-owned empty workspace. The V2 TUI performs its own
-project-plugin discovery independently, however, so user-facing clients must
-not be connected until that client-side discovery is enforceably disabled for
-every selected directory.
+The attached TUI performs its own local discovery, so it runs as a separate UID
+`60001` with root-owned managed config ancestry, isolated XDG roots, the bundled
+runtime guard only, and no inherited Home Assistant credentials. Both server
+and TUI reject project `.opencode` content before launch.
 
 ## Failure and Restart Behavior
 
@@ -257,10 +257,11 @@ every selected directory.
 Through the b4 terminal cutover, while the beta image still contains the
 temporary V1 fallback:
 
-1. Stop or leave the staged V2 service inactive.
-2. Continue running the retained V1 terminal, LAN, OpenChamber, and MCP paths.
-3. Never point V1 at `/data/v2`.
-4. Never copy V2 tables back into the V1 database.
+1. Select **Terminal runtime: V1 rollback**, save, and restart the add-on.
+2. The pre-s6 launcher bypasses the V2 mount, and the V2 server, sidecar, broker,
+   and proxy remain inactive.
+3. Continue running the retained V1 terminal, LAN, OpenChamber, and MCP paths.
+4. Never point V1 at `/data/v2` or copy V2 tables back into the V1 database.
 
 Removing `/data/v2` is not an automatic rollback step. It may contain V2-only
 sessions once user-facing activation begins and must be treated as user data.
@@ -286,20 +287,21 @@ original roots rather than attempting a V2-to-V1 database conversion.
 - V1 persistent data survives code removal until a later explicit retention
   policy is designed and approved.
 
-## Remaining V2 Activation Gates
+## Completed b4 Activation Gates
 
-- Keep the root TCP proxy bound to port 8765 throughout sidecar startup and
-  restart, return a clean 503 until a root-owned backend-ready marker exists,
-  correct the sidecar/proxy ownership log messages, and recheck exact s6 restart
-  behavior on Home Assistant.
-- Provide approved `/homeassistant` writes without exposing retained V1 or
-  sidecar credentials.
-- Enforce project/plugin discovery restrictions for every client-selected
-  working directory.
-- Provide V2 server authentication to the TUI client without placing the
-  password in its environment, arguments, shell history, or readable files.
-- Prove native V2 read-only and ordered permission behavior after every config
-  and plugin hook.
+- The root TCP proxy remains bound to port 8765 across sidecar restarts and
+  returns 503 until the root-owned backend-ready marker exists.
+- The ID-mapped workspace provides approved `/homeassistant` writes without
+  exposing retained V1 or sidecar credentials.
+- Both launchers use a root-owned, non-writable project directory and reject
+  `.opencode` there, while local TUI discovery is confined to a root-owned
+  managed configuration. The Home Assistant tree is external to that project.
+- The pinned client only accepts its attach password through the environment.
+  The native launcher therefore confines it to separate UID `60001`, restores
+  non-dumpability after exec, and loads a guard that scrubs it before shell
+  children can inherit it.
+- Native V2 read-only and ordered permission behavior passes image and live
+  authenticated policy tests.
 - Inject bounded briefing and decision context into initial and continuation
   requests without duplication.
 - Connect ttyd/TUI only after those boundaries pass, first as an explicit

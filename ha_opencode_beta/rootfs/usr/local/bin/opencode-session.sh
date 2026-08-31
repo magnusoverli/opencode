@@ -8,6 +8,11 @@
 # shellcheck source=/usr/local/lib/opencode/channel.sh
 source /usr/local/lib/opencode/channel.sh
 
+TERMINAL_RUNTIME=$(cat /data/.terminal_runtime 2>/dev/null || echo "v2")
+if [ "${TERMINAL_RUNTIME}" = "v2" ]; then
+    exec /usr/local/bin/opencode-v2-session
+fi
+
 # Set up home directory for persistent storage
 export HOME="/data"
 export XDG_DATA_HOME="/data/.local/share"
@@ -62,7 +67,7 @@ USER_HOOKS_ENABLED=$(cat /data/.user_hooks_enabled 2>/dev/null || echo "false")
 OPENCODE_VERSION=$(cat /data/.opencode_version 2>/dev/null || opencode --version 2>/dev/null || echo "unknown")
 OPENCODE_V2_VERSION=$(cat /usr/local/share/opencode-v2-certified-version 2>/dev/null || echo "unknown")
 if [ -f /run/opencode-v2/ready ]; then
-    OPENCODE_V2_STATUS="staged privately"
+    OPENCODE_V2_STATUS="private service ready"
 else
     OPENCODE_V2_STATUS="inactive"
 fi
@@ -124,6 +129,7 @@ show_shell_help() {
     echo -e "${BOLD}Commands${NC}"
     echo -e "  ${GREEN}opencode${NC}          Restart the AI coding agent"
     echo -e "  ${GREEN}ha-readonly${NC}       Investigate without changing anything (read-only session)"
+    echo -e "  ${GREEN}opencode-v2-self-test${NC}  Verify the private V2 policy without exposing credentials"
     echo -e "  ${GREEN}ha-logs${NC} ${GRAY}<type>${NC}    View logs (core, error, supervisor, host)"
     echo -e "  ${GREEN}ha-mcp${NC} ${GRAY}<cmd>${NC}     MCP integration (enable, disable, status)"
     echo -e "  ${GREEN}ha-agent-eval${NC} ${GRAY}[args]${NC}  Run synthetic model tool-selection checks"

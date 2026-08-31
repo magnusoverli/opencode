@@ -27,6 +27,7 @@ printf '%s\n' "${ADDON_CHANNEL}" > /data/.addon_channel
 
 CPU_MODE_CONFIG=$(bashio::config 'cpu_mode' || echo "auto")
 INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+TERMINAL_RUNTIME=$(bashio::config 'terminal_runtime' 2>/dev/null || echo "v2")
 MCP_ENABLED=$(bashio::config 'mcp_enabled')
 MCP_TOOL_PROFILE=$(bashio::config 'mcp_tool_profile' 2>/dev/null || echo "full")
 NATIVE_HA_MCP_ENABLED=$(bashio::config 'native_ha_mcp_enabled' 2>/dev/null || echo "false")
@@ -47,6 +48,16 @@ PPQ_API_KEY=$(bashio::config 'ppq_api_key' || echo "")
 if [ "${NATIVE_HA_MCP_API_ID}" = "null" ]; then
     NATIVE_HA_MCP_API_ID=""
 fi
+
+case "${TERMINAL_RUNTIME}" in
+    v1|v2)
+        ;;
+    *)
+        bashio::log.warning "Unknown terminal_runtime '${TERMINAL_RUNTIME}' - defaulting to V2"
+        TERMINAL_RUNTIME="v2"
+        ;;
+esac
+printf '%s\n' "${TERMINAL_RUNTIME}" > /data/.terminal_runtime
 
 case "${MCP_TOOL_PROFILE}" in
     compact|configuration|full)
@@ -78,7 +89,7 @@ if [ "${USER_HOOKS_ENABLED}" != "true" ]; then
     USER_HOOKS_ENABLED="false"
 fi
 
-bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} MCP=${MCP_ENABLED} MCP_TOOL_PROFILE=${MCP_TOOL_PROFILE} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED} USER_HOOKS=${USER_HOOKS_ENABLED}"
+bashio::log.info "Configuration: INTERFACE_MODE=${INTERFACE_MODE} TERMINAL_RUNTIME=${TERMINAL_RUNTIME} MCP=${MCP_ENABLED} MCP_TOOL_PROFILE=${MCP_TOOL_PROFILE} NATIVE_HA_MCP=${NATIVE_HA_MCP_ENABLED} NATIVE_HA_MCP_API_ID=${NATIVE_HA_MCP_API_ID} LSP=${LSP_ENABLED} SCREENSHOT=${SCREENSHOT_ENABLED} PPQ_PRIVATE=${PPQ_PRIVATE_ENABLED} ADDON_ACCESS=${ADDON_ACCESS_ENABLED} CPU_MODE=${CPU_MODE_CONFIG} RESTRICT_SENSITIVE_FILES=${RESTRICT_SENSITIVE_FILES} FOCUS_MODE=${FOCUS_MODE} HOME_BRIEFING=${HOME_BRIEFING_ENABLED} DECISION_NOTES=${DECISION_NOTES_ENABLED} USER_HOOKS=${USER_HOOKS_ENABLED}"
 
 # ==============================================================================
 # Runtime paths
@@ -110,7 +121,9 @@ if [ -f /data/.gitconfig ]; then chmod 600 /data/.gitconfig; fi
 if [ -f /data/.npmrc ]; then chmod 600 /data/.npmrc; fi
 chmod 600 /data/options.json 2>/dev/null || true
 V2_ROOTS_READY=false
-if opencode_v2_prepare_directories; then
+if [ "${TERMINAL_RUNTIME}" != "v2" ]; then
+    bashio::log.info "OpenCode V2 roots are untouched during explicit V1 rollback"
+elif opencode_v2_prepare_directories; then
     if chown opencode-v2:opencode-v2 /data/v2/cache /data/v2/cache/opencode; then
         V2_ROOTS_READY=true
     else
@@ -553,6 +566,10 @@ setup_opencode_runtime() {
     fi
 
     V2_RUNTIME_BINARY_READY=false
+    if [ "${TERMINAL_RUNTIME}" != "v2" ]; then
+        bashio::log.info "OpenCode V2 binary probing is skipped during explicit V1 rollback"
+        return
+    fi
     v2_certified_version=$(opencode_v2_certified_version)
     if [ "${V2_ROOTS_READY}" = "true" ] \
         && opencode_select_v2_package_binary "${v2_package}" "${cpu_mode}" \
@@ -573,9 +590,11 @@ setup_opencode_runtime
 # Build V2 state only from private copies. A failed or unsupported conversion is
 # non-fatal during the transition: V1 keeps running against its untouched roots,
 # and the non-secret journal records why V2 activation was deferred.
-V2_CERTIFIED_VERSION=$(opencode_v2_certified_version)
 V2_STATE_READY=false
-if [ "${V2_ROOTS_READY}" = "true" ] && [ "${V2_RUNTIME_BINARY_READY}" = "true" ]; then
+if [ "${TERMINAL_RUNTIME}" != "v2" ]; then
+    bashio::log.info "OpenCode V2 migration is skipped during explicit V1 rollback"
+elif [ "${V2_ROOTS_READY}" = "true" ] && [ "${V2_RUNTIME_BINARY_READY}" = "true" ]; then
+    V2_CERTIFIED_VERSION=$(opencode_v2_certified_version)
     if python3 /usr/local/bin/opencode-v2-migrate.py prepare \
         --root /data/v2 \
         --source-data /data/.local/share/opencode \
@@ -598,10 +617,10 @@ fi
 # managed policy, global AGENTS.md, and sidecar caller secret live under
 # root-owned /run, not in the runtime-writable generation. The secret reaches
 # the bundled plugin only through an inherited descriptor; it is never written
-# to config or environment. User-facing terminal and LAN services remain V1.
+# to config or environment. V1 rollback skips this managed runtime entirely.
 V2_RUNTIME_ROOT=/run/opencode-v2
 rm -rf -- "${V2_RUNTIME_ROOT}"
-if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
+if [ "${TERMINAL_RUNTIME}" = "v2" ] && [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
     V2_RESTRICT_BOOL=$([ "${RESTRICT_SENSITIVE_FILES}" = "true" ] && echo "true" || echo "false")
     V2_PLUGIN_ENABLED=$([ "${MCP_ENABLED}" = "true" ] && echo "true" || echo "false")
     V2_CONFIG_TEMP=""
@@ -609,8 +628,27 @@ if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
     V2_SIDECAR_SECRET_TEMP=""
     V2_SIDECAR_ENV_TEMP=""
     if mkdir -p "${V2_RUNTIME_ROOT}/config/opencode" "${V2_RUNTIME_ROOT}/home" "${V2_RUNTIME_ROOT}/workspace" \
+            "${V2_RUNTIME_ROOT}/tui/home" "${V2_RUNTIME_ROOT}/tui/config/opencode" \
+            "${V2_RUNTIME_ROOT}/tui/data" "${V2_RUNTIME_ROOT}/tui/state" "${V2_RUNTIME_ROOT}/tui/cache" \
         && chmod 755 "${V2_RUNTIME_ROOT}" "${V2_RUNTIME_ROOT}/config" "${V2_RUNTIME_ROOT}/config/opencode" \
             "${V2_RUNTIME_ROOT}/home" "${V2_RUNTIME_ROOT}/workspace" \
+        && chown -R 60001:60001 "${V2_RUNTIME_ROOT}/tui" \
+        && chown root:root "${V2_RUNTIME_ROOT}/tui" \
+        && chmod 755 "${V2_RUNTIME_ROOT}/tui" \
+        && chmod 700 "${V2_RUNTIME_ROOT}/tui/home" \
+            "${V2_RUNTIME_ROOT}/tui/data" \
+            "${V2_RUNTIME_ROOT}/tui/state" "${V2_RUNTIME_ROOT}/tui/cache" \
+        && chown root:root "${V2_RUNTIME_ROOT}/tui/config" "${V2_RUNTIME_ROOT}/tui/config/opencode" \
+        && chmod 755 "${V2_RUNTIME_ROOT}/tui/config" "${V2_RUNTIME_ROOT}/tui/config/opencode" \
+        && printf '%s\n' \
+            '{' \
+            '  "$schema": "https://opencode.ai/config.json",' \
+            '  "autoupdate": false,' \
+            '  "plugins": [' \
+            '    { "package": "file:///opt/opencode-v2-homeassistant/runtime-guard.js" }' \
+            '  ]' \
+            '}' > "${V2_RUNTIME_ROOT}/tui/config/opencode/opencode.json" \
+        && chmod 0444 "${V2_RUNTIME_ROOT}/tui/config/opencode/opencode.json" \
         && cp /opt/ha-mcp-server/AGENTS.md "${V2_RUNTIME_ROOT}/config/opencode/AGENTS.md" \
         && chmod 644 "${V2_RUNTIME_ROOT}/config/opencode/AGENTS.md"; then
         V2_CONFIG_TEMP=$(mktemp "${V2_RUNTIME_ROOT}/.managed.XXXXXX")
@@ -620,7 +658,13 @@ if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
         fi
         if node /opt/opencode-v2-homeassistant/managed-config.js \
                 --restrict-sensitive-files "${V2_RESTRICT_BOOL}" \
-                --plugin-enabled "${V2_PLUGIN_ENABLED}" > "${V2_CONFIG_TEMP}" \
+                --plugin-enabled "${V2_PLUGIN_ENABLED}" \
+                --mcp-profile "${MCP_TOOL_PROFILE}" \
+                --workspace /mnt/opencode-v2-homeassistant \
+                --focus-mode "${FOCUS_MODE}" \
+                --home-briefing "${HOME_BRIEFING_ENABLED}" \
+                --decision-notes "${DECISION_NOTES_ENABLED}" \
+                --user-hooks "${USER_HOOKS_ENABLED}" > "${V2_CONFIG_TEMP}" \
             && chmod 644 "${V2_CONFIG_TEMP}" \
             && { od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "${V2_PASSWORD_TEMP}"; } \
             && test "$(wc -c < "${V2_PASSWORD_TEMP}")" -eq 64 \
@@ -649,16 +693,18 @@ if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
                     && mv -f "${V2_SIDECAR_ENV_TEMP}" "${V2_RUNTIME_ROOT}/sidecar-env"; }; }; then
             printf '%s\n' "${OPENCODE_V2_GENERATION_ROOT}" > "${V2_RUNTIME_ROOT}/ready"
             chmod 600 "${V2_RUNTIME_ROOT}/ready"
-            bashio::log.info "OpenCode V2 managed configuration and private loopback server are staged"
+            printf '%s\n' "${MCP_ENABLED}" > "${V2_RUNTIME_ROOT}/mcp-enabled"
+            chmod 600 "${V2_RUNTIME_ROOT}/mcp-enabled"
+            bashio::log.info "OpenCode V2 managed configuration and private loopback server are ready"
             if [ "${MCP_ENABLED}" = "true" ]; then
-                bashio::log.info "OpenCode V2 Home Assistant MCP is staged behind a credential-isolated sidecar"
+                bashio::log.info "OpenCode V2 Home Assistant MCP is ready behind a credential-isolated sidecar"
             fi
         else
             rm -f -- "${V2_CONFIG_TEMP}" "${V2_PASSWORD_TEMP}" "${V2_SIDECAR_SECRET_TEMP}" "${V2_SIDECAR_ENV_TEMP}"
-            bashio::log.warning "OpenCode V2 managed configuration could not be secured; its staged server is disabled for this boot"
+            bashio::log.warning "OpenCode V2 managed configuration could not be secured; its server is disabled for this boot"
         fi
     else
-        bashio::log.warning "OpenCode V2 runtime directory could not be created; its staged server is disabled for this boot"
+        bashio::log.warning "OpenCode V2 runtime directory could not be created; its server is disabled for this boot"
     fi
 fi
 
