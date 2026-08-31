@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 3.0.0b3
+
 - Added a default-deny V2 read-only agent that permits ordinary file reads, path globbing, and compact diagnostic MCP tools while blocking content search, sensitive reads, mutations, and unknown actions.
 - Made the official Home Assistant Supervisor devcontainer the default workflow and added repeatable app, s6, smoke-test, Home Assistant Core Ingress, and automatic sidecar crash-recovery acceptance.
 - Standardized the container runtime on Node 24.15.0 while retaining Home Assistant's Supervisor-compatible Debian base.
@@ -11,7 +13,7 @@
 
 - Kept the root MCP proxy bound during sidecar startup while returning a clean 503 until backend readiness, and made startup logs and the terminal banner distinguish the active V1 TUI from staged V2.
 - Hardened staged V2 credential delivery against PID reuse and stale readiness after abrupt sidecar exits.
-- Clarified why the TUI still uses V1 and set gate-based targets for b3 to make V2 the default terminal runtime and b4 to remove V1 code from the beta image.
+- Clarified why the TUI still uses V1 and set gate-based targets for b4 to make V2 the default terminal runtime and b5 to remove V1 code from the beta image.
 
 ## 3.0.0b1
 

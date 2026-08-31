@@ -188,7 +188,7 @@ After successful migration, s6 supervises one staged V2 server on
 is not used by the terminal, LAN server, or OpenChamber. When MCP is enabled,
 the staged V2 process connects to a separately supervised Home Assistant MCP
 sidecar on authenticated loopback; user-facing clients still remain on V1.
-Consequently, seeing `1.18.25` in the ttyd TUI is expected through `3.0.0b2`:
+Consequently, seeing `1.18.25` in the ttyd TUI is expected through `3.0.0b3`:
 `opencode-session.sh` still launches the retained V1 binary until the terminal
 activation gates below pass.
 
@@ -254,7 +254,7 @@ every selected directory.
 
 ## Rollback
 
-Through the b3 terminal cutover, while the beta image still contains the
+Through the b4 terminal cutover, while the beta image still contains the
 temporary V1 fallback:
 
 1. Stop or leave the staged V2 service inactive.
@@ -265,7 +265,7 @@ temporary V1 fallback:
 Removing `/data/v2` is not an automatic rollback step. It may contain V2-only
 sessions once user-facing activation begins and must be treated as user data.
 
-The planned b4 beta removes V1 executables and service definitions from the
+The planned b5 beta removes V1 executables and service definitions from the
 image, so rollback after that point is an add-on downgrade to a prior image, not
 an in-container runtime switch. The V1 roots remain byte-for-byte untouched and
 must not be automatically deleted; the downgraded image continues to read those
@@ -275,10 +275,12 @@ original roots rather than attempting a V2-to-V1 database conversion.
 
 - b2 remains V1-default and makes the staged/active runtime explicit in the
   terminal banner.
-- b3 makes V2 the default terminal runtime and starts no V1 service unless the
+- b3 remains V1-default and adds the default-deny native read-only policy for
+  staged-service testing.
+- b4 makes V2 the default terminal runtime and starts no V1 service unless the
   temporary rollback selector is explicitly chosen.
-- b4 removes the V1 package, launchers, generated config, and s6 paths after the
-  b3 real-system soak passes.
+- b5 removes the V1 package, launchers, generated config, and s6 paths after the
+  b4 real-system soak passes.
 - Stable 3.0 ships V2 only; V1 remains available as the separate stable 2.5.x
   add-on release line, not as hidden code inside the 3.0 image.
 - V1 persistent data survives code removal until a later explicit retention

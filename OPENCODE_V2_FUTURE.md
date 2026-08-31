@@ -55,7 +55,7 @@ Sources:
 
 ### Why the TUI still reports 1.18.25
 
-This is intentional through `3.0.0b2`, not a stale upgrade. The terminal service
+This is intentional through `3.0.0b3`, not a stale upgrade. The terminal service
 still runs `opencode-session.sh`, which executes `/usr/local/bin/opencode`: the
 certified V1 `1.18.25` runtime. V2 currently runs only as the independently
 supervised, authenticated server on `127.0.0.1:4100`; ttyd, LAN, and
@@ -144,17 +144,18 @@ These are gate-based release targets rather than calendar promises. A beta does
 not ship merely to preserve the number if its prerequisite boundary is not
 closed.
 
-- `3.0.0b2` is the final planned beta with V1 as the default user-facing
-  runtime. It should complete the startup cleanup, dual-runtime banner, exact s6
-  restart checks, and as much of the terminal-preview implementation as can be
-  proven without weakening a boundary.
-- `3.0.0b3` targets V2 as the default terminal runtime. No V1 terminal, LAN, or
+- `3.0.0b2` completed startup cleanup, the dual-runtime banner, and exact s6
+  restart checks while retaining V1 as the default user-facing runtime.
+- `3.0.0b3` is the final planned V1-default beta. It adds the default-deny native
+  read-only policy and its target-native evaluator coverage so operators can test
+  the staged V2 service before terminal activation.
+- `3.0.0b4` targets V2 as the default terminal runtime. No V1 terminal, LAN, or
   OpenChamber service should run unless the operator explicitly selects the
-  temporary V1 rollback mode. If OpenChamber still lacks V2 support, b3 should
+  temporary V1 rollback mode. If OpenChamber still lacks V2 support, b4 should
   reject that interface mode clearly rather than silently start V1 for it.
-- `3.0.0b4` targets removal of the V1 `opencode-ai` package, V1 session/server
+- `3.0.0b5` targets removal of the V1 `opencode-ai` package, V1 session/server
   launchers, V1 s6 service paths, and V1 config generation from the beta image.
-  This happens only after b3 proves provider authentication, migrated sessions,
+  This happens only after b4 proves provider authentication, migrated sessions,
   `/homeassistant` work, read-only policy, shutdown, and rollback on real Home
   Assistant.
 - Stable `3.0.0` is V2-only. It must not contain a dormant V1 executable or a
