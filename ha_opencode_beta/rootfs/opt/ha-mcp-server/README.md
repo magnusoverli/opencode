@@ -108,6 +108,16 @@ services per domain under `returns_response`.
 | `get_logbook` | Get Activity Logbook | `readOnly`, `idempotent` |
 | `get_error_log` | Get Error Log | `readOnly`, `idempotent` |
 
+`get_history` keeps its newest-200 default but can traverse the complete fixed-bounds
+time window with `limit`, `offset`, and `page_from`. `response_format: "values"`
+requests every recorded row without attributes or minimal-response collapsing;
+event callers can opt into the same row selection with `include_all_changes`.
+Each partial result includes
+an exact `meta.continuation` argument object for the next call. Use
+the compact values format when attributes are not needed. The metadata also
+contains count, sum, arithmetic sample mean, and timestamped extrema calculated
+over the complete response rather than only the returned page.
+
 ### Supervisor Operations
 | Tool | Title | Annotations |
 |------|-------|-------------|

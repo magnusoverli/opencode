@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 3.0.0b10
+
+- Expanded `get_history` with fixed-window paging across all recorded state changes, compact state/timestamp pages, reusable continuation arguments, and complete-window numeric calculations instead of limiting analysis to the newest 200 events.
+
 ## 3.0.0b9
 
 - Restored the optional `homeassistant_native` MCP in V2 through the credential-isolated sidecar, so enabling the bridge now shows both Home Assistant MCP servers as connected without exposing Supervisor credentials to the V2 server or shell.

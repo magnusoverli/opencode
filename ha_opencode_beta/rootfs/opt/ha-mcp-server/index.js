@@ -130,6 +130,13 @@ import {
 } from "./lib/esphome-device-management.js";
 import { requireTimezoneAwareTimestamp } from "./lib/timestamps.js";
 import {
+  DEFAULT_HISTORY_PAGE_LIMIT,
+  MAX_HISTORY_PAGE_LIMIT,
+  projectHistoryValues,
+  selectHistoryPage,
+  summarizeNumericHistory,
+} from "./lib/history.js";
+import {
   DEFAULT_LIST_LIMIT as SUPERVISOR_DEFAULT_LIST_LIMIT,
   DEFAULT_LOG_LINES as SUPERVISOR_DEFAULT_LOG_LINES,
   MAX_LIST_LIMIT as SUPERVISOR_MAX_LIST_LIMIT,
@@ -2542,8 +2549,28 @@ const STATE_RESULT_CAP = 500;
 // narrowing a query should not cost the model results.
 const UNFILTERED_STATE_RESULT_CAP = 150;
 const HOME_CONTEXT_RESULT_CAP = 80;
-const HISTORY_RESULT_CAP = 200;
 const LOGBOOK_RESULT_CAP = 200;
+const HISTORY_CACHE_TTL_MS = 2 * 60 * 1000;
+const HISTORY_CACHE_MAX_ENTRIES = 2;
+const historyPageCache = new Map();
+
+function deleteHistoryCacheEntry(key) {
+  const cached = historyPageCache.get(key);
+  if (cached?.expiry_timer) clearTimeout(cached.expiry_timer);
+  historyPageCache.delete(key);
+}
+
+function cacheHistory(key, history, createdAt) {
+  while (historyPageCache.size >= HISTORY_CACHE_MAX_ENTRIES) {
+    deleteHistoryCacheEntry(historyPageCache.keys().next().value);
+  }
+  const cached = { created_at: createdAt, history, expiry_timer: null };
+  cached.expiry_timer = setTimeout(() => {
+    if (historyPageCache.get(key) === cached) historyPageCache.delete(key);
+  }, HISTORY_CACHE_TTL_MS);
+  cached.expiry_timer.unref?.();
+  historyPageCache.set(key, cached);
+}
 const DOCS_MAX_CHARS = 12000;
 const CHANGELOG_MAX_CHARS = 16000;
 const CLI_OUTPUT_MAX_CHARS = 20000;
@@ -2782,7 +2809,7 @@ const TOOLS = [
   {
     name: "get_history",
     title: "Get Entity History",
-    description: "Get historical state data for entities. Essential for analyzing trends, debugging issues, or understanding patterns. History timestamps are returned in UTC.",
+    description: "Get historical state data for one entity. The default preserves Home Assistant's compact newest-200 history behavior. Use response_format='values' to retrieve every recorded row as compact state/timestamp pairs, or include_all_changes=true for full event rows. Fixed-bounds paging can traverse the complete response, and metadata includes a numeric summary over the complete response rather than only the current page. History timestamps are returned in UTC.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2800,7 +2827,32 @@ const TOOLS = [
         },
         minimal: {
           type: "boolean",
-          description: "Defaults to true (faster, less data). Set false to include full attribute payloads.",
+          description: "For event responses, defaults to true (faster, less data); set false to include full attributes. Values responses always omit attributes without collapsing repeated same-state rows.",
+        },
+        include_all_changes: {
+          type: "boolean",
+          description: "Set true to disable Home Assistant's significant/minimal change filtering and exclude the carry-in state from before start_time. Automatically true for response_format='values'.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_HISTORY_PAGE_LIMIT,
+          description: `Events to return per page (default ${DEFAULT_HISTORY_PAGE_LIMIT}). Compact values allow up to ${MAX_HISTORY_PAGE_LIMIT}; full events are capped at ${DEFAULT_HISTORY_PAGE_LIMIT} to bound attributes.`,
+        },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          description: "Events to skip from the selected edge before returning this page. Use meta.next_offset for the next page.",
+        },
+        page_from: {
+          type: "string",
+          enum: ["newest", "oldest"],
+          description: "Page backward from the newest event (default, preserving existing behavior) or forward from the oldest event. Events within each page remain chronological.",
+        },
+        response_format: {
+          type: "string",
+          enum: ["events", "values"],
+          description: `Return Home Assistant history events (default, maximum ${DEFAULT_HISTORY_PAGE_LIMIT}) or every recorded row as compact state/timestamp pairs (maximum ${MAX_HISTORY_PAGE_LIMIT}, attributes omitted). Paging and the complete-response numeric summary are available in both formats.`,
         },
       },
       required: ["entity_id"],
@@ -4709,41 +4761,112 @@ async function handleToolCall(request) {
       // === HISTORY & LOGBOOK ===
       case "get_history": {
         const entityId = args.entity_id;
+        const now = Date.now();
         const startTime = args.start_time === undefined
-          ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+          ? new Date(now - 24 * 60 * 60 * 1000).toISOString()
           : requireTimezoneAwareTimestamp(args.start_time, "start_time");
         const endTime = args.end_time === undefined
-          ? null
+          ? new Date(now).toISOString()
           : requireTimezoneAwareTimestamp(args.end_time, "end_time");
+        const effectiveEndTime = Date.parse(endTime) > now ? new Date(now).toISOString() : endTime;
+        const endTimeClamped = effectiveEndTime !== endTime;
+        const responseFormat = args.response_format ?? "events";
+        const includeAllChanges = args.include_all_changes === true || responseFormat === "values";
+        const includeAttributes = responseFormat === "events" && args.minimal === false;
+        const minimal = !includeAttributes;
         const params = new URLSearchParams({ filter_entity_id: entityId });
-        if (endTime) params.append("end_time", endTime);
-        // Full attribute payloads are opt-in; minimal keeps chatty sensors cheap
-        if (args.minimal !== false) {
-          params.append("minimal_response", "true");
+        params.append("end_time", effectiveEndTime);
+        if (includeAllChanges) {
+          params.append("significant_changes_only", "0");
+          params.append("skip_initial_state", "true");
+        }
+        if (!includeAttributes) {
+          // no_attributes keeps exact repeated values cheap without enabling
+          // minimal_response, which can collapse same-state recorder rows.
+          if (!includeAllChanges) params.append("minimal_response", "true");
           params.append("no_attributes", "true");
         }
 
-        const history = await callHA(`/history/period/${encodeURIComponent(startTime)}?${params}`);
+        const historyPath = `/history/period/${encodeURIComponent(startTime)}?${params}`;
+        const cacheable = !includeAttributes;
+        const cached = cacheable ? historyPageCache.get(historyPath) : null;
+        let history;
+        let historyCacheHit = false;
+        if (cached && now - cached.created_at < HISTORY_CACHE_TTL_MS) {
+          history = cached.history;
+          historyCacheHit = true;
+          historyPageCache.delete(historyPath);
+          historyPageCache.set(historyPath, cached);
+        } else {
+          if (cached) deleteHistoryCacheEntry(historyPath);
+          history = await callHA(historyPath);
+          if (cacheable) cacheHistory(historyPath, history, now);
+        }
         const events = Array.isArray(history?.[0]) ? history[0] : [];
-        const truncated = events.length > HISTORY_RESULT_CAP;
-        const returnedEvents = truncated ? events.slice(-HISTORY_RESULT_CAP) : events;
-        const compactHistory = Array.isArray(history) && history.length > 0 ? [returnedEvents] : history;
+        const requestedLimit = args.limit ?? DEFAULT_HISTORY_PAGE_LIMIT;
+        const effectiveLimit = responseFormat === "values"
+          ? requestedLimit
+          : Math.min(requestedLimit, DEFAULT_HISTORY_PAGE_LIMIT);
+        const page = selectHistoryPage(events, {
+          offset: args.offset,
+          limit: effectiveLimit,
+          pageFrom: args.page_from,
+        });
+        const { items: pageItems, ...pageMeta } = page;
+        const responseData = responseFormat === "values"
+          ? projectHistoryValues(pageItems)
+          : (Array.isArray(history) && history.length > 0 ? [pageItems] : history);
+        const truncated = events.length > pageItems.length;
+        const range = pageItems.length > 0
+          ? `${page.first_event_index + 1}-${page.last_event_index + 1}`
+          : "empty";
         return makeCompatibleResponse({
           content: [createCompactJsonContent(
-            truncated
-              ? `Returned last ${returnedEvents.length} of ${events.length} history events for ${entityId}`
-              : `Returned ${events.length} history events for ${entityId}`,
-            compactHistory,
+            truncated && page.has_more
+              ? `Returned history events ${range} of ${events.length} for ${entityId}; use meta.continuation to continue`
+              : (truncated
+                ? `Returned final history page ${range} of ${events.length} for ${entityId}`
+                : `Returned ${events.length} history events for ${entityId}`),
+            responseData,
             {
               entity_id: entityId,
               start_time: startTime,
-              end_time: endTime,
+              end_time: args.end_time === undefined ? null : endTime,
+              effective_end_time: effectiveEndTime,
+              end_time_clamped_to_now: endTimeClamped,
               input_time_requirement: "RFC 3339 timestamp with Z or UTC offset",
               response_time_reference: "UTC",
-              minimal: args.minimal !== false,
+              minimal,
+              include_all_changes: includeAllChanges,
+              response_format: responseFormat,
+              requested_limit: requestedLimit,
+              effective_limit: page.limit,
+              limit_clamped_for_format: requestedLimit !== page.limit,
               total_events: events.length,
-              returned_events: returnedEvents.length,
+              returned_events: pageItems.length,
               truncated,
+              has_more: page.has_more,
+              next_offset: page.next_offset,
+              continuation: page.next_offset === null ? null : {
+                entity_id: entityId,
+                start_time: startTime,
+                end_time: effectiveEndTime,
+                minimal,
+                include_all_changes: includeAllChanges,
+                limit: page.limit,
+                offset: page.next_offset,
+                page_from: page.page_from,
+                response_format: responseFormat,
+              },
+              paging_consistency: "fixed_time_bounds; recorder backfills or purges between calls may shift offsets",
+              page: pageMeta,
+              history_cache_hit: historyCacheHit,
+              history_cache_ttl_seconds: cacheable ? HISTORY_CACHE_TTL_MS / 1000 : 0,
+              numeric_summary: summarizeNumericHistory(events, {
+                scope: includeAllChanges
+                  ? "complete_requested_window"
+                  : "home_assistant_default_history_including_carry_in",
+              }),
             },
             { audience: ["assistant"], priority: 0.7, pretty: false }
           )],
