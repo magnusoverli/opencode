@@ -1,7 +1,7 @@
-// The add-on ships exactly one OpenCode build and runs only that one. That is a
-// property of several files at once — the Dockerfile pin, the CI-read pin in
-// build.yaml, and every script that builds a PATH — so it is asserted here
-// rather than trusted to review.
+// The add-on ships one exact build for each selectable OpenCode generation and
+// runs only the selected certified path. That is a property of several files at
+// once — Dockerfile pins, CI-read pins, and every script that builds a PATH — so
+// it is asserted here rather than trusted to review.
 //
 // Scoped to the beta add-on, whose V2 runtime contract intentionally differs
 // from the V1 stable add-on.
@@ -101,7 +101,7 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.equal(buildYamlOpenchamberPin, dockerfileOpenchamberPin);
   });
 
-  it("retains the certified V1 rollback runtime during migration", () => {
+  it("retains the certified V1 rollback, LAN, and OpenChamber runtime", () => {
     assert.match(dockerfilePin, /^1\./);
   });
 

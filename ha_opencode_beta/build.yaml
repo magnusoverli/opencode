@@ -12,8 +12,8 @@ args:
   # never "latest" or a range — and must match the OPENCODE_VERSION ARG default
   # in Dockerfile. test/runtime-contract.test.js asserts both.
   OPENCODE_VERSION: "1.18.25"
-  # OpenCode V2 becomes the beta runtime in 3.0.0b0. V1 remains installed only
-  # as an untouched migration/rollback source until V2 activation is complete.
+  # V2 is the default beta runtime. V1 remains installed as the untouched
+  # rollback, LAN, and OpenChamber path.
   OPENCODE_V2_VERSION: "0.0.0-beta-18684"
   # The other genuine per-channel pin: beta can lead stable while a new
   # OpenChamber soaks.

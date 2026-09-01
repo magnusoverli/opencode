@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Consolidated the V2 readiness and migration roadmaps, documented selectable V1 as retained for rollback, LAN, and OpenChamber, and clarified the root V2 shell credential boundary.
+
 ## 3.0.0b10
 
 - Expanded `get_history` with fixed-window paging across all recorded state changes, compact state/timestamp pages, reusable continuation arguments, and complete-window numeric calculations instead of limiting analysis to the newest 200 events.

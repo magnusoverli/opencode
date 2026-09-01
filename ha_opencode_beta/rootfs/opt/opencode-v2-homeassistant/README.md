@@ -3,7 +3,7 @@
 This package pins and tests the OpenCode V2 runtime integrated into the
 `ha_opencode_beta` add-on.
 
-Initial integration scope:
+Runtime package scope:
 
 - pin the CLI and plugin API to one matching beta build;
 - register one existing Home Assistant MCP sidecar through `ctx.mcp.transform`;
@@ -15,7 +15,8 @@ Initial integration scope:
 It deliberately does not contain Home Assistant credentials, API clients, or
 tool handlers. The b4 terminal activation uses a credential-isolated sidecar,
 the direct Home Assistant workspace, a separate TUI identity, and managed plugin
-discovery; remaining LAN, OpenChamber, and V1-removal gates are tracked in
+discovery; migration, rollback, LAN, OpenChamber, and release-readiness work is
+tracked in the consolidated roadmap
 [`OPENCODE_V2_FUTURE.md`](../../../../OPENCODE_V2_FUTURE.md).
 
 Run:

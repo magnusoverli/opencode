@@ -33,15 +33,14 @@ ARG NODE_VERSION
 # rather than scattering channel-specific paths through the image.
 ARG ADDON_CHANNEL=stable
 ARG TTYD_VERSION=1.7.7
-# Certified OpenCode runtime. This is a hard pin, never a range or a dist-tag:
-# the add-on ships exactly one OpenCode build, it is the only one any session
-# can run, and it changes only through a tested add-on release. build.yaml
-# carries the same value and is what CI reads; the two are asserted equal by
-# test/runtime-contract.test.js so a half-done bump cannot ship.
+# Certified V1 runtime. This is a hard pin, never a range or a dist-tag. The
+# selected V1 path runs only this build, and it changes only through a tested
+# add-on release. build.yaml carries the same value and is what CI reads; the two
+# are asserted equal so a half-done bump cannot ship.
 ARG OPENCODE_VERSION=1.18.25
 # OpenCode V2 and its plugin API are one matched, exact beta build. V1 remains
-# installed temporarily as the rollback runtime while the 3.0.0b0 state
-# migration is implemented; no V2 process may use the V1 data roots.
+# installed as the rollback, LAN, and OpenChamber runtime; no V2 process may use
+# the V1 data roots.
 ARG OPENCODE_V2_VERSION=0.0.0-beta-18684
 ARG OPENCHAMBER_VERSION=1.21.0
 ARG PPQ_PROXY_VERSION=0.1.0
