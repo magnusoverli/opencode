@@ -158,9 +158,11 @@ closed.
 - `3.0.0b4` makes V2 the default terminal runtime. The V1 terminal, LAN, and
   OpenChamber paths run only when the operator explicitly selects temporary V1
   rollback; the V2 mount and services remain inactive in that mode.
-- `3.0.0b5` targets removal of the V1 `opencode-ai` package, V1 session/server
+- `3.0.0b5` removes the HAOS-incompatible ID-mapped mount and runs the V2 server
+  directly against `/homeassistant` as root so real-system testing can proceed.
+- `3.0.0b6` targets removal of the V1 `opencode-ai` package, V1 session/server
   launchers, V1 s6 service paths, and V1 config generation from the beta image.
-  This happens only after b4 proves provider authentication, migrated sessions,
+  This happens only after b5 proves provider authentication, migrated sessions,
   `/homeassistant` work, read-only policy, shutdown, and rollback on real Home
   Assistant.
 - Stable `3.0.0` is V2-only. It must not contain a dormant V1 executable or a
@@ -193,12 +195,11 @@ start successfully in the Home Assistant Debian Trixie images; the x64 baseline
 package must still be tested on a host without AVX2.
 
 V2 is daemon-first. Its shared daemon, client-owned `--standalone` server, and
-explicit `serve` process have different ownership models. Beta b4 runs one
-authenticated `serve` process under s6 on private loopback as UID 60000 and
-attaches a separately isolated UID-60001 TUI. An ID-mapped external workspace
-provides safe Home Assistant configuration writes, while both processes execute
-from a root-owned project directory they cannot modify. This prevents project
-plugin injection despite the pinned client's independent `.opencode` discovery.
+explicit `serve` process have different ownership models. Beta b5 runs one
+authenticated root `serve` process under s6 on private loopback and attaches a
+separately isolated UID-60001 TUI. The server accesses `/homeassistant` directly
+for HAOS compatibility; both processes start outside that tree in a dedicated
+root-owned project directory.
 The current V1 LAN service cannot be renamed mechanically:
 
 - V2 `serve` accepts repeatable `--cors` origins, but its authentication and
@@ -551,7 +552,7 @@ visual and irrelevant. The initial target is:
 
 ### Phase 2: terminal-first V2 activation and beta gaps (activated in b4)
 
-- Soak the activated V2 terminal, ID-mapped workspace, separate TUI identity,
+- Soak the activated V2 terminal, direct Home Assistant workspace, separate TUI identity,
   managed plugin boundary, and explicit V1 rollback before removing V1.
 - Track working LSP and formatter execution upstream.
 - Revalidate PPQ/custom-provider configuration in native V2 form.

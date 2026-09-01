@@ -5,7 +5,7 @@ Two channels, two folders.
 | | Folder | Runtime | Tag | Image | Add-on shown in HA |
 |---|---|---|---|---|---|
 | **Stable** | `ha_opencode/` | OpenCode V1 | `v2.5.3` | `ghcr.io/magnusoverli/ha_opencode` | OpenCode |
-| **Beta** | `ha_opencode_beta/` | OpenCode V2 beta | `beta-v3.0.0b4` | `ghcr.io/magnusoverli/ha_opencode_beta` | OpenCode Beta |
+| **Beta** | `ha_opencode_beta/` | OpenCode V2 beta | `beta-v3.0.0b5` | `ghcr.io/magnusoverli/ha_opencode_beta` | OpenCode Beta |
 
 Each folder is a complete add-on: its own `Dockerfile`, its own `rootfs/`, its
 own `config.yaml`. Both live on `main`, and both release from `main`.
@@ -217,11 +217,11 @@ and the GitHub Release already reference it, and a moved tag means a pinned
 Things deliberately not fixed yet, so they don't surprise you:
 
 - **V2 project plugin discovery is independent of project-config disablement.**
-  `OPENCODE_DISABLE_PROJECT_CONFIG=1` is not sufficient by itself, so b4 runs
-  both server and TUI from a root-owned project directory that their runtime
-  users cannot modify. The ID-mapped Home Assistant tree is an explicitly
-  allowed external workspace, not the project root; both launchers also reject
-  `.opencode` if it ever appears in the managed project directory.
+  `OPENCODE_DISABLE_PROJECT_CONFIG=1` is not sufficient by itself, so the server
+  and TUI start from a dedicated root-owned project directory rather than
+  `/homeassistant`; both launchers reject `.opencode` there at startup. Beta b5
+  prioritizes HAOS compatibility and runs the V2 server as root, so this is no
+  longer an immutable boundary against changes made by the server itself.
 
 - **A beta session still reads stable's `AGENTS.md`** when both add-ons are
   installed, because OpenCode discovers it from the working directory and

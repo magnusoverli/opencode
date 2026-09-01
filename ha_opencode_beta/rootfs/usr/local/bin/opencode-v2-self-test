@@ -358,21 +358,21 @@ def exercise_policy(client, expected_version, mcp_enabled, reporter):
             assert_permission(client, session_id, action, "*", "deny", reporter)
 
         allowed = (
-            ("read", "/mnt/opencode-v2-homeassistant/configuration.yaml"),
+            ("read", "/homeassistant/configuration.yaml"),
             ("glob", "**/*.yaml"),
-            ("external_directory", "/mnt/opencode-v2-homeassistant/configuration.yaml"),
+            ("external_directory", "/homeassistant/configuration.yaml"),
             ("homeassistant_get_states", "*"),
         )
         for action, resource_name in allowed:
             assert_permission(client, session_id, action, resource_name, "allow", reporter)
 
         sensitive_paths = (
-            "/mnt/opencode-v2-homeassistant/secrets.yaml",
-            "/mnt/opencode-v2-homeassistant/.storage/core.config",
-            "/mnt/opencode-v2-homeassistant/.cloud/account",
-            "/mnt/opencode-v2-homeassistant/ssl/certificate",
-            "/mnt/opencode-v2-homeassistant/private.key",
-            "/mnt/opencode-v2-homeassistant/private.pem",
+            "/homeassistant/secrets.yaml",
+            "/homeassistant/.storage/core.config",
+            "/homeassistant/.cloud/account",
+            "/homeassistant/ssl/certificate",
+            "/homeassistant/private.key",
+            "/homeassistant/private.pem",
         )
         for sensitive_path in sensitive_paths:
             assert_permission(client, session_id, "read", sensitive_path, "deny", reporter)

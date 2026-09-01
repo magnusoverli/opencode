@@ -5,15 +5,15 @@
 source /usr/local/lib/opencode/v2-environment.sh
 
 V2_RUNTIME_ROOT=/run/opencode-v2
-V2_WORKSPACE=/mnt/opencode-v2-homeassistant
+V2_WORKSPACE=/homeassistant
 V2_PROJECT_WORKSPACE="${V2_RUNTIME_ROOT}/workspace"
 SIDECAR_SECRET_FILE="${V2_RUNTIME_ROOT}/sidecar-secret"
 BROKER_SOCKET="${V2_RUNTIME_ROOT}/credential.sock"
 if [ ! -f /run/opencode-v2-homeassistant.ready ] \
     || [ -L /run/opencode-v2-homeassistant.ready ] \
     || [ "$(cat /run/opencode-v2-homeassistant.ready 2>/dev/null || true)" != "${V2_WORKSPACE}" ] \
-    || [ "$(stat -c '%u:%g' "${V2_WORKSPACE}" 2>/dev/null || true)" != "60000:60000" ]; then
-    bashio::log.warning "OpenCode V2 is inactive because its ID-mapped Home Assistant workspace is unavailable"
+    || [ ! -d "${V2_WORKSPACE}" ]; then
+    bashio::log.warning "OpenCode V2 is inactive because its Home Assistant workspace is unavailable"
     exec sleep infinity
 fi
 if [ ! -f "${V2_RUNTIME_ROOT}/ready" ] \
@@ -73,7 +73,7 @@ if [ -f "${SIDECAR_SECRET_FILE}" ]; then
 
 fi
 
-bashio::log.info "Starting OpenCode V2 server as uid 60000 on private loopback port 4100"
+bashio::log.info "Starting OpenCode V2 server as root on private loopback port 4100"
 exec /usr/local/bin/opencode-v2-launch \
     "${V2_RUNTIME_ROOT}" \
     "${OPENCODE_V2_GENERATION_ROOT}" \

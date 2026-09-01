@@ -14,7 +14,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#define RUNTIME_UID 60000
+#define RUNTIME_UID 0
 #define SECRET_LENGTH 64
 
 static int listener = -1;

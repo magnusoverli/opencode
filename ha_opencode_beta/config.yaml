@@ -1,7 +1,7 @@
 ---
 name: "OpenCode Beta"
 description: "Beta channel for OpenCode - AI coding agent for Home Assistant. May contain experimental features."
-version: "3.0.0b4"
+version: "3.0.0b5"
 slug: "ha_opencode_beta"
 image: "ghcr.io/magnusoverli/ha_opencode_beta"
 url: "https://github.com/magnusoverli/opencode"
@@ -41,8 +41,7 @@ homeassistant_api: true
 
 # Security and hardware access - keep permissions minimal
 host_network: false
-privileged:
-  - SYS_ADMIN
+privileged: []
 apparmor: true
 # Static Supervisor hardware mappings. Keep default-off; users can opt into
 # specific serial devices via the serial_devices option below.

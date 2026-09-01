@@ -102,7 +102,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # OpenCode V2 conversion runs without root access to retained V1 state or
-# Supervisor secrets. The eventual V2 runtime uses this same process identity.
+# Supervisor secrets. The interactive server runs as root for HAOS filesystem
+# compatibility; this dedicated identity remains the migration boundary.
 RUN groupadd --gid 60000 opencode-v2 \
     && useradd --uid 60000 --gid opencode-v2 --no-create-home --no-log-init \
         --home-dir /nonexistent --shell /usr/sbin/nologin opencode-v2 \
@@ -264,7 +265,7 @@ RUN chmod +x /usr/local/bin/* \
     && chmod +x /etc/s6-overlay/s6-rc.d/ppq-private-proxy/run \
     && chmod +x /etc/profile.d/hab-esphome.sh \
     && chmod +x /etc/profile.d/zigporter-z2m.sh \
-    && mkdir -p /data/.local/share/opencode /data/.config/opencode /mnt/opencode-v2-homeassistant
+    && mkdir -p /data/.local/share/opencode /data/.config/opencode
 
 # Exercise the exact in-image V1 -> V2 database and credential conversion. The
 # source hash assertion proves the coordinator only touches its private copy.

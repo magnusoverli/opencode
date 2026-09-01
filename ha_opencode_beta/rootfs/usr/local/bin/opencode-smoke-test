@@ -60,7 +60,7 @@ source /usr/local/lib/opencode/runtime.sh
 
 GENERATED_CONFIG="/data/.config/opencode/opencode.json"
 GENERATED_V2_CONFIG="/run/opencode-v2/managed.json"
-V2_WORKSPACE="/mnt/opencode-v2-homeassistant"
+V2_WORKSPACE="/homeassistant"
 TERMINAL_RUNTIME=$(cat /data/.terminal_runtime 2>/dev/null || echo "v2")
 
 # ---------------------------------------------------------------------------
@@ -121,24 +121,17 @@ section "OpenCode V2 workspace boundary"
 # ---------------------------------------------------------------------------
 if [ "${TERMINAL_RUNTIME}" = "v2" ]; then
     if [ ! -f /run/opencode-v2-homeassistant.ready ]; then
-        fail "ID-mapped workspace readiness marker exists"
+        fail "V2 workspace readiness marker exists"
     elif [ "$(cat /run/opencode-v2-homeassistant.ready 2>/dev/null)" != "${V2_WORKSPACE}" ]; then
-        fail "ID-mapped workspace readiness marker names the mounted view"
+        fail "V2 workspace readiness marker names /homeassistant"
     else
-        pass "ID-mapped workspace readiness marker names the mounted view"
+        pass "V2 workspace readiness marker names /homeassistant"
     fi
 
-    SOURCE_ID=$(stat -Lc '%d:%i:%u:%g' /homeassistant 2>/dev/null || echo "")
-    TARGET_ID=$(stat -Lc '%d:%i:%u:%g' "${V2_WORKSPACE}" 2>/dev/null || echo "")
-    IFS=: read -r SOURCE_DEV SOURCE_INO SOURCE_UID SOURCE_GID <<<"${SOURCE_ID}"
-    IFS=: read -r TARGET_DEV TARGET_INO TARGET_UID TARGET_GID <<<"${TARGET_ID}"
-    if [ -n "${SOURCE_ID}" ] && [ "${SOURCE_DEV}:${SOURCE_INO}" = "${TARGET_DEV}:${TARGET_INO}" ] \
-        && [ "${SOURCE_UID}:${SOURCE_GID}" = "0:0" ] \
-        && [ "${TARGET_UID}:${TARGET_GID}" = "60000:60000" ]; then
-        pass "V2 workspace maps the Home Assistant root identity to UID/GID 60000"
+    if [ -d "${V2_WORKSPACE}" ]; then
+        pass "V2 workspace uses the Home Assistant configuration mount directly"
     else
-        fail "V2 workspace maps the Home Assistant root identity to UID/GID 60000" \
-             "source ${SOURCE_ID:-unavailable}, target ${TARGET_ID:-unavailable}"
+        fail "V2 workspace uses the Home Assistant configuration mount directly"
     fi
 
     if [ ! -f "${GENERATED_V2_CONFIG}" ]; then
@@ -148,9 +141,9 @@ if [ "${TERMINAL_RUNTIME}" = "v2" ]; then
     elif jq -e --arg workspace "${V2_WORKSPACE}" \
         '.permissions | any(.action == "external_directory" and .resource == $workspace and .effect == "allow")' \
         "${GENERATED_V2_CONFIG}" >/dev/null; then
-        pass "managed V2 configuration allows the ID-mapped workspace"
+        pass "managed V2 configuration allows the Home Assistant workspace"
     else
-        fail "managed V2 configuration allows the ID-mapped workspace"
+        fail "managed V2 configuration allows the Home Assistant workspace"
     fi
 else
     V2_SERVICE_PATHS_ABSENT=true
@@ -165,7 +158,6 @@ else
         && [ ! -e /run/opencode-v2/credential.sock ] \
         && [ ! -e /run/opencode-v2/mcp-sidecar.sock ] \
         && [ "${V2_SERVICE_PATHS_ABSENT}" = "true" ] \
-        && ! findmnt -rn --target "${V2_WORKSPACE}" >/dev/null 2>&1 \
         && ! pgrep -f '^/usr/local/bin/opencode2 serve ' >/dev/null 2>&1 \
         && ! curl -sS -o /dev/null --connect-timeout 1 --max-time 2 \
             http://127.0.0.1:4100/global/health 2>/dev/null \
@@ -179,9 +171,9 @@ fi
 
 CAP_BND=$(awk '/^CapBnd:/ { print $2 }' /proc/1/status 2>/dev/null || echo "")
 if [ -n "${CAP_BND}" ] && [ $((16#${CAP_BND} & (1 << 21))) -eq 0 ]; then
-    pass "SYS_ADMIN is absent after ID-mapped mount setup"
+    pass "SYS_ADMIN is absent from the add-on runtime"
 else
-    fail "SYS_ADMIN is absent after ID-mapped mount setup" "CapBnd=${CAP_BND:-unavailable}"
+    fail "SYS_ADMIN is absent from the add-on runtime" "CapBnd=${CAP_BND:-unavailable}"
 fi
 
 # ---------------------------------------------------------------------------

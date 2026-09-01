@@ -14,7 +14,7 @@ Initial integration scope:
 
 It deliberately does not contain Home Assistant credentials, API clients, or
 tool handlers. The b4 terminal activation uses a credential-isolated sidecar,
-an ID-mapped workspace, separate server/TUI identities, and managed plugin
+the direct Home Assistant workspace, a separate TUI identity, and managed plugin
 discovery; remaining LAN, OpenChamber, and V1-removal gates are tracked in
 [`OPENCODE_V2_FUTURE.md`](../../../../OPENCODE_V2_FUTURE.md).
 

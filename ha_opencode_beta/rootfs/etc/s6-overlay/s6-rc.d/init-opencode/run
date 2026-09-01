@@ -660,7 +660,7 @@ if [ "${TERMINAL_RUNTIME}" = "v2" ] && [ "${V2_STATE_READY}" = "true" ] && openc
                 --restrict-sensitive-files "${V2_RESTRICT_BOOL}" \
                 --plugin-enabled "${V2_PLUGIN_ENABLED}" \
                 --mcp-profile "${MCP_TOOL_PROFILE}" \
-                --workspace /mnt/opencode-v2-homeassistant \
+                --workspace /homeassistant \
                 --focus-mode "${FOCUS_MODE}" \
                 --home-briefing "${HOME_BRIEFING_ENABLED}" \
                 --decision-notes "${DECISION_NOTES_ENABLED}" \

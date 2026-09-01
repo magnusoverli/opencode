@@ -4,8 +4,8 @@ V2_RUNTIME_ROOT="${V2_RUNTIME_ROOT:-/run/opencode-v2}"
 SIDECAR_READY_FILE="${V2_RUNTIME_ROOT}/mcp-sidecar.ready"
 SIDECAR_SOCKET="${V2_RUNTIME_ROOT}/mcp-sidecar.sock"
 
-# The root listener binds immediately so UID 60000 never gets a replacement
-# window. Validate both root-owned paths and the worker's exact process identity
+# The root listener binds immediately so there is no replacement window.
+# Validate both root-owned paths and the worker's exact process identity
 # so startup and stale readiness after an abrupt exit both return cleanly.
 backend_ready() {
     [ -f "${SIDECAR_READY_FILE}" ] \

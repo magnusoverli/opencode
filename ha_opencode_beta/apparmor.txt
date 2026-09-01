@@ -19,14 +19,8 @@ profile ha_opencode_beta flags=(attach_disconnected,mediate_deleted) {
   capability setgid,
   capability setpcap,
   capability setuid,
-  capability sys_admin,
   capability sys_chroot,
   file,
-  # util-linux creates the ID-mapped bind with the new mount API. The native
-  # entrypoint drops SYS_ADMIN from every capability set and the bounding set
-  # before it execs s6, so these rules are unusable by the service process tree.
-  mount,
-  umount,
 
   signal,
 

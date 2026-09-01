@@ -193,13 +193,10 @@ The launcher:
 
 - verifies the root-owned readiness files and selected generation;
 - uses one target-native launcher to publish the expected V2 PID, construct a
-  credential-free allowlisted environment, drop to UID/GID `60000`, clear
-  supplementary groups and capabilities, disable core dumps, set
-  `no_new_privs` and non-dumpability, and directly `execve` V2;
-- starts from a root-owned, non-writable project directory and accesses
-  `/mnt/opencode-v2-homeassistant` as an explicitly allowed external workspace;
-  that ID-mapped view is owned by UID `60000` while preserving the underlying
-  Home Assistant files and host IDs;
+  credential-free allowlisted environment, disable core dumps, set
+  `no_new_privs` and non-dumpability, and directly `execve` V2 as root;
+- starts from a dedicated root-owned project directory and accesses
+  `/homeassistant` directly for HAOS compatibility;
 - uses an empty allowlisted environment and root-owned config/home paths;
 - exposes only authenticated loopback;
 - disables project config and external skill discovery, requires the project
@@ -258,7 +255,7 @@ Through the b4 terminal cutover, while the beta image still contains the
 temporary V1 fallback:
 
 1. Select **Terminal runtime: V1 rollback**, save, and restart the add-on.
-2. The pre-s6 launcher bypasses the V2 mount, and the V2 server, sidecar, broker,
+2. The pre-s6 launcher disables the V2 server, sidecar, broker,
    and proxy remain inactive.
 3. Continue running the retained V1 terminal, LAN, OpenChamber, and MCP paths.
 4. Never point V1 at `/data/v2` or copy V2 tables back into the V1 database.
@@ -266,7 +263,7 @@ temporary V1 fallback:
 Removing `/data/v2` is not an automatic rollback step. It may contain V2-only
 sessions once user-facing activation begins and must be treated as user data.
 
-The planned b5 beta removes V1 executables and service definitions from the
+The planned b6 beta removes V1 executables and service definitions from the
 image, so rollback after that point is an add-on downgrade to a prior image, not
 an in-container runtime switch. The V1 roots remain byte-for-byte untouched and
 must not be automatically deleted; the downgraded image continues to read those
@@ -280,8 +277,9 @@ original roots rather than attempting a V2-to-V1 database conversion.
   staged-service testing.
 - b4 makes V2 the default terminal runtime and starts no V1 service unless the
   temporary rollback selector is explicitly chosen.
-- b5 removes the V1 package, launchers, generated config, and s6 paths after the
-  b4 real-system soak passes.
+- b5 removes the ID-mapped mount and uses direct root access for HAOS compatibility.
+- b6 removes the V1 package, launchers, generated config, and s6 paths after the
+  b5 real-system soak passes.
 - Stable 3.0 ships V2 only; V1 remains available as the separate stable 2.5.x
   add-on release line, not as hidden code inside the 3.0 image.
 - V1 persistent data survives code removal until a later explicit retention
@@ -291,8 +289,7 @@ original roots rather than attempting a V2-to-V1 database conversion.
 
 - The root TCP proxy remains bound to port 8765 across sidecar restarts and
   returns 503 until the root-owned backend-ready marker exists.
-- The ID-mapped workspace provides approved `/homeassistant` writes without
-  exposing retained V1 or sidecar credentials.
+- The V2 server accesses `/homeassistant` directly as root for HAOS compatibility.
 - Both launchers use a root-owned, non-writable project directory and reject
   `.opencode` there, while local TUI discovery is confined to a root-owned
   managed configuration. The Home Assistant tree is external to that project.

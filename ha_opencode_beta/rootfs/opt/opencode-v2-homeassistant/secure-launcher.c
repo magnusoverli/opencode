@@ -2,8 +2,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <grp.h>
-#include <linux/capability.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,12 +9,8 @@
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#define RUNTIME_UID 60000
-#define RUNTIME_GID 60000
 
 extern char **environ;
 
@@ -60,8 +54,8 @@ static void set_environment(const char *runtime_root,
   } while (0)
 
   SET_ENV("HOME", home);
-  SET_ENV("USER", "opencode-v2");
-  SET_ENV("LOGNAME", "opencode-v2");
+  SET_ENV("USER", "root");
+  SET_ENV("LOGNAME", "root");
   SET_ENV("SHELL", "/bin/bash");
   SET_ENV("PATH", "/usr/local/bin:/usr/bin:/bin");
   SET_ENV("LANG", "C.UTF-8");
@@ -150,34 +144,13 @@ static void enter_workspace(const char *path) {
   close(fd);
 }
 
-static void drop_privileges(void) {
+static void harden_process(void) {
   struct rlimit no_core = {0, 0};
   if (setrlimit(RLIMIT_CORE, &no_core) != 0 ||
-      prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
+      prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
+      prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 ||
+      getuid() != 0 || geteuid() != 0 || getgid() != 0 || getegid() != 0) {
     fail("cannot establish the process security policy");
-  }
-
-  for (int capability = 0; capability <= CAP_LAST_CAP; capability++) {
-    if (prctl(PR_CAPBSET_DROP, capability, 0, 0, 0) != 0 && errno != EINVAL) {
-      fail("cannot clear the capability bounding set");
-    }
-  }
-  if (setgroups(0, NULL) != 0 ||
-      setresgid(RUNTIME_GID, RUNTIME_GID, RUNTIME_GID) != 0 ||
-      setresuid(RUNTIME_UID, RUNTIME_UID, RUNTIME_UID) != 0) {
-    fail("cannot switch to the runtime identity");
-  }
-
-  struct __user_cap_header_struct header = {
-      .version = _LINUX_CAPABILITY_VERSION_3,
-      .pid = 0,
-  };
-  struct __user_cap_data_struct capabilities[2] = {{0}, {0}};
-  if (syscall(SYS_capset, &header, capabilities) != 0 ||
-      prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 || getuid() != RUNTIME_UID ||
-      geteuid() != RUNTIME_UID || getgid() != RUNTIME_GID ||
-      getegid() != RUNTIME_GID || getgroups(0, NULL) != 0) {
-    fail("cannot finalize the runtime process boundary");
   }
 }
 
@@ -199,7 +172,7 @@ int main(int argc, char **argv) {
 
   publish_expected_pid(argv[1]);
   set_environment(argv[1], argv[2], argv[3]);
-  drop_privileges();
+  harden_process();
 
   char port_text[6];
   snprintf(port_text, sizeof(port_text), "%ld", port);

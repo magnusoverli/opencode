@@ -15,7 +15,7 @@ configuration:
     description: "Which interface OpenCode shows in the Home Assistant sidebar. 'terminal' is the classic ttyd terminal; 'openchamber' serves the OpenChamber web UI through Home Assistant Ingress."
   terminal_runtime:
     name: "Terminal runtime"
-    description: "OpenCode V2 is the default terminal and runs as an isolated user against an ID-mapped Home Assistant configuration mount. Choose V1 rollback only temporarily if the V2 terminal cannot start; V1 is removed in the next beta milestone. OpenChamber currently requires V1 rollback."
+    description: "OpenCode V2 is the default terminal and uses the Home Assistant configuration mount directly. Choose V1 rollback temporarily if the V2 terminal cannot start. OpenChamber currently requires V1 rollback."
 
   terminal_theme:
     name: "Terminal theme"

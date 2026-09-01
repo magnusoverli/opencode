@@ -185,17 +185,15 @@ describe("OpenCode V2 state isolation", () => {
     assert.ok(init.indexOf("V2_STATE_READY=true") < init.indexOf("managed-config.js"));
   });
 
-  it("supervises V2 on loopback under uid 60000 with a scrubbed environment", () => {
+  it("supervises V2 on loopback as root with a scrubbed environment", () => {
     assert.match(v2Server, /opencode_v2_select_generation/);
     assert.match(v2Server, /exec \/usr\/local\/bin\/opencode-v2-launch/);
     assert.doesNotMatch(v2Server, /SERVER_PASSWORD=/);
     assert.doesNotMatch(v2Server, /exec 3</);
-    assert.match(secureLauncher, /#define RUNTIME_UID 60000/);
-    assert.match(secureLauncher, /setgroups\(0, NULL\)/);
-    assert.match(secureLauncher, /setresgid\(RUNTIME_GID/);
-    assert.match(secureLauncher, /setresuid\(RUNTIME_UID/);
+    assert.match(v2Server, /Starting OpenCode V2 server as root/);
+    assert.match(secureLauncher, /getuid\(\) != 0/);
+    assert.doesNotMatch(secureLauncher, /setresgid|setresuid|RUNTIME_UID/);
     assert.match(secureLauncher, /PR_SET_NO_NEW_PRIVS/);
-    assert.match(secureLauncher, /PR_CAPBSET_DROP/);
     assert.match(secureLauncher, /PR_SET_DUMPABLE, 0/);
     assert.match(secureLauncher, /setrlimit\(RLIMIT_CORE/);
     assert.match(secureLauncher, /clearenv\(\)/);
@@ -208,6 +206,7 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(nonDumpable, /setenv\("OPENCODE_SERVER_PASSWORD"/);
     assert.match(nonDumpable, /pipe2\(descriptors, O_CLOEXEC\)/);
     assert.match(credentialBroker, /SO_PEERCRED/);
+    assert.match(credentialBroker, /#define RUNTIME_UID 0/);
     assert.match(credentialBroker, /validate_expected_identity\(pid_path, peer\.pid\)/);
     assert.match(secureLauncher, /process_start_time\(getpid\(\)\)/);
     assert.match(credentialBroker, /signal\(SIGPIPE, SIG_IGN\)/);
@@ -288,7 +287,6 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(v2BoundaryFixture, /wait_for_status 401/);
     assert.doesNotMatch(v2BoundaryFixture, /kill -KILL "\$\{SIDECAR_PID\}"/);
     assert.match(v2BoundaryFixture, /NoNewPrivs/);
-    assert.match(v2BoundaryFixture, /CapBnd/);
     assert.match(v2BoundaryFixture, /StreamableHTTPClientTransport/);
     for (const marker of [
       ["user", "contents.d", "ha-opencode-v2-mcp-sidecar"],

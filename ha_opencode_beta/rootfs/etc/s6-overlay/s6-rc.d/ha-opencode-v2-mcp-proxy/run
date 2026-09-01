@@ -6,8 +6,7 @@ if [ ! -f "${V2_RUNTIME_ROOT}/sidecar-secret" ]; then
 fi
 
 # This root-owned listener retains the public loopback port across sidecar
-# worker restarts. UID 60000 can neither replace it nor create the backend Unix
-# socket in the root-owned runtime directory.
+# worker restarts.
 bashio::log.info "Starting root-owned OpenCode V2 MCP proxy on private loopback port 8765"
 exec s6-tcpserver -q -c 64 127.0.0.1 8765 \
     /etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-proxy/connect

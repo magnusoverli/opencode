@@ -76,9 +76,7 @@ cleanup() {
         docker exec "${container}" kill "${tui_pid}" >/dev/null 2>&1 || true
     fi
     if [ -n "${mount_test}" ]; then
-        docker exec "${container}" rm -f \
-            "/homeassistant/${mount_test}" "/mnt/opencode-v2-homeassistant/${mount_test}" \
-            >/dev/null 2>&1 || true
+        docker exec "${container}" rm -f "/homeassistant/${mount_test}" >/dev/null 2>&1 || true
     fi
     if [ "${sidecar_recovery_pending}" = true ]; then
         docker exec "${container}" s6-svc -u /run/service/ha-opencode-v2-mcp-sidecar \
@@ -107,45 +105,29 @@ if [ "${app}" = ha_opencode_beta ]; then
     [ "$(docker exec "${container}" stat -c '%u:%g:%a' /run/opencode-v2/workspace)" = 0:0:755 ] \
         || fail "the V2 project workspace is not root-owned"
     docker exec "${container}" runuser -u opencode-v2 -- test -x /run/opencode-v2/workspace \
-        || fail "the V2 server cannot traverse its project workspace"
+        || fail "the V2 migration user cannot traverse the project workspace"
     docker exec "${container}" runuser -u opencode-v2-tui -- test -x /run/opencode-v2/workspace \
         || fail "the V2 TUI cannot traverse its project workspace"
-    if docker exec "${container}" runuser -u opencode-v2 -- \
-        touch /run/opencode-v2/workspace/.opencode >/dev/null 2>&1; then
-        fail "UID 60000 can modify the root-owned V2 project workspace"
-    fi
     if docker exec "${container}" runuser -u opencode-v2-tui -- \
         touch /run/opencode-v2/workspace/.opencode >/dev/null 2>&1; then
         fail "UID 60001 can modify the root-owned V2 project workspace"
     fi
     [ "$(jq -r '.data.options.terminal_runtime' <<<"${info}")" = v2 ] \
         || fail "the beta terminal runtime is not V2"
-    [ "$(docker exec "${container}" cat /run/opencode-v2-homeassistant.ready)" = "/mnt/opencode-v2-homeassistant" ] \
-        || fail "the ID-mapped workspace readiness marker is invalid"
-
-    source_id=$(docker exec "${container}" stat -Lc '%d:%i:%u:%g' /homeassistant)
-    target_id=$(docker exec "${container}" stat -Lc '%d:%i:%u:%g' /mnt/opencode-v2-homeassistant)
-    source_object=${source_id%:*:*}
-    target_object=${target_id%:*:*}
-    [ "${source_object}" = "${target_object}" ] \
-        || fail "the V2 workspace does not reference the Home Assistant mount"
-    [ "${source_id#"${source_object}":}" = "0:0" ] \
-        || fail "the source Home Assistant mount is not root-owned: ${source_id}"
-    [ "${target_id#"${target_object}":}" = "60000:60000" ] \
-        || fail "the V2 workspace does not map root to UID/GID 60000: ${target_id}"
+    [ "$(docker exec "${container}" cat /run/opencode-v2-homeassistant.ready)" = "/homeassistant" ] \
+        || fail "the V2 workspace readiness marker is invalid"
 
     pid1_cap_bnd=$(docker exec "${container}" awk '/^CapBnd:/ { print $2 }' /proc/1/status)
     [ $((16#${pid1_cap_bnd} & (1 << 21))) -eq 0 ] \
-        || fail "PID 1 retained SYS_ADMIN after ID-mapped mount setup"
+        || fail "PID 1 unexpectedly has SYS_ADMIN"
 
     mount_test=".opencode-v2-acceptance-$$"
-    docker exec "${container}" runuser -u opencode-v2 -- \
-        sh -c 'printf "%s\n" v2-write-ok > "$1"' sh "/mnt/opencode-v2-homeassistant/${mount_test}"
+    docker exec "${container}" sh -c \
+        'printf "%s\n" v2-write-ok > "$1"' sh "/homeassistant/${mount_test}"
     [ "$(docker exec "${container}" cat "/homeassistant/${mount_test}")" = v2-write-ok ] \
         || fail "a V2 workspace write was not visible through /homeassistant"
-    docker exec "${container}" runuser -u opencode-v2 -- \
-        rm -f "/mnt/opencode-v2-homeassistant/${mount_test}"
-    docker exec "${container}" test ! -e "/mnt/opencode-v2-homeassistant/${mount_test}" \
+    docker exec "${container}" rm -f "/homeassistant/${mount_test}"
+    docker exec "${container}" test ! -e "/homeassistant/${mount_test}" \
         || fail "the V2 workspace write fixture was not removed"
     mount_test=""
 fi

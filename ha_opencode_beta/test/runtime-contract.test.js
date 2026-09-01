@@ -153,18 +153,19 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(session, /Current TUI: OpenCode V1 \$\{OPENCODE_VERSION\}/);
     assert.match(v2Session, /Current TUI: OpenCode V2 \$\{V2_VERSION\}/);
     assert.match(v2Session, /Rollback runtime retained: OpenCode V1 \$\{V1_VERSION\}/);
-    assert.match(v2Session, /TUI runs as uid 60001 and the server as uid 60000/);
+    assert.match(v2Session, /TUI runs as uid 60001; the V2 server runs as root/);
     assert.match(v2Session, /exec \/usr\/local\/bin\/opencode-v2-tui-launch \/run\/opencode-v2/);
   });
 
-  it("creates an ID-mapped workspace before s6 and drops transient SYS_ADMIN", () => {
-    assert.match(configYaml, /privileged:\s+\- SYS_ADMIN/);
+  it("uses the direct Home Assistant workspace without elevated mount privileges", () => {
+    assert.match(configYaml, /privileged: \[\]/);
     assert.match(configYaml, /apparmor: true/);
-    assert.match(appArmor, /capability sys_admin,/);
+    assert.doesNotMatch(appArmor, /capability sys_admin,/);
     assert.doesNotMatch(appArmor, /^\s*capability,\s*$/m);
     assert.doesNotMatch(appArmor, /^\s*ptrace,\s*$/m);
     assert.match(dockerfile, /ENTRYPOINT \["\/usr\/local\/bin\/opencode-container-init"\]/);
-    assert.match(containerInit, /X-mount\.idmap=b:0:60000:1,nosuid,nodev/);
+    assert.doesNotMatch(containerInit, /X-mount\.idmap|\/usr\/bin\/mount|CAP_SYS_ADMIN/);
+    assert.match(containerInit, /#define SOURCE_PATH "\/homeassistant"/);
     assert.match(containerInit, /v1_rollback_requested/);
     assert.match(containerInit, /\.terminal_runtime == \\\"v1\\\"/);
     for (const service of [
@@ -179,10 +180,6 @@ describe(`${CHANNEL} runtime pin`, () => {
     const rollbackMigrationGate = initService.indexOf("OpenCode V2 migration is skipped during explicit V1 rollback");
     assert.ok(rollbackMigrationGate >= 0);
     assert.ok(rollbackMigrationGate < initService.indexOf("opencode-v2-migrate.py prepare"));
-    assert.match(containerInit, /source\.st_ino != target\.st_ino/);
-    assert.match(containerInit, /target\.st_uid != RUNTIME_UID/);
-    assert.match(containerInit, /PR_CAPBSET_DROP, CAP_SYS_ADMIN/);
-    assert.match(containerInit, /PR_CAPBSET_READ, CAP_SYS_ADMIN/);
     assert.match(containerInit, /execve\(arguments\[0\], arguments, environ\)/);
   });
 
@@ -210,7 +207,6 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(dockerfile, /opencode-v2-launch/);
     assert.match(dockerfile, /secure-launcher\.c/);
     assert.match(v2BoundaryFixture, /NoNewPrivs:/);
-    assert.match(v2BoundaryFixture, /CapBnd:/);
     assert.match(v2BoundaryFixture, /managed-config\.js --restrict-sensitive-files false --plugin-enabled true/);
     assert.match(v2BoundaryFixture, /V2 server accepted project \.opencode content/);
     assert.match(v2BoundaryFixture, /OPENCODE_MCP_TOOL_PROFILE=full/);

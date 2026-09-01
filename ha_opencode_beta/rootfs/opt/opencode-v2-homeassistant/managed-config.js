@@ -4,7 +4,7 @@ import { TOOL_PROFILES } from "../ha-mcp-server/lib/tool-profiles.js";
 export const DEFAULT_PLUGIN_PACKAGE = "file:///opt/opencode-v2-homeassistant/plugin.js";
 export const DEFAULT_RUNTIME_GUARD_PACKAGE = "file:///opt/opencode-v2-homeassistant/runtime-guard.js";
 export const DEFAULT_MCP_ENDPOINT = "http://127.0.0.1:8765/mcp";
-export const DEFAULT_WORKSPACE = "/mnt/opencode-v2-homeassistant";
+export const DEFAULT_WORKSPACE = "/homeassistant";
 export const WORKSPACE_INSTRUCTIONS = "/opt/opencode-v2-homeassistant/WORKSPACE.md";
 export const READ_ONLY_AGENT_ID = "home-assistant-read-only";
 export const READ_ONLY_AGENT_SYSTEM = [

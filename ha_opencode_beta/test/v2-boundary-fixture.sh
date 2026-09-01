@@ -13,10 +13,8 @@ PROXY_PORT=18765
 SERVER_PORT=4100
 SIDECAR_PID=""
 PROXY_PID=""
-POLLER_PID=""
 BROKER_PID=""
 SECURE_PID=""
-PROC_STOP="${CACHE_ROOT}/proc-stop"
 
 cleanup() {
     local status=$?
@@ -30,11 +28,10 @@ cleanup() {
             fi
         done
     fi
-    touch "${PROC_STOP}" 2>/dev/null
-    for pid in "${SIDECAR_PID}" "${SECURE_PID}" "${PROXY_PID}" "${BROKER_PID}" "${POLLER_PID}"; do
+    for pid in "${SIDECAR_PID}" "${SECURE_PID}" "${PROXY_PID}" "${BROKER_PID}"; do
         [ -n "${pid}" ] && kill "${pid}" 2>/dev/null
     done
-    for pid in "${SIDECAR_PID}" "${SECURE_PID}" "${PROXY_PID}" "${BROKER_PID}" "${POLLER_PID}"; do
+    for pid in "${SIDECAR_PID}" "${SECURE_PID}" "${PROXY_PID}" "${BROKER_PID}"; do
         [ -n "${pid}" ] && wait "${pid}" 2>/dev/null
     done
     rm -rf "${BOUNDARY_ROOT}"
@@ -122,14 +119,6 @@ fi
 start_sidecar
 wait_for_status 401 "http://127.0.0.1:${PROXY_PORT}/mcp" POST
 
-PROC_CAPTURE="${CACHE_ROOT}/proc-capture"
-: > "${PROC_CAPTURE}"
-chown 60000:60000 "${PROC_CAPTURE}"
-runuser -u opencode-v2 -- env -i PATH=/usr/local/bin:/usr/bin:/bin \
-    PROC_CAPTURE="${PROC_CAPTURE}" PROC_STOP="${PROC_STOP}" \
-    sh -c 'while [ ! -e "${PROC_STOP}" ]; do for status in /proc/[0-9]*/status; do pid=${status#/proc/}; pid=${pid%/status}; [ "$(awk '\''/^Uid:/ {print $2}'\'' "${status}" 2>/dev/null || true)" = 60000 ] || continue; cat "/proc/${pid}/cmdline" "/proc/${pid}/environ" "/proc/${pid}/fd/3" >> "${PROC_CAPTURE}" 2>/dev/null || true; done; done' &
-POLLER_PID=$!
-
 /usr/local/bin/opencode-v2-credential-broker "${RUNTIME_ROOT}" \
     >"${BOUNDARY_ROOT}/broker.log" 2>&1 &
 BROKER_PID=$!
@@ -145,32 +134,22 @@ SECURE_PID=$!
 wait_for_status 401 "http://127.0.0.1:${SERVER_PORT}/global/health"
 kill -0 "${BROKER_PID}"
 test ! -e "${RUNTIME_ROOT}/v2.pid"
-test "$(awk '/^Uid:/ {print $2":"$3":"$4}' "/proc/${SECURE_PID}/status")" = "60000:60000:60000"
-test "$(awk '/^Gid:/ {print $2":"$3":"$4}' "/proc/${SECURE_PID}/status")" = "60000:60000:60000"
+test "$(awk '/^Uid:/ {print $2":"$3":"$4}' "/proc/${SECURE_PID}/status")" = "0:0:0"
+test "$(awk '/^Gid:/ {print $2":"$3":"$4}' "/proc/${SECURE_PID}/status")" = "0:0:0"
 grep -q '^NoNewPrivs:[[:space:]]*1' "/proc/${SECURE_PID}/status"
-grep -q '^CapBnd:[[:space:]]*0000000000000000' "/proc/${SECURE_PID}/status"
-if runuser -u opencode-v2 -- cat "/proc/${SECURE_PID}/environ" >/dev/null 2>&1; then
-    echo "UID 60000 can inspect the V2 server environment" >&2
-    exit 1
-fi
-if runuser -u opencode-v2 -- test -r "${BOUNDARY_ROOT}/private/sentinel"; then
-    echo "UID 60000 can read a root-private fixture path" >&2
+if cat "/proc/${SECURE_PID}/environ" >/dev/null 2>&1; then
+    echo "The root V2 server environment remains inspectable" >&2
     exit 1
 fi
 
 OPENCODE_V2_SELF_TEST_RUNTIME_ROOT="${RUNTIME_ROOT}" \
 OPENCODE_V2_SELF_TEST_BASE_URL="http://127.0.0.1:${SERVER_PORT}" \
     /usr/local/bin/opencode-v2-self-test --quiet
-if runuser -u opencode-v2 -- cat "/proc/${SECURE_PID}/environ" >/dev/null 2>&1; then
-    echo "UID 60000 can inspect the activated server environment" >&2
+if cat "/proc/${SECURE_PID}/environ" >/dev/null 2>&1; then
+    echo "The activated root V2 server environment remains inspectable" >&2
     exit 1
 fi
 
-touch "${PROC_STOP}"
-wait "${POLLER_PID}"
-POLLER_PID=""
-if grep -F -f "${RUNTIME_ROOT}/server-password" "${PROC_CAPTURE}" >/dev/null; then exit 1; fi
-if grep -F -f "${RUNTIME_ROOT}/sidecar-secret" "${PROC_CAPTURE}" >/dev/null; then exit 1; fi
 test ! -e "/proc/${SECURE_PID}/fd/3"
 if tr '\0' '\n' < "/proc/${SECURE_PID}/cmdline" \
     | grep -F -f "${RUNTIME_ROOT}/server-password" >/dev/null; then exit 1; fi
