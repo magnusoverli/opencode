@@ -26,7 +26,7 @@ printf '%s\n' "${ADDON_CHANNEL}" > /data/.addon_channel
 # ==============================================================================
 
 CPU_MODE_CONFIG=$(bashio::config 'cpu_mode' || echo "auto")
-INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+SELECTED_INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
 TERMINAL_RUNTIME=$(bashio::config 'terminal_runtime' 2>/dev/null || echo "v2")
 MCP_ENABLED=$(bashio::config 'mcp_enabled')
 MCP_TOOL_PROFILE=$(bashio::config 'mcp_tool_profile' 2>/dev/null || echo "full")
@@ -58,6 +58,24 @@ case "${TERMINAL_RUNTIME}" in
         ;;
 esac
 printf '%s\n' "${TERMINAL_RUNTIME}" > /data/.terminal_runtime
+
+case "${SELECTED_INTERFACE_MODE}" in
+    terminal|openchamber)
+        ;;
+    *)
+        bashio::log.warning "Unknown interface_mode '${SELECTED_INTERFACE_MODE}' - defaulting to terminal"
+        SELECTED_INTERFACE_MODE="terminal"
+        ;;
+esac
+if [ "${TERMINAL_RUNTIME}" = "v2" ]; then
+    INTERFACE_MODE="terminal"
+    if [ "${SELECTED_INTERFACE_MODE}" = "openchamber" ]; then
+        bashio::log.warning "OpenChamber is V1-only; V2 will serve the terminal. The OpenChamber preference is preserved for a later switch to V1."
+    fi
+else
+    INTERFACE_MODE="${SELECTED_INTERFACE_MODE}"
+fi
+printf '%s\n' "${INTERFACE_MODE}" > /data/.interface_mode
 
 case "${MCP_TOOL_PROFILE}" in
     compact|configuration|full)
@@ -132,7 +150,6 @@ elif opencode_v2_prepare_directories; then
 else
     bashio::log.warning "OpenCode V2 private roots are unsafe or unavailable; V2 migration is disabled for this boot"
 fi
-printf '%s\n' "${INTERFACE_MODE}" > /data/.interface_mode
 
 # ==============================================================================
 # Legacy update-policy migration

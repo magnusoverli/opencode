@@ -162,9 +162,11 @@ closed.
   directly against `/homeassistant` as root so real-system testing can proceed.
 - `3.0.0b6` removes provider calls from the V2 self-test so operators can run it
   without creating temporary model sessions or misleading authorization errors.
-- `3.0.0b7` targets removal of the V1 `opencode-ai` package, V1 session/server
+- `3.0.0b7` makes the configuration matrix explicit: V2 always serves the
+  terminal, while V1 honors the saved terminal or OpenChamber preference.
+- `3.0.0b8` targets removal of the V1 `opencode-ai` package, V1 session/server
   launchers, V1 s6 service paths, and V1 config generation from the beta image.
-  This happens only after b5 proves provider authentication, migrated sessions,
+  This happens only after b7 proves provider authentication, migrated sessions,
   `/homeassistant` work, read-only policy, shutdown, and rollback on real Home
   Assistant.
 - Stable `3.0.0` is V2-only. It must not contain a dormant V1 executable or a

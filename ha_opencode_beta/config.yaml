@@ -1,7 +1,7 @@
 ---
 name: "OpenCode Beta"
 description: "Beta channel for OpenCode - AI coding agent for Home Assistant. May contain experimental features."
-version: "3.0.0b6"
+version: "3.0.0b7"
 slug: "ha_opencode_beta"
 image: "ghcr.io/magnusoverli/ha_opencode_beta"
 url: "https://github.com/magnusoverli/opencode"
@@ -22,7 +22,7 @@ ports:
   4097/tcp: null
 ports_description:
   4096/tcp: "OpenCode LAN server — only serves traffic when the 'OpenCode LAN server' option is enabled. These are container ports; if the stable OpenCode add-on is installed too, give each one a different host port here."
-  4097/tcp: "OpenChamber LAN web UI (requires interface_mode: openchamber). Container port — pick a host port that the stable add-on is not already using."
+  4097/tcp: "OpenChamber LAN web UI (requires OpenCode runtime V1 and interface OpenChamber). Container port — pick a host port that the stable add-on is not already using."
 
 # File access - Home Assistant config directory
 map:
@@ -69,12 +69,12 @@ udev: false
 # Keep the options and schema blocks in the same order.
 options:
   # --- 1. Presentation ---------------------------------------------------
-  # Interface served through Home Assistant Ingress.
-  # terminal is the classic ttyd shell; openchamber is the OpenChamber web UI.
-  interface_mode: "terminal"
-  # V2 is the default terminal runtime. V1 remains installed for one beta as
-  # an explicit rollback path while the V2 cutover soaks.
+  # Select the OpenCode generation first. V2 supports the terminal only; V1
+  # supports both the terminal and OpenChamber.
   terminal_runtime: "v2"
+  # Interface served through Home Assistant Ingress when V1 is selected.
+  # V2 always uses terminal, but this preference is retained for a later V1 run.
+  interface_mode: "terminal"
   # Terminal appearance. No effect when interface_mode is openchamber.
   terminal_theme: "breeze"
   font_size: 14
@@ -167,8 +167,8 @@ options:
 
 schema:
   # --- 1. Presentation ---------------------------------------------------
-  interface_mode: list(terminal|openchamber)
   terminal_runtime: list(v2|v1)
+  interface_mode: list(terminal|openchamber)
   terminal_theme: list(breeze|catppuccin_mocha|catppuccin_latte|dracula|nord|tokyo_night|one_dark|solarized_dark|solarized_light|gruvbox_dark)
   font_size: int(10,24)
   cursor_style: list(block|underline|bar)

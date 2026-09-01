@@ -3,7 +3,7 @@
 # OpenCode - OpenChamber Home Assistant Ingress Proxy Service
 # ==============================================================================
 
-TERMINAL_RUNTIME=$(bashio::config 'terminal_runtime' 2>/dev/null || echo "v2")
+TERMINAL_RUNTIME=$(cat /data/.terminal_runtime 2>/dev/null || echo "v2")
 if [ "${TERMINAL_RUNTIME}" != "v1" ]; then
     bashio::log.info "OpenChamber ingress remains inactive while V2 is the selected terminal runtime."
     exec sleep infinity
@@ -19,7 +19,7 @@ if [ -f /data/.env_vars ]; then
     source /data/.env_vars
 fi
 
-INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+INTERFACE_MODE=$(cat /data/.interface_mode 2>/dev/null || echo "terminal")
 if [ "${INTERFACE_MODE}" != "openchamber" ]; then
     bashio::log.info "Interface mode is '${INTERFACE_MODE}'; OpenChamber ingress proxy is inactive."
     exec sleep infinity

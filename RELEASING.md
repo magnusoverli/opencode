@@ -5,7 +5,7 @@ Two channels, two folders.
 | | Folder | Runtime | Tag | Image | Add-on shown in HA |
 |---|---|---|---|---|---|
 | **Stable** | `ha_opencode/` | OpenCode V1 | `v2.5.3` | `ghcr.io/magnusoverli/ha_opencode` | OpenCode |
-| **Beta** | `ha_opencode_beta/` | OpenCode V2 beta | `beta-v3.0.0b6` | `ghcr.io/magnusoverli/ha_opencode_beta` | OpenCode Beta |
+| **Beta** | `ha_opencode_beta/` | OpenCode V2 beta | `beta-v3.0.0b7` | `ghcr.io/magnusoverli/ha_opencode_beta` | OpenCode Beta |
 
 Each folder is a complete add-on: its own `Dockerfile`, its own `rootfs/`, its
 own `config.yaml`. Both live on `main`, and both release from `main`.

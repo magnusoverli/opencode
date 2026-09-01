@@ -10,7 +10,7 @@
 # there is no Home Assistant Ingress session in front of the mapped port.
 # ==============================================================================
 
-TERMINAL_RUNTIME=$(bashio::config 'terminal_runtime' 2>/dev/null || echo "v2")
+TERMINAL_RUNTIME=$(cat /data/.terminal_runtime 2>/dev/null || echo "v2")
 if [ "${TERMINAL_RUNTIME}" != "v1" ]; then
     bashio::log.info "OpenChamber LAN remains inactive while V2 is the selected terminal runtime."
     exec sleep infinity
@@ -21,7 +21,7 @@ export XDG_DATA_HOME="/data/.local/share"
 export XDG_CONFIG_HOME="/data/.config"
 export NPM_CONFIG_PREFIX="/data/.npm-global"
 
-INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+INTERFACE_MODE=$(cat /data/.interface_mode 2>/dev/null || echo "terminal")
 ENABLE_OPENCHAMBER_LAN=$(bashio::config 'enable_openchamber_lan' 2>/dev/null || echo "false")
 
 if [ "${INTERFACE_MODE}" != "openchamber" ]; then

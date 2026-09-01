@@ -145,9 +145,31 @@ describe(`${CHANNEL} runtime pin`, () => {
 
   it("selects V2 for the default TUI and retains explicit V1 rollback", () => {
     const session = read(ROOTFS, "usr", "local", "bin", "opencode-session.sh");
+    const serviceRoot = path.join(ROOTFS, "etc", "s6-overlay", "s6-rc.d");
 
     assert.match(configYaml, /terminal_runtime: "v2"/);
     assert.match(configYaml, /terminal_runtime: list\(v2\|v1\)/);
+    assert.ok(configYaml.indexOf('terminal_runtime: "v2"') < configYaml.indexOf('interface_mode: "terminal"'));
+    assert.match(initService, /SELECTED_INTERFACE_MODE=.*interface_mode/);
+    assert.match(initService, /if \[ "\$\{TERMINAL_RUNTIME\}" = "v2" \]; then\s+INTERFACE_MODE="terminal"/);
+    assert.match(initService, /OpenChamber is V1-only; V2 will serve the terminal/);
+    assert.match(initService, /printf '%s\\n' "\$\{INTERFACE_MODE\}" > \/data\/\.interface_mode/);
+    for (const service of [
+      "ha-opencode",
+      "ha-openchamber",
+      "ha-openchamber-ingress",
+      "ha-openchamber-lan",
+    ]) {
+      assert.match(read(serviceRoot, service, "run"), /cat \/data\/\.interface_mode/);
+    }
+    for (const service of [
+      "ha-openchamber",
+      "ha-openchamber-ingress",
+      "ha-openchamber-lan",
+      "ha-opencode-server",
+    ]) {
+      assert.match(read(serviceRoot, service, "run"), /cat \/data\/\.terminal_runtime/);
+    }
     assert.match(session, /TERMINAL_RUNTIME=.*\.terminal_runtime/);
     assert.match(session, /exec \/usr\/local\/bin\/opencode-v2-session/);
     assert.match(session, /Current TUI: OpenCode V1 \$\{OPENCODE_VERSION\}/);

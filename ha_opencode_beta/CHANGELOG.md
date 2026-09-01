@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## 3.0.0b7
+
+- Clarified the configuration page's V1/V2 choice and made OpenChamber an effective V1-only interface preference; V2 always serves the terminal without discarding the saved OpenChamber choice.
+- Documented that provider credentials are copied from V1 only during initial V2 migration and must be reconnected in V2 if the provider rejects the migrated credential.
+
 ## 3.0.0b6
 
 - Fixed the V2 self-test creating temporary model sessions that logged provider authorization errors; it now validates the active read-only rules without invoking a provider.

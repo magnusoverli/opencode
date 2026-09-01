@@ -10,12 +10,12 @@
 #   - Two sentences where possible, three at most.
 #   - No restart instructions (every option needs one) and no changelog voice.
 configuration:
-  interface_mode:
-    name: "Interface mode"
-    description: "Which interface OpenCode shows in the Home Assistant sidebar. 'terminal' is the classic ttyd terminal; 'openchamber' serves the OpenChamber web UI through Home Assistant Ingress."
   terminal_runtime:
-    name: "Terminal runtime"
-    description: "OpenCode V2 is the default terminal and uses the Home Assistant configuration mount directly. Choose V1 rollback temporarily if the V2 terminal cannot start. OpenChamber currently requires V1 rollback."
+    name: "OpenCode runtime"
+    description: "Choose V2 for the new terminal runtime, or V1 for the previous runtime with terminal and OpenChamber support. V2 currently supports the terminal interface only."
+  interface_mode:
+    name: "Interface (V1 only)"
+    description: "Choose the classic terminal or OpenChamber when OpenCode runtime is V1. V2 always serves the terminal and keeps this preference for the next time V1 is selected."
 
   terminal_theme:
     name: "Terminal theme"
@@ -115,7 +115,7 @@ configuration:
 
   enable_openchamber_lan:
     name: "OpenChamber LAN web UI"
-    description: "Publish the OpenChamber web UI on internal port 4097 so a reverse proxy or tunnel can point straight at the root path. Only works when Interface mode is 'openchamber'. To reach it, also map 4097/tcp in the Network settings. There is no Home Assistant login in front of this port, so only use it on trusted networks and put it behind a reverse proxy or Cloudflare Access before any remote exposure."
+    description: "Requires OpenCode runtime V1 and Interface (V1 only) set to 'openchamber'. Publishes the OpenChamber web UI on internal port 4097; also map 4097/tcp in Network settings. There is no Home Assistant login in front of this port, so use it only behind trusted-network access control."
 
   env_vars:
     name: "Environment variables"

@@ -48,10 +48,12 @@ pass.**
 
 ## 4. Sessions
 
-- [ ] **Terminal** (`interface_mode: terminal`): banner correct, OpenCode starts,
-      a prompt gets a reply.
-- [ ] **OpenChamber** (`interface_mode: openchamber`): UI loads through Ingress,
-      assets resolve (no 404s in the browser console), a session runs.
+- [ ] **V2 terminal** (`terminal_runtime: v2`): terminal is served even when the
+      retained V1 interface preference is `openchamber`; a prompt gets a reply.
+- [ ] **V1 terminal** (`terminal_runtime: v1`, `interface_mode: terminal`): banner
+      correct, OpenCode starts, and a prompt gets a reply.
+- [ ] **V1 OpenChamber** (`terminal_runtime: v1`, `interface_mode: openchamber`):
+      UI loads through Ingress, assets resolve, and a session runs.
 - [ ] **LAN mode**: `enable_server: true` with `4096/tcp` mapped — `opencode
       attach` from another machine connects and runs a prompt.
 - [ ] **OpenChamber LAN**: `enable_openchamber_lan: true` with `4097/tcp` mapped

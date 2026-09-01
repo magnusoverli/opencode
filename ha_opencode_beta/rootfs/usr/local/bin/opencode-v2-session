@@ -29,7 +29,7 @@ echo ""
 echo -e "${GREEN}V2 terminal security boundary${NC}"
 echo -e "${GRAY}The TUI runs as uid 60001; the V2 server runs as root for HAOS compatibility.${NC}"
 echo -e "${GRAY}Home Assistant configuration is mounted at ${CYAN}/homeassistant${NC}."
-echo -e "${GRAY}Set ${YELLOW}Terminal runtime${GRAY} to ${YELLOW}V1 rollback${GRAY} and restart only if V2 cannot start.${NC}"
+echo -e "${GRAY}Set ${YELLOW}OpenCode runtime${GRAY} to ${YELLOW}v1${GRAY} for OpenChamber or if V2 cannot start.${NC}"
 echo ""
 
 if [ ! -x /usr/local/bin/opencode-v2-tui-launch ]; then

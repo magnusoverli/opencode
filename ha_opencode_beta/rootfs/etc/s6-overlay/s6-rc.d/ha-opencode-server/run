@@ -3,7 +3,7 @@
 # OpenCode - Optional LAN Server Service
 # ==============================================================================
 
-TERMINAL_RUNTIME=$(bashio::config 'terminal_runtime' 2>/dev/null || echo "v2")
+TERMINAL_RUNTIME=$(cat /data/.terminal_runtime 2>/dev/null || echo "v2")
 if [ "${TERMINAL_RUNTIME}" != "v1" ]; then
     bashio::log.info "The LAN server remains disabled while V2 is the selected terminal runtime."
     exec sleep infinity
