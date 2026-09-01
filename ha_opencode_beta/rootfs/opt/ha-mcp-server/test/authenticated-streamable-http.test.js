@@ -18,7 +18,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function startTestServer({ callDelayMs = 0, callHandler } = {}) {
+async function startTestServer({ callDelayMs = 0, callHandler, jsonRpcHandlers = {} } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "ha-mcp-http-"));
   temporaryDirectories.push(directory);
   const secretFile = join(directory, "secret");
@@ -49,6 +49,7 @@ async function startTestServer({ callDelayMs = 0, callHandler } = {}) {
     secretFile,
     host: "127.0.0.1",
     port: 0,
+    jsonRpcHandlers,
   });
   openListeners.push(listener);
   return `http://${listener.host}:${listener.port}`;
@@ -100,6 +101,59 @@ describe("authenticated Streamable HTTP transport", () => {
 
     expect(client.getServerVersion()?.name).toBe("transport-test");
     expect(result.tools.map((tool) => tool.name)).toEqual(["test_tool"]);
+  });
+
+  it("serves an independent authenticated stateless native MCP route", async () => {
+    const nativeMessages = [];
+    const nativeHandler = vi.fn(async (message, context) => {
+      nativeMessages.push({
+        method: message.method,
+        requestedProtocolVersion: message.params?.protocolVersion,
+        headerProtocolVersion: context.protocolVersion,
+      });
+      if (message.method === "initialize") {
+        return {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: message.params.protocolVersion,
+            capabilities: { tools: {} },
+            serverInfo: { name: "homeassistant-native", version: "1" },
+          },
+        };
+      }
+      if (message.method === "tools/list") {
+        return {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { tools: [{ name: "HassTurnOn", inputSchema: { type: "object" } }] },
+        };
+      }
+      return null;
+    });
+    const baseUrl = await startTestServer({
+      jsonRpcHandlers: { "/native-mcp": nativeHandler },
+    });
+    const missing = await fetch(`${baseUrl}/native-mcp`, initializeRequest());
+    const nativeClient = new Client({ name: "native-vitest", version: "1.0.0" });
+    const nativeTransport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/native-mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${SECRET}` } },
+    });
+    const regularClient = new Client({ name: "regular-vitest", version: "1.0.0" });
+    const regularTransport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${SECRET}` } },
+    });
+
+    expect(missing.status).toBe(401);
+    await Promise.all([nativeClient.connect(nativeTransport), regularClient.connect(regularTransport)]);
+    expect((await nativeClient.listTools()).tools.map((tool) => tool.name)).toEqual(["HassTurnOn"]);
+    expect((await regularClient.listTools()).tools.map((tool) => tool.name)).toEqual(["test_tool"]);
+    await Promise.all([nativeClient.close(), regularClient.close()]);
+    const initialization = nativeMessages.find(({ method }) => method === "initialize");
+    const toolsList = nativeMessages.find(({ method }) => method === "tools/list");
+    expect(initialization).toBeDefined();
+    expect(toolsList).toBeDefined();
+    expect(toolsList.headerProtocolVersion).toBe(initialization.requestedProtocolVersion);
   });
 
   it("keeps authenticated tool calls open beyond the former socket timeout", async () => {

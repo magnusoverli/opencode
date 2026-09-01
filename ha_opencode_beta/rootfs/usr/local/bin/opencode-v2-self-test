@@ -98,20 +98,25 @@ def read_runtime_material(runtime_root, reporter):
             raise SelfTestError("V2 ready marker is not a root-owned regular file")
         reporter.ok("root-owned V2 readiness marker is present")
 
-        mcp_fd = os.open("mcp-enabled", file_flags, dir_fd=root_fd)
-        try:
-            mcp_status = os.fstat(mcp_fd)
-            if not stat.S_ISREG(mcp_status.st_mode) or mcp_status.st_uid != 0:
-                raise SelfTestError("V2 MCP marker is not a root-owned regular file")
-            if stat.S_IMODE(mcp_status.st_mode) != 0o600:
-                raise SelfTestError("V2 MCP marker mode is not 0600")
-            mcp_value = os.read(mcp_fd, 16).decode("ascii").strip()
-        finally:
-            os.close(mcp_fd)
-        if mcp_value not in ("true", "false"):
-            raise SelfTestError("V2 MCP marker has an invalid value")
-        mcp_enabled = mcp_value == "true"
-        reporter.ok("root-owned V2 MCP expectation is valid")
+        enabled = {}
+        for marker, label in (
+            ("mcp-enabled", "MCP"),
+            ("native-mcp-enabled", "native MCP"),
+        ):
+            marker_fd = os.open(marker, file_flags, dir_fd=root_fd)
+            try:
+                marker_status = os.fstat(marker_fd)
+                if not stat.S_ISREG(marker_status.st_mode) or marker_status.st_uid != 0:
+                    raise SelfTestError(f"V2 {label} marker is not a root-owned regular file")
+                if stat.S_IMODE(marker_status.st_mode) != 0o600:
+                    raise SelfTestError(f"V2 {label} marker mode is not 0600")
+                marker_value = os.read(marker_fd, 16).decode("ascii").strip()
+            finally:
+                os.close(marker_fd)
+            if marker_value not in ("true", "false"):
+                raise SelfTestError(f"V2 {label} marker has an invalid value")
+            enabled[marker] = marker_value == "true"
+            reporter.ok(f"root-owned V2 {label} expectation is valid")
 
         password_fd = os.open("server-password", file_flags, dir_fd=root_fd)
         try:
@@ -131,7 +136,7 @@ def read_runtime_material(runtime_root, reporter):
             password[index] = 0
         raise SelfTestError("V2 server password has an invalid length")
     reporter.ok("server password is a bounded root-only file opened without following symlinks")
-    return password, mcp_enabled
+    return password, enabled["mcp-enabled"], enabled["native-mcp-enabled"]
 
 
 class ApiClient:
@@ -231,7 +236,7 @@ def wait_for(description, probe):
     raise SelfTestError(f"timed out waiting for {description}{detail}")
 
 
-def exercise_policy(client, expected_version, mcp_enabled, reporter):
+def exercise_policy(client, expected_version, mcp_enabled, native_mcp_enabled, reporter):
     def authentication_boundary():
         client.request("/global/health", expected=401, authenticated=False, decode=False)
         return True
@@ -268,6 +273,31 @@ def exercise_policy(client, expected_version, mcp_enabled, reporter):
     else:
         reporter.skip("Home Assistant V2 MCP plugin is disabled by configuration")
 
+    def connected_mcp_servers():
+        servers = data_field(client.request("/api/mcp"), "MCP server list")
+        if not isinstance(servers, list):
+            raise SelfTestError("MCP server list data is not an array")
+        statuses = {
+            item.get("name"): item.get("status", {}).get("status")
+            for item in servers
+            if isinstance(item, dict) and isinstance(item.get("status"), dict)
+        }
+        if mcp_enabled and statuses.get("homeassistant") != "connected":
+            return None
+        if native_mcp_enabled and statuses.get("homeassistant_native") != "connected":
+            return None
+        return statuses
+
+    mcp_servers = wait_for("configured V2 MCP servers", connected_mcp_servers)
+    if mcp_enabled:
+        reporter.ok("Home Assistant V2 MCP server is connected")
+    if native_mcp_enabled:
+        reporter.ok("Native Home Assistant V2 MCP server is connected")
+    elif "homeassistant_native" in mcp_servers:
+        raise SelfTestError("Native Home Assistant V2 MCP server is present while disabled by configuration")
+    else:
+        reporter.skip("Native Home Assistant V2 MCP server is disabled by configuration")
+
     def read_only_agent():
         agent = data_field(client.request(f"/api/agent/{READ_ONLY_AGENT}"), "read-only agent")
         if isinstance(agent, dict) and agent.get("id") == READ_ONLY_AGENT and agent.get("mode") == "primary":
@@ -291,6 +321,7 @@ def exercise_policy(client, expected_version, mcp_enabled, reporter):
         "homeassistant_write_config_safe",
         "homeassistant_remember_decision",
         "homeassistant_future_mutation",
+        "homeassistant_native_HassTurnOn",
     )
     for action in denied_actions:
         assert_permission(rules, action, "*", "deny", reporter)
@@ -342,12 +373,18 @@ def main():
         harden_process(reporter)
         runtime_root = os.environ.get("OPENCODE_V2_SELF_TEST_RUNTIME_ROOT", DEFAULT_RUNTIME_ROOT)
         base_url = validate_base_url(os.environ.get("OPENCODE_V2_SELF_TEST_BASE_URL", DEFAULT_BASE_URL))
-        password, mcp_enabled = read_runtime_material(runtime_root, reporter)
+        password, mcp_enabled, native_mcp_enabled = read_runtime_material(runtime_root, reporter)
         with open("/usr/local/share/opencode-v2-certified-version", "r", encoding="utf-8") as version_file:
             expected_version = version_file.read(128).strip()
         if not expected_version:
             raise SelfTestError("certified V2 version is unavailable")
-        exercise_policy(ApiClient(base_url, password), expected_version, mcp_enabled, reporter)
+        exercise_policy(
+            ApiClient(base_url, password),
+            expected_version,
+            mcp_enabled,
+            native_mcp_enabled,
+            reporter,
+        )
     except (SelfTestError, OSError, KeyboardInterrupt) as error:
         print(f"V2 self-test failed: {error}", file=sys.stderr)
         return 1

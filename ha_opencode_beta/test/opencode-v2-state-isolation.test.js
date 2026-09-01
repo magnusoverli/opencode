@@ -184,6 +184,7 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(init, /V2_RUNTIME_ROOT=\/run\/opencode-v2/);
     assert.match(init, /managed-config\.js/);
     assert.match(init, /--plugin-enabled "\$\{V2_PLUGIN_ENABLED\}"/);
+    assert.match(init, /--native-mcp-enabled "\$\{V2_NATIVE_MCP_ENABLED\}"/);
     assert.match(init, /V2_PLUGIN_ENABLED=.*MCP_ENABLED/);
     assert.match(init, /sidecar-secret/);
     assert.match(init, /cp \/opt\/ha-mcp-server\/AGENTS\.md/);
@@ -242,6 +243,17 @@ describe("OpenCode V2 state isolation", () => {
     )));
   });
 
+  it("waits for the credential broker socket instead of racing service startup", () => {
+    const waitStart = v2Server.indexOf("BROKER_READY=false");
+    const socketReady = v2Server.indexOf('if [ -S "${BROKER_SOCKET}" ]');
+    const restart = v2Server.indexOf("credential broker is not ready");
+    assert.ok(waitStart >= 0);
+    assert.ok(waitStart < socketReady);
+    assert.ok(socketReady < restart);
+    assert.match(v2Server, /for _attempt in \$\(seq 1 100\)/);
+    assert.match(v2Server, /sleep 0\.1/);
+  });
+
   it("isolates the authenticated Home Assistant sidecar from V2 shell subprocesses", () => {
     assert.match(v2Sidecar, /OPENCODE_MCP_TRANSPORT=streamable-http/);
     assert.match(v2Sidecar, /OPENCODE_MCP_SIDECAR_SOCKET="\$\{V2_RUNTIME_ROOT\}\/mcp-sidecar\.sock"/);
@@ -259,8 +271,12 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(init, /"\$\{V2_RUNTIME_ROOT\}\/sidecar-env"/);
     assert.match(v2Sidecar, /exec env -i/);
     assert.match(v2Sidecar, /SUPERVISOR_TOKEN="\$\{SUPERVISOR_TOKEN\}"/);
+    assert.match(v2Sidecar, /OPENCODE_NATIVE_HA_MCP_ENABLED="\$\{OPENCODE_NATIVE_HA_MCP_ENABLED:-false\}"/);
+    assert.doesNotMatch(v2Sidecar, /OPENCODE_NATIVE_HA_MCP_ENABLED=false/);
     assert.doesNotMatch(v2Sidecar, /OPENCODE_SERVER_PASSWORD/);
     assert.match(v2Plugin, /CALLER_SECRET_FD = 3/);
+    assert.match(v2Plugin, /NATIVE_MCP_SERVER_NAME = "homeassistant_native"/);
+    assert.match(v2Plugin, /nativeEndpoint/);
     assert.match(runtimeGuard, /import\("bun:ffi"\)/);
     assert.match(runtimeGuard, /PR_SET_DUMPABLE = 4/);
     assert.match(runtimeGuard, /prctl\(PR_SET_DUMPABLE, 0/);
@@ -283,6 +299,12 @@ describe("OpenCode V2 state isolation", () => {
     assert.match(v2ProxyConnect, /HTTP\/1\.1 503 Service Unavailable/);
     assert.match(v2ProxyConnect, /exec s6-ipcclient "\$\{SIDECAR_SOCKET\}" s6-ioconnect/);
     assert.match(mcpServer, /OPENCODE_MCP_SIDECAR_READY_FILE/);
+    assert.match(mcpServer, /createNativeMcpHandler/);
+    assert.match(mcpServer, /"\/native-mcp": nativeMcpHandler/);
+    assert.match(init, /HA_NATIVE_MCP_API_ID=%q.*NATIVE_HA_MCP_API_ID/);
+    assert.match(init, /OPENCODE_NATIVE_HA_MCP_ENABLED=%q.*V2_NATIVE_MCP_ENABLED/);
+    assert.match(init, /"\$\{V2_RUNTIME_ROOT\}\/native-mcp-enabled"/);
+    assert.match(v2BoundaryFixture, /native-mcp-enabled/);
     assert.match(mcpServer, /writeFileSync\(temporaryReadyFile/);
     assert.match(mcpServer, /readFileSync\("\/proc\/self\/stat"/);
     assert.match(mcpServer, /unlinkSync\(readyFile\)/);

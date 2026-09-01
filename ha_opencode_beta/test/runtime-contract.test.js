@@ -241,7 +241,9 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(v2SelfTest, /fnmatch\.fnmatchcase/);
     assert.match(v2SelfTest, /agent\.get\("permissions"\)/);
     assert.match(v2SelfTest, /homeassistant_remember_decision/);
+    assert.match(v2SelfTest, /homeassistant_native_HassTurnOn/);
     assert.match(v2SelfTest, /mcp-enabled/);
+    assert.match(v2SelfTest, /native-mcp-enabled/);
     assert.doesNotMatch(v2SelfTest, /\/api\/session|method="DELETE"/);
     assert.match(smokeTest, /timeout --signal=TERM --kill-after=10s 60s/);
     assert.doesNotMatch(devcontainerAcceptance, /curl[^\n]*-u/);
@@ -289,6 +291,7 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(devcontainerAcceptance, /new_sidecar_pid.*old_sidecar_pid/);
     assert.match(devcontainerAcceptance, /http:\/\/127\.0\.0\.1:8123\/api\/hassio_ingress\/\$\{INGRESS_TOKEN\}\//);
     assert.match(devcontainerAcceptance, /\/usr\/local\/bin\/opencode-smoke-test/);
+    assert.match(devcontainerAcceptance, /readlink "\/proc\/\$\{tui_pid\}\/cwd" >\/dev\/null 2>&1/);
   });
 
   it("bounds every process in the in-image migration fixture", () => {

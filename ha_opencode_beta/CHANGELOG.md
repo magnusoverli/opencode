@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## 3.0.0b9
+
+- Restored the optional `homeassistant_native` MCP in V2 through the credential-isolated sidecar, so enabling the bridge now shows both Home Assistant MCP servers as connected without exposing Supervisor credentials to the V2 server or shell.
+- Prevented a harmless one-time V2 server restart by waiting for the credential broker socket during concurrent s6 startup.
+
 ## 3.0.0b8
 
 - Stopped copying V1 provider credentials into new V2 state because the formats are not reliably compatible; migrated sessions remain available, V1 credentials stay untouched, and V2 now asks for a fresh `/connect` sign-in.

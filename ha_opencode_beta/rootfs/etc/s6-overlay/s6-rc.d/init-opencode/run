@@ -643,6 +643,7 @@ rm -rf -- "${V2_RUNTIME_ROOT}"
 if [ "${TERMINAL_RUNTIME}" = "v2" ] && [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
     V2_RESTRICT_BOOL=$([ "${RESTRICT_SENSITIVE_FILES}" = "true" ] && echo "true" || echo "false")
     V2_PLUGIN_ENABLED=$([ "${MCP_ENABLED}" = "true" ] && echo "true" || echo "false")
+    V2_NATIVE_MCP_ENABLED=$([ "${V2_PLUGIN_ENABLED}" = "true" ] && [ "${NATIVE_HA_MCP_ENABLED}" = "true" ] && echo "true" || echo "false")
     V2_CONFIG_TEMP=""
     V2_PASSWORD_TEMP=""
     V2_SIDECAR_SECRET_TEMP=""
@@ -679,6 +680,7 @@ if [ "${TERMINAL_RUNTIME}" = "v2" ] && [ "${V2_STATE_READY}" = "true" ] && openc
         if node /opt/opencode-v2-homeassistant/managed-config.js \
                 --restrict-sensitive-files "${V2_RESTRICT_BOOL}" \
                 --plugin-enabled "${V2_PLUGIN_ENABLED}" \
+                --native-mcp-enabled "${V2_NATIVE_MCP_ENABLED}" \
                 --mcp-profile "${MCP_TOOL_PROFILE}" \
                 --workspace /homeassistant \
                 --focus-mode "${FOCUS_MODE}" \
@@ -703,7 +705,10 @@ if [ "${TERMINAL_RUNTIME}" = "v2" ] && [ "${V2_STATE_READY}" = "true" ] && openc
                         printf 'export OPENCODE_MCP_TOOL_PROFILE=%q\n' "${MCP_TOOL_PROFILE}"; \
                         printf 'export SUPERVISOR_TOKEN=%q\n' "${SUPERVISOR_TOKEN}"; \
                         printf 'export HA_ACCESS_TOKEN=%q\n' "${ACCESS_TOKEN}"; \
-                        printf 'export HA_NATIVE_MCP_API_ID=%q\n' "${HA_NATIVE_MCP_API_ID:-assist}"; \
+                        printf 'export HA_NATIVE_MCP_API_ID=%q\n' "${NATIVE_HA_MCP_API_ID}"; \
+                        printf 'export HA_NATIVE_MCP_ENDPOINT_MODE=%q\n' "${HA_NATIVE_MCP_ENDPOINT_MODE:-auto}"; \
+                        printf 'export HA_NATIVE_MCP_SANITIZE_SCHEMAS=%q\n' "${HA_NATIVE_MCP_SANITIZE_SCHEMAS:-1}"; \
+                        printf 'export OPENCODE_NATIVE_HA_MCP_ENABLED=%q\n' "${V2_NATIVE_MCP_ENABLED}"; \
                         printf 'export OPENCODE_DECISION_NOTES=%q\n' "${DECISION_NOTES_ENABLED}"; \
                         printf 'export SCREENSHOT_ENABLED=%q\n' "${SCREENSHOT_ENABLED}"; \
                         printf 'export Z2M_URL=%q\n' "${Z2M_URL:-}"; \
@@ -715,9 +720,14 @@ if [ "${TERMINAL_RUNTIME}" = "v2" ] && [ "${V2_STATE_READY}" = "true" ] && openc
             chmod 600 "${V2_RUNTIME_ROOT}/ready"
             printf '%s\n' "${MCP_ENABLED}" > "${V2_RUNTIME_ROOT}/mcp-enabled"
             chmod 600 "${V2_RUNTIME_ROOT}/mcp-enabled"
+            printf '%s\n' "${V2_NATIVE_MCP_ENABLED}" > "${V2_RUNTIME_ROOT}/native-mcp-enabled"
+            chmod 600 "${V2_RUNTIME_ROOT}/native-mcp-enabled"
             bashio::log.info "OpenCode V2 managed configuration and private loopback server are ready"
             if [ "${MCP_ENABLED}" = "true" ]; then
                 bashio::log.info "OpenCode V2 Home Assistant MCP is ready behind a credential-isolated sidecar"
+            fi
+            if [ "${V2_NATIVE_MCP_ENABLED}" = "true" ]; then
+                bashio::log.info "OpenCode V2 native Home Assistant MCP bridge is ready behind the credential-isolated sidecar"
             fi
         else
             rm -f -- "${V2_CONFIG_TEMP}" "${V2_PASSWORD_TEMP}" "${V2_SIDECAR_SECRET_TEMP}" "${V2_SIDECAR_ENV_TEMP}"

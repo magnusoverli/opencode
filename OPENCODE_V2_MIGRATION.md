@@ -187,7 +187,9 @@ After successful migration, s6 supervises the active V2 server on
 `127.0.0.1:4100`. It is not exposed through Home Assistant Network settings.
 The default ttyd terminal attaches to it; LAN and OpenChamber remain available
 only through explicit V1 rollback. When MCP is enabled, V2 connects to a
-separately supervised Home Assistant MCP sidecar on authenticated loopback.
+separately supervised Home Assistant MCP sidecar on authenticated loopback. If
+the native bridge is enabled, the same sidecar exposes it as a second V2 MCP
+server without giving the V2 process Home Assistant credentials.
 
 The launcher:
 
@@ -218,7 +220,9 @@ separate root-retained listener owns `127.0.0.1:8765`, preventing UID `60000`
 from impersonating a restarted sidecar, and proxies to that socket. The stateful
 Streamable HTTP endpoint rejects calls without the boot bearer, supports
 long-running calls, and propagates cancellation into HTTP, WebSocket, and
-process-group operations. A restarted V2 client can replace the previous
+process-group operations. Its separate `/native-mcp` route validates JSON-RPC
+before forwarding requests to Home Assistant Core and shares only the in-memory
+boot bearer, never the Supervisor token. A restarted V2 client can replace the previous
 session, and sidecar-readiness failures make the supervised V2 process exit and
 retry instead of sleeping permanently.
 
@@ -263,7 +267,7 @@ temporary V1 fallback:
 Removing `/data/v2` is not an automatic rollback step. It may contain V2-only
 sessions once user-facing activation begins and must be treated as user data.
 
-The planned b9 beta removes V1 executables and service definitions from the
+The planned b10 beta removes V1 executables and service definitions from the
 image, so rollback after that point is an add-on downgrade to a prior image, not
 an in-container runtime switch. The V1 roots remain byte-for-byte untouched and
 must not be automatically deleted; the downgraded image continues to read those
@@ -282,8 +286,10 @@ original roots rather than attempting a V2-to-V1 database conversion.
 - b7 makes the V1/V2 and terminal/OpenChamber compatibility matrix explicit.
 - b8 stops importing V1 provider credentials into new V2 generations while
   preserving sessions, retained V1 state, and credentials already created in V2.
-- b9 removes the V1 package, launchers, generated config, and s6 paths after the
-  b8 real-system soak passes.
+- b9 restores native Home Assistant MCP in V2 and retains explicit V1 rollback
+  while the sidecar and provider-authentication fixes soak.
+- b10 removes the V1 package, launchers, generated config, and s6 paths after the
+  b9 real-system soak passes.
 - Stable 3.0 ships V2 only; V1 remains available as the separate stable 2.5.x
   add-on release line, not as hidden code inside the 3.0 image.
 - V1 persistent data survives code removal until a later explicit retention

@@ -81,6 +81,19 @@ function sendJson(response, statusCode, message, headers = {}) {
   );
 }
 
+function sendJsonRpc(response, payload) {
+  if (payload === null || payload === undefined) {
+    response.writeHead(202, { "cache-control": "no-store" });
+    response.end();
+    return;
+  }
+  response.writeHead(200, {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+  });
+  response.end(JSON.stringify(payload));
+}
+
 function readJsonBody(request) {
   if (request.aborted || request.destroyed) return Promise.reject(new Error("Request aborted"));
   const contentLength = Number(request.headers["content-length"]);
@@ -137,7 +150,14 @@ function authorityFor(host, port) {
 /** Start an authenticated, loopback-only Streamable HTTP MCP endpoint. */
 export async function startAuthenticatedStreamableHttp(
   mcpServer,
-  { secretFile, host = "127.0.0.1", port = 3000, socketPath, publicHost } = {},
+  {
+    secretFile,
+    host = "127.0.0.1",
+    port = 3000,
+    socketPath,
+    publicHost,
+    jsonRpcHandlers = {},
+  } = {},
 ) {
   if (socketPath) {
     if (!isAbsolute(socketPath)) throw new Error("Streamable HTTP socket path must be absolute");
@@ -148,11 +168,19 @@ export async function startAuthenticatedStreamableHttp(
   }
 
   const expectedAuthorization = readBearerAuthorization(secretFile);
+  const additionalHandlers = new Map(Object.entries(jsonRpcHandlers));
+  for (const [path, handler] of additionalHandlers) {
+    if (!/^\/[a-z0-9-]+$/.test(path) || path === MCP_PATH || typeof handler !== "function") {
+      expectedAuthorization.fill(0);
+      throw new Error("Invalid authenticated JSON-RPC route");
+    }
+  }
   let expectedHost;
   let closing = false;
   let closePromise;
   let activeTransport;
   let initializeQueue = Promise.resolve();
+  const activeJsonRpcControllers = new Set();
 
   const httpServer = createServer({ maxHeaderSize: MAX_HEADER_BYTES }, async (request, response) => {
     if (closing) {
@@ -171,7 +199,8 @@ export async function startAuthenticatedStreamableHttp(
       sendJson(response, 403, "Origin header is not allowed");
       return;
     }
-    if (request.url !== MCP_PATH) {
+    const jsonRpcHandler = additionalHandlers.get(request.url);
+    if (request.url !== MCP_PATH && !jsonRpcHandler) {
       sendJson(response, 404, "Not found");
       return;
     }
@@ -194,6 +223,27 @@ export async function startAuthenticatedStreamableHttp(
       }
       if (parsed.invalid) {
         sendJson(response, 400, "Invalid JSON request body");
+        return;
+      }
+      if (jsonRpcHandler) {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        const abortOnClose = () => {
+          if (!response.writableEnded) controller.abort();
+        };
+        activeJsonRpcControllers.add(controller);
+        request.once("aborted", abort);
+        response.once("close", abortOnClose);
+        try {
+          sendJsonRpc(response, await jsonRpcHandler(parsed.body, {
+            signal: controller.signal,
+            protocolVersion: request.headers["mcp-protocol-version"],
+          }));
+        } finally {
+          request.off("aborted", abort);
+          response.off("close", abortOnClose);
+          activeJsonRpcControllers.delete(controller);
+        }
         return;
       }
       if (isInitializeRequest(parsed.body)) {
@@ -269,6 +319,7 @@ export async function startAuthenticatedStreamableHttp(
       closing = true;
       closePromise = (async () => {
         try {
+          for (const controller of activeJsonRpcControllers) controller.abort();
           const closed = new Promise((resolve, reject) => {
             httpServer.close((error) => (error ? reject(error) : resolve()));
             httpServer.closeIdleConnections?.();

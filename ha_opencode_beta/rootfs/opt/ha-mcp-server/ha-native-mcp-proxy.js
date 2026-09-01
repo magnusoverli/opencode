@@ -3,14 +3,12 @@ import readline from "readline";
 
 import {
   createJsonRpcError,
-  createNativeMcpForwarder,
   DEFAULT_NATIVE_MCP_ENDPOINT_MODE,
   NATIVE_MCP_ASSIST_API_ID,
   normalizeNativeMcpApiId,
   normalizeNativeMcpEndpointMode,
-  validateJsonRpcMessage,
 } from "./lib/ha-native-mcp.js";
-import { sanitizeToolsListResult } from "./lib/native-mcp-schema.js";
+import { createNativeMcpHandler } from "./lib/native-mcp-handler.js";
 
 const SUPERVISOR_API = process.env.HA_NATIVE_MCP_BASE_URL || "http://supervisor/core/api";
 const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN;
@@ -43,26 +41,14 @@ if (!SUPERVISOR_TOKEN) {
   process.exit(1);
 }
 
-const forwarder = createNativeMcpForwarder({
+const handleNativeMcp = createNativeMcpHandler({
   supervisorToken: SUPERVISOR_TOKEN,
   baseUrl: SUPERVISOR_API,
   apiId: API_ID,
   endpointMode: ENDPOINT_MODE,
   timeoutMs: REQUEST_TIMEOUT_MS,
-  onEndpointFallback: (details) => {
-    log(
-      "info",
-      "Home Assistant has no keyed /api/mcp/<API ID> endpoint (added in 2026.8); falling back to the configured /api/mcp endpoint",
-      details
-    );
-  },
-  onEndpointRecovered: (details) => {
-    log(
-      "info",
-      "The keyed /api/mcp/<API ID> endpoint is available now; using it instead of the configured endpoint",
-      details
-    );
-  },
+  sanitizeSchemas: SANITIZE_SCHEMAS,
+  onLog: log,
 });
 
 const rl = readline.createInterface({
@@ -75,28 +61,8 @@ log("info", "Home Assistant native MCP stdio proxy started", {
 });
 
 let queue = Promise.resolve();
-let loggedSchemaRepair = false;
-
 function write(payload) {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
-}
-
-function repairToolSchemas(response) {
-  if (!SANITIZE_SCHEMAS) return response;
-
-  const { result, repairedTools, repairedToolNames } = sanitizeToolsListResult(response.result);
-  if (!repairedTools) return response;
-
-  if (!loggedSchemaRepair) {
-    loggedSchemaRepair = true;
-    log("info", "Repaired Home Assistant tool schemas that strict MCP clients cannot compile", {
-      repaired_tools: repairedTools,
-      tools: repairedToolNames,
-      upstream_fix: "home-assistant/core#176814 (Home Assistant 2026.8)",
-    });
-  }
-
-  return { ...response, result };
 }
 
 async function handleLine(line) {
@@ -115,17 +81,9 @@ async function handleLine(line) {
 
   // Never forward a malformed message: Home Assistant Core has crashed on them
   // (home-assistant/core#176734).
-  const { valid, id, reason } = validateJsonRpcMessage(message);
-  if (!valid) {
-    log("warn", "Rejected a malformed JSON-RPC message before forwarding", { reason });
-    write(createJsonRpcError(id, -32600, "Invalid Request", { reason }));
-    return;
-  }
-
-  const response = await forwarder.send(message);
+  const response = await handleNativeMcp(message);
   if (!response) return;
-
-  write(message.method === "tools/list" ? repairToolSchemas(response) : response);
+  write(response);
 }
 
 rl.on("line", (line) => {

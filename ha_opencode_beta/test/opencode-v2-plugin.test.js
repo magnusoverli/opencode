@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import plugin, {
   CALLER_SECRET_FD,
   MCP_SERVER_NAME,
+  NATIVE_MCP_SERVER_NAME,
   PLUGIN_ID,
   createSetup,
   createServerConfig,
@@ -23,8 +24,27 @@ describe("Home Assistant OpenCode V2 plugin", () => {
   it("normalizes a safe loopback endpoint and timeout defaults", () => {
     assert.deepEqual(parseOptions(DEFAULT_OPTIONS), {
       endpoint: "http://127.0.0.1:43110/mcp",
+      nativeEnabled: false,
+      nativeEndpoint: "http://127.0.0.1:43110/native-mcp",
       timeouts: { startup: 30_000, catalog: 60_000, execution: 60_000 },
     });
+  });
+
+  it("rejects unsafe native endpoints and invalid enablement", () => {
+    for (const nativeEndpoint of [
+      "http://192.0.2.1:43110/native-mcp",
+      "http://127.0.0.1:43110/mcp",
+      "http://127.0.0.1:43110/native-mcp?token=secret",
+    ]) {
+      assert.throws(
+        () => parseOptions({ ...DEFAULT_OPTIONS, nativeEnabled: true, nativeEndpoint }),
+        /plain loopback HTTP URL/,
+      );
+    }
+    assert.throws(
+      () => parseOptions({ ...DEFAULT_OPTIONS, nativeEnabled: "true" }),
+      /must be true or false/,
+    );
   });
 
   it("rejects remote, credential-bearing, and non-HTTP endpoints", () => {
@@ -154,6 +174,33 @@ describe("Home Assistant OpenCode V2 plugin", () => {
 
     await cleanup();
     assert.deepEqual(disposed, ["mcp"]);
+  });
+
+  it("registers native Home Assistant as a second MCP with the same in-memory bearer", async () => {
+    let transform;
+    const options = { ...DEFAULT_OPTIONS, nativeEnabled: true };
+    const setup = createSetup({ readSecret: () => CALLER_SECRET });
+    const cleanup = await setup({
+      options,
+      mcp: {
+        async transform(callback) {
+          transform = callback;
+          return { async dispose() {} };
+        },
+      },
+    });
+
+    const servers = new Map();
+    transform({ set: (name, value) => servers.set(name, value) });
+
+    assert.deepEqual([...servers.keys()], [MCP_SERVER_NAME, NATIVE_MCP_SERVER_NAME]);
+    assert.equal(servers.get(NATIVE_MCP_SERVER_NAME).url, "http://127.0.0.1:43110/native-mcp");
+    assert.equal(
+      servers.get(NATIVE_MCP_SERVER_NAME).headers.Authorization,
+      servers.get(MCP_SERVER_NAME).headers.Authorization,
+    );
+    assert.doesNotMatch(JSON.stringify(options), new RegExp(CALLER_SECRET));
+    await cleanup();
   });
 
   it("keeps the default export on the pinned Plugin.define setup contract", () => {

@@ -12,6 +12,7 @@ import {
   probeNativeMcpEndpoint,
   validateJsonRpcMessage,
 } from "../lib/ha-native-mcp.js";
+import { createNativeMcpHandler } from "../lib/native-mcp-handler.js";
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -449,5 +450,67 @@ describe("JSON-RPC message validation", () => {
 
     expect(hint).toMatch(/reachable from an add-on/);
     expect(hint).not.toMatch(/may not be able to reach/);
+  });
+});
+
+describe("V2 native MCP sidecar handler", () => {
+  it("rejects malformed messages before they reach Home Assistant", async () => {
+    const fetchImpl = vi.fn();
+    const handler = createNativeMcpHandler({ fetchImpl, supervisorToken: "token" });
+
+    const response = await handler({ jsonrpc: "1.0", id: 7, method: "tools/list" });
+
+    expect(response.error.code).toBe(-32600);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("forwards valid messages with cancellation confined to the sidecar", async () => {
+    const fetchImpl = vi.fn(async (_url, options) => {
+      expect(options.headers.Authorization).toBe("Bearer token");
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+      return jsonResponse({ jsonrpc: "2.0", id: 8, result: { tools: [] } });
+    });
+    const handler = createNativeMcpHandler({ fetchImpl, supervisorToken: "token" });
+    const controller = new AbortController();
+
+    const response = await handler(
+      { jsonrpc: "2.0", id: 8, method: "tools/list" },
+      { signal: controller.signal, protocolVersion: "2025-06-18" },
+    );
+
+    expect(response).toEqual({ jsonrpc: "2.0", id: 8, result: { tools: [] } });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl.mock.calls[0][1].headers["MCP-Protocol-Version"]).toBe("2025-06-18");
+  });
+
+  it("aborts the matching in-flight request when V2 sends MCP cancellation", async () => {
+    let startedResolve;
+    let abortedResolve;
+    const started = new Promise((resolve) => { startedResolve = resolve; });
+    const aborted = new Promise((resolve) => { abortedResolve = resolve; });
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const message = JSON.parse(options.body);
+      if (message.method === "notifications/cancelled") return new Response(null, { status: 202 });
+      startedResolve();
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          abortedResolve();
+          reject(new Error("cancelled"));
+        }, { once: true });
+      });
+    });
+    const handler = createNativeMcpHandler({ fetchImpl, supervisorToken: "token" });
+
+    const call = handler({ jsonrpc: "2.0", id: 9, method: "tools/call", params: {} });
+    await started;
+    const cancellation = await handler({
+      jsonrpc: "2.0",
+      method: "notifications/cancelled",
+      params: { requestId: 9, reason: "test" },
+    });
+
+    expect(cancellation).toBeNull();
+    await expect(aborted).resolves.toBeUndefined();
+    expect((await call).error.message).toMatch(/failed/i);
   });
 });

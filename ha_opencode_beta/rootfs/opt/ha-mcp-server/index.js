@@ -99,6 +99,7 @@ import {
   normalizeNativeMcpApiId,
   probeNativeMcpEndpoint,
 } from "./lib/ha-native-mcp.js";
+import { createNativeMcpHandler } from "./lib/native-mcp-handler.js";
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
 import { createSupervisorAppsClient } from "./lib/supervisor-apps.js";
 import {
@@ -7701,12 +7702,27 @@ async function main() {
     const host = process.env.OPENCODE_MCP_SIDECAR_HOST || "127.0.0.1";
     const portText = process.env.OPENCODE_MCP_SIDECAR_PORT || "3000";
     if (!/^\d+$/.test(portText)) throw new Error("Invalid OPENCODE_MCP_SIDECAR_PORT");
+    const nativeMcpHandler = NATIVE_HA_MCP_BRIDGE_ENABLED
+      ? createNativeMcpHandler({
+        supervisorToken: SUPERVISOR_TOKEN,
+        baseUrl: SUPERVISOR_API,
+        apiId: HA_NATIVE_MCP_API_ID,
+        endpointMode: process.env.HA_NATIVE_MCP_ENDPOINT_MODE,
+        sanitizeSchemas: process.env.HA_NATIVE_MCP_SANITIZE_SCHEMAS !== "0",
+        onLog: (level, message, details) => sendLog(level, "native-mcp", {
+          action: "bridge_status",
+          message,
+          ...details,
+        }),
+      })
+      : null;
     const listener = await startAuthenticatedStreamableHttp(server, {
       secretFile: process.env.OPENCODE_MCP_SIDECAR_SECRET_FILE,
       host,
       port: Number(portText),
       socketPath,
       publicHost: process.env.OPENCODE_MCP_SIDECAR_PUBLIC_HOST,
+      jsonRpcHandlers: nativeMcpHandler ? { "/native-mcp": nativeMcpHandler } : {},
     });
     close = () => listener.close();
     readyFile = process.env.OPENCODE_MCP_SIDECAR_READY_FILE;

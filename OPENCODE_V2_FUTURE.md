@@ -9,7 +9,7 @@ User-data migration and rollback are specified separately in
 
 ## Status Snapshot
 
-Updated on 2026-08-31:
+Updated on 2026-09-01:
 
 - Stable OpenCode is `opencode-ai@1.18.25` and remains the certified runtime in
   stable add-on 2.5.3.
@@ -138,7 +138,7 @@ acceptance both invoke it.
 ### Parity after terminal cutover
 
 OpenChamber is not the first V2 client. After the terminal preview is reliable,
-close the remaining LSP/formatter, PPQ, native MCP, startup-hook, LAN, and
+close the remaining LSP/formatter, PPQ, startup-hook, LAN, and
 custom-provider gaps. Integrate OpenChamber only after upstream V2 support lands
 and its Ingress, streaming, OAuth, update-policy, and service-worker behavior is
 revalidated. Stable 3.0 still requires a supported upstream V2 release and a
@@ -167,11 +167,14 @@ closed.
 - `3.0.0b8` stops importing V1 provider credentials into new V2 generations;
   sessions still migrate, existing V2 generations remain untouched, and users
   authenticate providers directly in V2 with `/connect`.
-- `3.0.0b9` targets removal of the V1 `opencode-ai` package, V1 session/server
-  launchers, V1 s6 service paths, and V1 config generation from the beta image.
-  This happens only after b8 proves fresh provider authentication, migrated sessions,
-  `/homeassistant` work, read-only policy, shutdown, and rollback on real Home
-  Assistant.
+- `3.0.0b9` restores the optional native Home Assistant MCP bridge in V2 through
+  the credential-isolated sidecar and removes the one-time credential-broker
+  startup race. It retains explicit V1 rollback while these fixes soak.
+- `3.0.0b10` is the earliest target for removing the V1 `opencode-ai` package,
+  V1 session/server launchers, V1 s6 service paths, and V1 config generation
+  from the beta image. This happens only after b9 proves fresh provider
+  authentication, migrated sessions, native MCP, `/homeassistant` work,
+  read-only policy, shutdown, and rollback on real Home Assistant.
 - Stable `3.0.0` is V2-only. It must not contain a dormant V1 executable or a
   hidden V1 service path. Stable 2.5.x remains the separately versioned V1
   product for users who are not ready to move.
@@ -322,8 +325,8 @@ The first plugin should:
 
 1. Register the sidecar's `homeassistant` MCP endpoint with `ctx.mcp.transform`.
 2. Preserve `OPENCODE_MCP_TOOL_PROFILE` and server-side dispatch rejection.
-3. Leave native MCP disabled until its sidecar path and profile enforcement are
-   separately verified.
+3. Register native MCP through a separate authenticated sidecar route when its
+   option is enabled, and deny its entire namespace in the read-only agent.
 4. Set `codemode: false` for compatibility during the first migration.
 5. Add already-sanitized, bounded home briefing and decision-note context with
    `ctx.session.hook("context")` once per model request.
@@ -566,7 +569,8 @@ visual and irrelevant. The initial target is:
 - Test LAN authentication and replace V1 attach/CORS assumptions.
 - Test V1 session migration plus fresh V2 provider authentication and document
   rollback.
-- Add native MCP and screenshot/access-token paths to the privileged sidecar.
+- Soak the native MCP sidecar route and screenshot/access-token paths on real
+  Home Assistant.
 - Integrate an OpenChamber release that explicitly supports V2, then rerun all
   Ingress, OAuth, streaming, service-worker, update-policy, and asset tests.
 

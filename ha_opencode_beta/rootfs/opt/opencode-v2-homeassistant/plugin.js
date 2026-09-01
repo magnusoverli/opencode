@@ -3,6 +3,7 @@ import { Plugin } from "@opencode-ai/plugin";
 
 export const PLUGIN_ID = "homeassistant.mcp";
 export const MCP_SERVER_NAME = "homeassistant";
+export const NATIVE_MCP_SERVER_NAME = "homeassistant_native";
 export const CALLER_SECRET_FD = 3;
 
 const SENSITIVE_SHELL_ENV = new Set([
@@ -31,28 +32,36 @@ function requireObject(value) {
   return value;
 }
 
-function requireLoopbackEndpoint(value) {
+function requireLoopbackEndpoint(value, expectedPath, optionName) {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError("Home Assistant plugin option 'endpoint' is required");
+    throw new TypeError(`Home Assistant plugin option '${optionName}' is required`);
   }
 
   let endpoint;
   try {
     endpoint = new URL(value);
   } catch {
-    throw new TypeError("Home Assistant plugin option 'endpoint' must be an absolute URL");
+    throw new TypeError(`Home Assistant plugin option '${optionName}' must be an absolute URL`);
   }
 
   const loopback = endpoint.hostname === "127.0.0.1"
     || endpoint.hostname === "localhost"
     || endpoint.hostname === "[::1]";
 
-  const fixedPath = endpoint.pathname === "/mcp" && endpoint.search === "" && endpoint.hash === "";
+  const fixedPath = endpoint.pathname === expectedPath && endpoint.search === "" && endpoint.hash === "";
   if (endpoint.protocol !== "http:" || !loopback || endpoint.username || endpoint.password || !fixedPath) {
-    throw new TypeError("Home Assistant MCP endpoint must be a plain loopback HTTP URL ending in /mcp");
+    throw new TypeError(
+      `Home Assistant plugin option '${optionName}' must be a plain loopback HTTP URL ending in ${expectedPath}`,
+    );
   }
 
   return endpoint.toString();
+}
+
+function nativeEndpointFor(endpoint) {
+  const native = new URL(endpoint);
+  native.pathname = "/native-mcp";
+  return native.toString();
 }
 
 function requireTimeouts(value) {
@@ -78,14 +87,24 @@ function requireTimeouts(value) {
 
 export function parseOptions(value) {
   const input = requireObject(value);
-  const allowed = new Set(["endpoint", "timeouts"]);
+  const allowed = new Set(["endpoint", "nativeEnabled", "nativeEndpoint", "timeouts"]);
   const unknown = Object.keys(input).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
     throw new TypeError(`Unknown Home Assistant plugin option: ${unknown.join(", ")}`);
   }
 
+  const endpoint = requireLoopbackEndpoint(input.endpoint, "/mcp", "endpoint");
+  if (input.nativeEnabled !== undefined && typeof input.nativeEnabled !== "boolean") {
+    throw new TypeError("Home Assistant plugin option 'nativeEnabled' must be true or false");
+  }
   return {
-    endpoint: requireLoopbackEndpoint(input.endpoint),
+    endpoint,
+    nativeEnabled: input.nativeEnabled ?? false,
+    nativeEndpoint: requireLoopbackEndpoint(
+      input.nativeEndpoint ?? nativeEndpointFor(endpoint),
+      "/native-mcp",
+      "nativeEndpoint",
+    ),
     timeouts: requireTimeouts(input.timeouts),
   };
 }
@@ -111,10 +130,10 @@ export function readCallerSecret({
   return requireCallerSecret(value);
 }
 
-export function createServerConfig(options, callerSecret) {
+export function createServerConfig(options, callerSecret, endpoint = options.endpoint) {
   return {
     type: "remote",
-    url: options.endpoint,
+    url: endpoint,
     headers: { Authorization: `Bearer ${requireCallerSecret(callerSecret)}` },
     oauth: false,
     disabled: false,
@@ -156,8 +175,12 @@ export function createSetup({ readSecret = readCallerSecret } = {}) {
     const callerSecret = readSecret();
     const options = parseOptions(ctx.options);
     const server = createServerConfig(options, callerSecret);
+    const nativeServer = options.nativeEnabled
+      ? createServerConfig(options, callerSecret, options.nativeEndpoint)
+      : null;
     const registrations = [await ctx.mcp.transform((draft) => {
       draft.set(MCP_SERVER_NAME, server);
+      if (nativeServer) draft.set(NATIVE_MCP_SERVER_NAME, nativeServer);
     })];
 
     return async () => {

@@ -4,6 +4,7 @@ import { TOOL_PROFILES } from "../ha-mcp-server/lib/tool-profiles.js";
 export const DEFAULT_PLUGIN_PACKAGE = "file:///opt/opencode-v2-homeassistant/plugin.js";
 export const DEFAULT_RUNTIME_GUARD_PACKAGE = "file:///opt/opencode-v2-homeassistant/runtime-guard.js";
 export const DEFAULT_MCP_ENDPOINT = "http://127.0.0.1:8765/mcp";
+export const DEFAULT_NATIVE_MCP_ENDPOINT = "http://127.0.0.1:8765/native-mcp";
 export const DEFAULT_WORKSPACE = "/homeassistant";
 export const WORKSPACE_INSTRUCTIONS = "/opt/opencode-v2-homeassistant/WORKSPACE.md";
 export const READ_ONLY_AGENT_ID = "home-assistant-read-only";
@@ -49,6 +50,7 @@ export function buildReadOnlyPermissions(workspace = DEFAULT_WORKSPACE) {
       resource: "*",
       effect: "allow",
     })),
+    { action: "homeassistant_native_*", resource: "*", effect: "deny" },
     ...SENSITIVE_READ_PATTERNS.map((resource) => ({ action: "read", resource, effect: "deny" })),
   ];
 }
@@ -59,6 +61,8 @@ export function buildManagedConfig({
   pluginPackage = DEFAULT_PLUGIN_PACKAGE,
   runtimeGuardPackage = DEFAULT_RUNTIME_GUARD_PACKAGE,
   mcpEndpoint = DEFAULT_MCP_ENDPOINT,
+  nativeMcpEnabled = false,
+  nativeMcpEndpoint = DEFAULT_NATIVE_MCP_ENDPOINT,
   mcpProfile = "full",
   workspace = DEFAULT_WORKSPACE,
   focusMode = false,
@@ -92,6 +96,8 @@ export function buildManagedConfig({
         package: pluginPackage,
         options: {
           endpoint: mcpEndpoint,
+          nativeEnabled: nativeMcpEnabled,
+          nativeEndpoint: nativeMcpEndpoint,
           timeouts: { startup: 30_000, catalog: 60_000, execution: 60_000 },
         },
       }]
@@ -155,6 +161,10 @@ export function parseArguments(argv) {
       options.pluginPackage = value;
     } else if (name === "--mcp-endpoint") {
       options.mcpEndpoint = value;
+    } else if (name === "--native-mcp-enabled") {
+      options.nativeMcpEnabled = parseBoolean(value, name);
+    } else if (name === "--native-mcp-endpoint") {
+      options.nativeMcpEndpoint = value;
     } else if (name === "--mcp-profile") {
       if (!["compact", "configuration", "full"].includes(value)) {
         throw new TypeError(`${name} must be compact, configuration, or full`);

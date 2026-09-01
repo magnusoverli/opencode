@@ -41,7 +41,15 @@ if [ ! -x /usr/local/bin/opencode-v2-launch ]; then
     bashio::log.warning "OpenCode V2 server is inactive because its secure launcher is unavailable"
     exec sleep infinity
 fi
-if [ ! -S "${BROKER_SOCKET}" ]; then
+BROKER_READY=false
+for _attempt in $(seq 1 100); do
+    if [ -S "${BROKER_SOCKET}" ]; then
+        BROKER_READY=true
+        break
+    fi
+    sleep 0.1
+done
+if [ "${BROKER_READY}" != "true" ]; then
     bashio::log.warning "OpenCode V2 server is restarting because its credential broker is not ready"
     exit 1
 fi

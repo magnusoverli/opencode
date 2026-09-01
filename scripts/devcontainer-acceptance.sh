@@ -209,8 +209,9 @@ if [ "${app}" = ha_opencode_beta ]; then
         || fail "the attached V2 TUI does not enforce no-new-privileges"
     [ "$(docker exec "${container}" awk '/^CapBnd:/ { print $2 }' "/proc/${tui_pid}/status")" = \
         0000000000000000 ] || fail "the attached V2 TUI retained capabilities"
-    [ "$(docker exec "${container}" readlink "/proc/${tui_pid}/cwd")" = /run/opencode-v2/workspace ] \
-        || fail "the attached V2 TUI escaped its root-owned project workspace"
+    if docker exec "${container}" readlink "/proc/${tui_pid}/cwd" >/dev/null 2>&1; then
+        fail "the attached V2 TUI working directory remains externally inspectable"
+    fi
     if docker exec "${container}" runuser -u opencode-v2-tui -- \
         cat "/proc/${tui_pid}/environ" >/dev/null 2>&1; then
         fail "UID 60001 can inspect the attached V2 TUI credential environment"

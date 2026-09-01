@@ -8,6 +8,7 @@ import {
   buildReadOnlyPermissions,
   buildManagedConfig,
   DEFAULT_MCP_ENDPOINT,
+  DEFAULT_NATIVE_MCP_ENDPOINT,
   DEFAULT_PLUGIN_PACKAGE,
   DEFAULT_RUNTIME_GUARD_PACKAGE,
   DEFAULT_WORKSPACE,
@@ -65,10 +66,21 @@ describe("OpenCode V2 managed configuration", () => {
         package: DEFAULT_PLUGIN_PACKAGE,
         options: {
           endpoint: DEFAULT_MCP_ENDPOINT,
+          nativeEnabled: false,
+          nativeEndpoint: DEFAULT_NATIVE_MCP_ENDPOINT,
           timeouts: { startup: 30_000, catalog: 60_000, execution: 60_000 },
         },
       },
     ]);
+  });
+
+  it("enables native Home Assistant only through the credential-isolated plugin", () => {
+    const config = buildManagedConfig({ pluginEnabled: true, nativeMcpEnabled: true });
+    const options = config.plugins[1].options;
+
+    assert.equal(options.nativeEnabled, true);
+    assert.equal(options.nativeEndpoint, DEFAULT_NATIVE_MCP_ENDPOINT);
+    assert.doesNotMatch(JSON.stringify(config), /SUPERVISOR_TOKEN|Bearer |server-password/);
   });
 
   it("defines a V2-native read-only agent whose final rules fail closed", () => {
@@ -92,15 +104,21 @@ describe("OpenCode V2 managed configuration", () => {
     const mcpRules = agent.permissions.filter((rule) => rule.action.startsWith("homeassistant_"));
     assert.deepEqual(mcpRules[0], { action: "homeassistant_*", resource: "*", effect: "deny" });
     assert.deepEqual(
-      mcpRules.slice(1).map((rule) => rule.action),
+      mcpRules.slice(1, -1).map((rule) => rule.action),
       [...TOOL_PROFILES.compact.toolNames].map((name) => `homeassistant_${name}`),
     );
-    assert.ok(mcpRules.slice(1).every((rule) => rule.effect === "allow" && rule.resource === "*"));
+    assert.ok(mcpRules.slice(1, -1).every((rule) => rule.effect === "allow" && rule.resource === "*"));
+    assert.deepEqual(mcpRules.at(-1), {
+      action: "homeassistant_native_*",
+      resource: "*",
+      effect: "deny",
+    });
     for (const action of [
       "homeassistant_call_service",
       "homeassistant_write_config_safe",
       "homeassistant_remember_decision",
       "homeassistant_future_mutation",
+      "homeassistant_native_HassTurnOn",
     ]) {
       assert.equal(mcpRules.some((rule) => rule.action === action && rule.effect === "allow"), false);
     }
@@ -157,11 +175,14 @@ describe("OpenCode V2 managed configuration", () => {
       "false",
       "--plugin-enabled",
       "false",
+      "--native-mcp-enabled",
+      "true",
     ], { encoding: "utf8" });
     assert.equal(generated.status, 0, generated.stderr);
     assert.deepEqual(JSON.parse(generated.stdout), buildManagedConfig({
       restrictSensitiveFiles: false,
       pluginEnabled: false,
+      nativeMcpEnabled: true,
     }));
 
     const rejected = spawnSync(process.execPath, [GENERATOR, "--unknown", "value"], {
