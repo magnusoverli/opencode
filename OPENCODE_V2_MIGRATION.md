@@ -263,7 +263,7 @@ temporary V1 fallback:
 Removing `/data/v2` is not an automatic rollback step. It may contain V2-only
 sessions once user-facing activation begins and must be treated as user data.
 
-The planned b6 beta removes V1 executables and service definitions from the
+The planned b7 beta removes V1 executables and service definitions from the
 image, so rollback after that point is an add-on downgrade to a prior image, not
 an in-container runtime switch. The V1 roots remain byte-for-byte untouched and
 must not be automatically deleted; the downgraded image continues to read those
@@ -278,7 +278,8 @@ original roots rather than attempting a V2-to-V1 database conversion.
 - b4 makes V2 the default terminal runtime and starts no V1 service unless the
   temporary rollback selector is explicitly chosen.
 - b5 removes the ID-mapped mount and uses direct root access for HAOS compatibility.
-- b6 removes the V1 package, launchers, generated config, and s6 paths after the
+- b6 makes the active V2 policy self-test provider-free.
+- b7 removes the V1 package, launchers, generated config, and s6 paths after the
   b5 real-system soak passes.
 - Stable 3.0 ships V2 only; V1 remains available as the separate stable 2.5.x
   add-on release line, not as hidden code inside the 3.0 image.

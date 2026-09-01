@@ -160,7 +160,9 @@ closed.
   rollback; the V2 mount and services remain inactive in that mode.
 - `3.0.0b5` removes the HAOS-incompatible ID-mapped mount and runs the V2 server
   directly against `/homeassistant` as root so real-system testing can proceed.
-- `3.0.0b6` targets removal of the V1 `opencode-ai` package, V1 session/server
+- `3.0.0b6` removes provider calls from the V2 self-test so operators can run it
+  without creating temporary model sessions or misleading authorization errors.
+- `3.0.0b7` targets removal of the V1 `opencode-ai` package, V1 session/server
   launchers, V1 s6 service paths, and V1 config generation from the beta image.
   This happens only after b5 proves provider authentication, migrated sessions,
   `/homeassistant` work, read-only policy, shutdown, and rollback on real Home

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 3.0.0b6
+
+- Fixed the V2 self-test creating temporary model sessions that logged provider authorization errors; it now validates the active read-only rules without invoking a provider.
+
 ## 3.0.0b5
 
 - Fixed V2 startup on HAOS by removing the unsupported ID-mapped mount and `SYS_ADMIN` requirement; the V2 server now uses `/homeassistant` directly as root, matching the proven V1 filesystem model.

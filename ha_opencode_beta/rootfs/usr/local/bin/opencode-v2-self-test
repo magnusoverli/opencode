@@ -3,11 +3,10 @@
 
 import base64
 import ctypes
+import fnmatch
 import json
 import os
-import re
 import resource
-import secrets
 import signal
 import stat
 import sys
@@ -22,8 +21,6 @@ READ_ONLY_AGENT = "home-assistant-read-only"
 DEFAULT_RUNTIME_ROOT = "/run/opencode-v2"
 DEFAULT_BASE_URL = "http://127.0.0.1:4100"
 SELF_TEST_DEADLINE_SECONDS = 45
-CLEANUP_DEADLINE_SECONDS = 5
-SESSION_ID_PATTERN = re.compile(r"^ses_[A-Za-z0-9]+$")
 CANCELLED_SIGNAL = None
 
 
@@ -201,15 +198,18 @@ def data_field(response, path):
     return response["data"]
 
 
-def assert_permission(client, session_id, action, resource_name, expected, reporter):
-    encoded_session_id = urllib.parse.quote(session_id, safe="")
-    response = client.request(
-        f"/api/session/{encoded_session_id}/permission",
-        method="POST",
-        payload={"action": action, "resources": [resource_name], "agent": READ_ONLY_AGENT},
-    )
-    result = data_field(response, "permission evaluator")
-    effect = result.get("effect") if isinstance(result, dict) else None
+def assert_permission(rules, action, resource_name, expected, reporter):
+    effect = None
+    for rule in rules:
+        if not isinstance(rule, dict):
+            raise SelfTestError("read-only agent contains an invalid permission rule")
+        rule_action = rule.get("action")
+        rule_resource = rule.get("resource")
+        rule_effect = rule.get("effect")
+        if not all(isinstance(value, str) for value in (rule_action, rule_resource, rule_effect)):
+            raise SelfTestError("read-only agent contains an incomplete permission rule")
+        if fnmatch.fnmatchcase(action, rule_action) and fnmatch.fnmatchcase(resource_name, rule_resource):
+            effect = rule_effect
     if effect != expected:
         raise SelfTestError(f"permission {action} returned {effect!r}, expected {expected!r}")
     reporter.ok(f"permission {action} is {expected}")
@@ -274,136 +274,47 @@ def exercise_policy(client, expected_version, mcp_enabled, reporter):
             return agent
         return None
 
-    wait_for("V2 read-only agent", read_only_agent)
+    agent = wait_for("V2 read-only agent", read_only_agent)
     reporter.ok("V2 read-only agent is selectable")
+    rules = agent.get("permissions")
+    if not isinstance(rules, list) or not rules:
+        raise SelfTestError("read-only agent omitted its active permission rules")
 
-    check_cancelled()
-    session_title = f"V2 authenticated policy self-test {secrets.token_hex(8)}"
-    session_id = None
-    cleanup_done = False
+    denied_actions = (
+        "edit",
+        "shell",
+        "subagent",
+        "lsp",
+        "grep",
+        "future_native_action",
+        "homeassistant_call_service",
+        "homeassistant_write_config_safe",
+        "homeassistant_remember_decision",
+        "homeassistant_future_mutation",
+    )
+    for action in denied_actions:
+        assert_permission(rules, action, "*", "deny", reporter)
 
-    def cleanup_temporary_session():
-        nonlocal session_id
-        try:
-            signal.alarm(0)
-            signal.alarm(CLEANUP_DEADLINE_SECONDS)
-            if session_id is None:
-                sessions = data_field(
-                    client.request("/api/session", observe_cancellation=False),
-                    "session recovery",
-                )
-                if not isinstance(sessions, list):
-                    raise SelfTestError("session recovery data is not an array")
-                matches = [
-                    candidate.get("id")
-                    for candidate in sessions
-                    if isinstance(candidate, dict)
-                    and candidate.get("title") == session_title
-                    and isinstance(candidate.get("id"), str)
-                    and SESSION_ID_PATTERN.fullmatch(candidate["id"]) is not None
-                ]
-                if len(matches) > 1:
-                    raise SelfTestError("session recovery found duplicate temporary sessions")
-                if not matches:
-                    return None, True
-                session_id = matches[0]
-            encoded_session_id = urllib.parse.quote(session_id, safe="")
-            client.request(
-                f"/api/session/{encoded_session_id}", method="DELETE", expected=204, decode=False,
-                observe_cancellation=False,
-            )
-            reporter.ok("temporary session was removed")
-            return None, True
-        except BaseException as error:
-            return error, False
-        finally:
-            signal.alarm(0)
+    allowed = (
+        ("read", "/homeassistant/configuration.yaml"),
+        ("glob", "**/*.yaml"),
+        ("external_directory", "/homeassistant/configuration.yaml"),
+        ("homeassistant_get_states", "*"),
+    )
+    for action, resource_name in allowed:
+        assert_permission(rules, action, resource_name, "allow", reporter)
 
-    failure = None
-    cleanup_errors = []
-    try:
-        session = data_field(
-            client.request(
-                "/api/session",
-                method="POST",
-                payload={"title": session_title, "agent": READ_ONLY_AGENT},
-                observe_cancellation=False,
-            ),
-            "session create",
-        )
-        candidate_id = session.get("id") if isinstance(session, dict) else None
-        if (
-            not isinstance(candidate_id, str)
-            or SESSION_ID_PATTERN.fullmatch(candidate_id) is None
-            or session.get("title") != session_title
-        ):
-            raise SelfTestError("V2 self-test received an invalid temporary session")
-        session_id = candidate_id
-        check_cancelled()
-        reporter.ok("temporary read-only session was created")
-
-        denied_actions = (
-            "edit",
-            "shell",
-            "subagent",
-            "lsp",
-            "grep",
-            "future_native_action",
-            "homeassistant_call_service",
-            "homeassistant_write_config_safe",
-            "homeassistant_remember_decision",
-            "homeassistant_future_mutation",
-        )
-        for action in denied_actions:
-            assert_permission(client, session_id, action, "*", "deny", reporter)
-
-        allowed = (
-            ("read", "/homeassistant/configuration.yaml"),
-            ("glob", "**/*.yaml"),
-            ("external_directory", "/homeassistant/configuration.yaml"),
-            ("homeassistant_get_states", "*"),
-        )
-        for action, resource_name in allowed:
-            assert_permission(client, session_id, action, resource_name, "allow", reporter)
-
-        sensitive_paths = (
-            "/homeassistant/secrets.yaml",
-            "/homeassistant/.storage/core.config",
-            "/homeassistant/.cloud/account",
-            "/homeassistant/ssl/certificate",
-            "/homeassistant/private.key",
-            "/homeassistant/private.pem",
-        )
-        for sensitive_path in sensitive_paths:
-            assert_permission(client, session_id, "read", sensitive_path, "deny", reporter)
-
-        encoded_session_id = urllib.parse.quote(session_id, safe="")
-        pending = data_field(client.request(f"/api/session/{encoded_session_id}/permission"), "permission list")
-        if pending != []:
-            raise SelfTestError("policy self-test left a pending approval request")
-        reporter.ok("policy evaluation created no pending approvals")
-    except BaseException as error:
-        failure = error
-    finally:
-        try:
-            cleanup_error, cleanup_done = cleanup_temporary_session()
-            if cleanup_error is not None:
-                cleanup_errors.append(cleanup_error)
-        finally:
-            if not cleanup_done:
-                cleanup_error, cleanup_done = cleanup_temporary_session()
-                if cleanup_error is not None:
-                    cleanup_errors.append(cleanup_error)
-
-    if not cleanup_done:
-        cleanup_summary = "; ".join(str(error) for error in cleanup_errors)
-        cleanup_failure = SelfTestError(f"temporary-session cleanup failed: {cleanup_summary}")
-        failure = cleanup_failure if failure is None else SelfTestError(f"{failure}; {cleanup_failure}")
-    if failure is None and CANCELLED_SIGNAL is not None:
-        failure = SelfTestError(f"cancelled by signal {CANCELLED_SIGNAL}")
-
-    if failure is not None:
-        raise failure
+    sensitive_paths = (
+        "/homeassistant/secrets.yaml",
+        "/homeassistant/.storage/core.config",
+        "/homeassistant/.cloud/account",
+        "/homeassistant/ssl/certificate",
+        "/homeassistant/private.key",
+        "/homeassistant/private.pem",
+    )
+    for sensitive_path in sensitive_paths:
+        assert_permission(rules, "read", sensitive_path, "deny", reporter)
+    reporter.ok("policy validation created no model session or pending approval")
 
 
 def main():

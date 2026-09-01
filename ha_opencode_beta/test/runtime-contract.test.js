@@ -216,14 +216,11 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(v2SelfTest, /urllib\.request\.ProxyHandler\(\{\}\)/);
     assert.match(v2SelfTest, /NoRedirectHandler/);
     assert.match(v2SelfTest, /signal\.alarm\(SELF_TEST_DEADLINE_SECONDS\)/);
-    assert.match(v2SelfTest, /signal\.alarm\(CLEANUP_DEADLINE_SECONDS\)/);
-    assert.match(v2SelfTest, /observe_cancellation=False/);
-    assert.match(v2SelfTest, /SESSION_ID_PATTERN\.fullmatch\(candidate_id\)/);
-    assert.match(v2SelfTest, /urllib\.parse\.quote\(session_id, safe=""\)/);
+    assert.match(v2SelfTest, /fnmatch\.fnmatchcase/);
+    assert.match(v2SelfTest, /agent\.get\("permissions"\)/);
     assert.match(v2SelfTest, /homeassistant_remember_decision/);
     assert.match(v2SelfTest, /mcp-enabled/);
-    assert.match(v2SelfTest, /\/api\/session\/\{encoded_session_id\}\/permission/);
-    assert.match(v2SelfTest, /method="DELETE", expected=204/);
+    assert.doesNotMatch(v2SelfTest, /\/api\/session|method="DELETE"/);
     assert.match(smokeTest, /timeout --signal=TERM --kill-after=10s 60s/);
     assert.doesNotMatch(devcontainerAcceptance, /curl[^\n]*-u/);
     assert.match(
