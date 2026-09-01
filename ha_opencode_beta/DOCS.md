@@ -23,7 +23,8 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 
 ## Current Beta Changes
 
-- **OpenCode V2 terminal cutover**: Beta `3.0.0b7` uses OpenCode V2 `0.0.0-beta-18684` for the terminal by default. For broad HAOS compatibility, the server runs as root and edits `/homeassistant` directly, matching the proven V1 filesystem model. Its attached TUI still runs separately as UID `60001`. Certified V1 `1.18.25` remains available through the **OpenCode runtime** option.
+- **OpenCode V2 terminal cutover**: Beta `3.0.0b8` uses OpenCode V2 `0.0.0-beta-18684` for the terminal by default. For broad HAOS compatibility, the server runs as root and edits `/homeassistant` directly, matching the proven V1 filesystem model. Its attached TUI still runs separately as UID `60001`. Certified V1 `1.18.25` remains available through the **OpenCode runtime** option.
+- **Fresh V2 provider sign-in**: V1 sessions migrate into V2, but V1 provider credentials do not. Authenticate providers once with `/connect` in V2; the retained V1 credential remains untouched.
 - **ESPHome 2026.8 support**: Device Builder migrations can be previewed as validated, hash-guarded candidates; structured DNS/mDNS/ICMP troubleshooting and bounded crash decoding are available; naturally completed log and job streams now finish immediately.
 - **Startup hooks**: Your own `.sh` scripts, kept in your configuration directory, run once every time the add-on starts — the supported way to add a bridge or a small service without editing files inside the container, which never survives a restart. Off by default. See [Startup Hooks (Beta)](#startup-hooks-beta).
 - **Home context**: Sessions now start knowing your installation. A generated **Install briefing** describes your setup (version, areas, entity counts, configuration layout, integrations), **decision notes** carry lasting decisions between sessions once you approve them, and `AGENTS.local.md` holds your own instructions where add-on updates cannot overwrite them. Both options default on and switch off independently. See [Home Context (Beta)](#home-context-beta).
@@ -261,7 +262,7 @@ Some providers offer a **browser** sign-in method (for example **ChatGPT Pro/Plu
 
 In **Settings → Providers**, copy the whole `http://localhost:...` URL from your browser's address bar, paste it into the **Paste authorization code** field, and select **Complete** — the add-on delivers it to OpenCode locally so the sign-in finishes. Pasting only the `code=` value from that URL works too. In `terminal` mode, use the provider's **headless** method instead, which shows a short code to enter on the provider's device-authorization page and needs no redirect at all.
 
-The first V2 activation copies provider credentials from V1 into the V2 state generation once. The V1 and V2 credential stores are separate after that point. If an OpenAI or other migrated provider returns HTTP `401`, run `/connect` in the V2 terminal and authenticate it again; this replaces the stale V2 credential without changing the retained V1 credential.
+The first V2 activation migrates sessions but does not copy V1 provider credentials because the V1 and V2 credential formats are not reliably compatible. Run `/connect` in the V2 terminal and authenticate each provider once; this does not change the retained V1 credential. If an earlier beta already copied credentials into your active V2 generation, they are preserved rather than deleted and the terminal shows a reminder to reconnect providers that return HTTP `401`.
 
 ## Zigbee2MQTT URL
 

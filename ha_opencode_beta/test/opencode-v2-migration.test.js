@@ -97,14 +97,14 @@ describe("OpenCode V2 copy-on-write migration", () => {
     });
   });
 
-  it("fails closed on dropped duplicate content, wrong ownership, and changed credentials", () => {
+  it("fails closed on dropped content, wrong ownership, and unexpected credentials", () => {
     const result = spawnSync(python, [VALIDATION_FIXTURE], {
       encoding: "utf8",
       timeout: 30_000,
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), "ok");
-    assert.doesNotMatch(result.stdout + result.stderr, /credential-sentinel|duplicate text/);
+    assert.doesNotMatch(result.stdout + result.stderr, /secret|duplicate text/);
   });
 
   it("activates a real pinned conversion with exact message, session, and watermark projections", async () => {
@@ -216,7 +216,8 @@ describe("OpenCode V2 copy-on-write migration", () => {
           "message=c.execute(\"SELECT type,data FROM session_message WHERE id='msg_000000000040aaaaaaaaaaaaaa'\").fetchone()",
           "session=c.execute(\"SELECT project_id,metadata,cost,tokens_input,tokens_output,tokens_reasoning,tokens_cache_read,tokens_cache_write,revert,permission,agent,model,time_created,time_updated,time_compacting,time_archived,fork_session_id,fork_boundary,time_idle,time_viewed,idle_outcome,time_suspended,resume_attempts FROM session_v2 WHERE id='ses_review'\").fetchone()",
           "sequence=c.execute(\"SELECT seq,owner_id FROM event_sequence WHERE aggregate_id='ses_review'\").fetchone()",
-          "print(json.dumps([[message[0],json.loads(message[1])],[session[0],json.loads(session[1]),*session[2:9],json.loads(session[9]),session[10],json.loads(session[11]),*session[12:]],[*sequence]]))",
+          "credentials=c.execute('SELECT count(*) FROM credential').fetchone()[0]",
+          "print(json.dumps([[message[0],json.loads(message[1])],[session[0],json.loads(session[1]),*session[2:9],json.loads(session[9]),session[10],json.loads(session[11]),*session[12:]],[*sequence],credentials]))",
           "c.close()",
         ].join("; "),
         database,
@@ -252,10 +253,11 @@ describe("OpenCode V2 copy-on-write migration", () => {
         0,
       ],
       [0, null],
+      0,
     ]);
   });
 
-  it("rejects hardlinked credential input before reading it", async () => {
+  it("ignores hardlinked credential input without reading it", async () => {
     const source = join(sandbox, "hardlink-source");
     const auth = join(source, "auth.json");
     await mkdir(source, { recursive: true });
@@ -264,37 +266,12 @@ describe("OpenCode V2 copy-on-write migration", () => {
 
     const result = runMigrator(python, ["inventory", "--source-data", source]);
 
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /unsafe_hardlink/);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).provider_auth, false);
     assert.doesNotMatch(result.stderr, new RegExp(AUTH_SECRET));
   });
 
-  it("rejects empty and colliding normalized provider IDs before conversion", async () => {
-    const cases = [
-      ["empty", { "///": { type: "api", key: AUTH_SECRET } }, /invalid_provider_auth_id/],
-      [
-        "collision",
-        {
-          provider: { type: "api", key: AUTH_SECRET },
-          "provider/": { type: "api", key: `${AUTH_SECRET}-second` },
-        },
-        /provider_auth_id_collision/,
-      ],
-    ];
-    for (const [name, credentials, error] of cases) {
-      const source = join(sandbox, `${name}-provider-source`);
-      await mkdir(source, { recursive: true });
-      await writeFile(join(source, "auth.json"), JSON.stringify(credentials));
-
-      const result = runMigrator(python, ["inventory", "--source-data", source]);
-
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, error);
-      assert.doesNotMatch(result.stdout + result.stderr, new RegExp(AUTH_SECRET));
-    }
-  });
-
-  it("defers auth-only input without disclosing or changing it", async () => {
+  it("ignores auth-only V1 input without disclosing or changing it", async () => {
     const source = join(sandbox, "auth-only-source");
     const root = join(sandbox, "auth-only-v2");
     const auth = join(source, "auth.json");
@@ -314,13 +291,18 @@ describe("OpenCode V2 copy-on-write migration", () => {
       TARGET_VERSION,
     ]);
 
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /provider_auth_requires_v1_database/);
+    assert.equal(result.status, 0, result.stderr);
     assert.doesNotMatch(result.stdout + result.stderr, new RegExp(AUTH_SECRET));
     const journalText = await readFile(join(root, "migration.json"), "utf8");
-    assert.equal(JSON.parse(journalText).error, "provider_auth_requires_v1_database");
+    const journal = JSON.parse(journalText);
+    assert.equal(journal.status, "activated");
+    assert.equal(journal.source.provider_auth, false);
+    assert.equal(journal.source.provider_auth_count, 0);
+    assert.equal(journal.target.provider_auth_count, 0);
     assert.doesNotMatch(journalText, new RegExp(AUTH_SECRET));
     assert.equal(hash(await readFile(auth)), sourceBefore);
+    const database = join(root, "generations", journal.generation, "data", "opencode", "opencode.db");
+    assert.equal(sqliteTableCounts(python, database).credential, 0);
   });
 
   it("rejects orphan SQLite sidecars instead of activating empty state", async () => {
@@ -407,6 +389,18 @@ describe("OpenCode V2 copy-on-write migration", () => {
     assert.equal(counts.session_v2, 0);
     assert.deepEqual(await readdir(join(root, "generations")), [current]);
 
+    const addCredential = spawnSync(
+      python,
+      [
+        "-c",
+        "import json,sqlite3,sys; c=sqlite3.connect(sys.argv[1]); info=c.execute('pragma table_info(credential)').fetchall(); base={'id':'v2-auth','integration_id':'anthropic','label':'API key','value':json.dumps({'type':'key','key':sys.argv[2]}),'connector_id':None,'method_id':None}; cols=[r[1] for r in info]; vals=[base[n] if n in base else (0 if r[3] and 'INT' in r[2].upper() else '' if r[3] else None) for r,n in zip(info,cols)]; c.execute(f\"insert into credential ({','.join(cols)}) values ({','.join('?'*len(cols))})\",vals); c.commit(); c.close()",
+        database,
+        AUTH_SECRET,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(addCredential.status, 0, addCredential.stderr);
+
     await rm(join(root, "migration.json"));
     const second = runMigrator(python, args);
     assert.equal(second.status, 0, second.stderr);
@@ -417,6 +411,7 @@ describe("OpenCode V2 copy-on-write migration", () => {
     const repairedJournal = JSON.parse(await readFile(join(root, "migration.json"), "utf8"));
     assert.equal(repairedJournal.status, "activated");
     assert.equal(repairedJournal.generation, current);
+    assert.equal(sqliteTableCounts(python, database).credential, 1);
     assert.deepEqual(await readdir(join(root, "generations")), [current]);
     assert.deepEqual(await readdir(join(root, "work")), [".migration.lock"]);
 

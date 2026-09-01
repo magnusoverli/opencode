@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 3.0.0b8
+
+- Stopped copying V1 provider credentials into new V2 state because the formats are not reliably compatible; migrated sessions remain available, V1 credentials stay untouched, and V2 now asks for a fresh `/connect` sign-in.
+
 ## 3.0.0b7
 
 - Clarified the configuration page's V1/V2 choice and made OpenChamber an effective V1-only interface preference; V2 always serves the terminal without discarding the saved OpenChamber choice.

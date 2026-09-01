@@ -134,6 +134,13 @@ describe("OpenCode V2 state isolation", () => {
     );
   });
 
+  it("migrates sessions without importing V1 provider credentials", () => {
+    assert.doesNotMatch(migrator, /auth\.json/);
+    assert.match(migrator, /validate_no_credentials/);
+    assert.match(migrator, /credential_count != 0/);
+    assert.match(init, /provider credentials copied by an earlier beta/);
+  });
+
   it("runs the V2 converter as a dedicated identity with an allowlisted environment", () => {
     assert.match(dockerfile, /useradd --uid 60000 --gid opencode-v2/);
     assert.match(migrator, /def minimal_environment/);

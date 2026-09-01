@@ -267,8 +267,8 @@ RUN chmod +x /usr/local/bin/* \
     && chmod +x /etc/profile.d/zigporter-z2m.sh \
     && mkdir -p /data/.local/share/opencode /data/.config/opencode
 
-# Exercise the exact in-image V1 -> V2 database and credential conversion. The
-# source hash assertion proves the coordinator only touches its private copy.
+# Exercise the exact in-image V1 -> V2 session conversion and prove the V1
+# credential file is neither changed nor imported into the V2 generation.
 RUN set -eu; \
     MIGRATION_TEST_ROOT=$(mktemp -d); \
     chmod 711 "${MIGRATION_TEST_ROOT}"; \
@@ -326,7 +326,7 @@ RUN set -eu; \
     test "$(jq -r '.source.content_part_count' "${MIGRATION_TEST_ROOT}/v2/migration.json")" = 1; \
     test "$(jq -r '.target.message_count' "${MIGRATION_TEST_ROOT}/v2/migration.json")" = 1; \
     test "$(jq -r '.target.validated_content_part_count' "${MIGRATION_TEST_ROOT}/v2/migration.json")" = 1; \
-    test "$(jq -r '.target.provider_auth_count' "${MIGRATION_TEST_ROOT}/v2/migration.json")" = 1; \
+    test "$(jq -r '.target.provider_auth_count' "${MIGRATION_TEST_ROOT}/v2/migration.json")" = 0; \
     HOME="${V1_ROOT}/home" \
     XDG_CONFIG_HOME="${V1_ROOT}/config" \
     XDG_DATA_HOME="${V1_ROOT}/data" \

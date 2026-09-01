@@ -18,9 +18,9 @@ Implementation status and remaining release work are tracked in
 
 The beta add-on upgrades in place. Home Assistant preserves its private `/data`,
 which contains the previous beta V1 database and provider authentication. The
-migrator reads only that beta-owned state. It never reads stable's private
-volume and never uses `/homeassistant`, `/share`, or Home Assistant backups as a
-transport.
+migrator reads only the beta-owned database and deliberately ignores V1 provider
+credentials. It never reads stable's private volume and never uses
+`/homeassistant`, `/share`, or Home Assistant backups as a transport.
 
 ## Non-Negotiable Rules
 
@@ -33,9 +33,9 @@ transport.
 4. Only a fully validated generation is activated.
 5. Failure is non-fatal to the retained V1 runtime and never replaces the last
    known-good V2 generation.
-6. `SUPERVISOR_TOKEN`, Home Assistant access tokens, PPQ keys, discovered
-   sessions, arbitrary environment variables, hooks, SSH state, and local
-   plugins are not migrated.
+6. Provider credentials, `SUPERVISOR_TOKEN`, Home Assistant access tokens, PPQ
+   keys, discovered sessions, arbitrary environment variables, hooks, SSH state,
+   and local plugins are not migrated.
 7. There is no V2-to-V1 conversion. Rollback reuses the untouched V1 state.
 8. A V2 binary with a different target version cannot open an activated
    generation until a reviewed V2-to-V2 copy-on-write upgrade exists.
@@ -89,13 +89,13 @@ database remains in the selected `/data/v2/generations/<id>` generation.
 The automatic migration recognizes only:
 
 - `/data/.local/share/opencode/opencode.db`;
-- its SQLite `-wal` and `-shm` sidecars when a database is present;
-- `/data/.local/share/opencode/auth.json` when a database is present.
+- its SQLite `-wal` and `-shm` sidecars when a database is present.
 
 The coordinator rejects symlinks, hardlinks, non-regular files, unexpected
-sidecars, auth-only state, legacy JSON without its database, oversized input,
-and V1 database files open by another process. It validates retained-root access
-against UID/GID `60000` before conversion.
+sidecars, legacy JSON without its database, oversized input, and V1 database
+files open by another process. It validates retained-root access against UID/GID
+`60000` before conversion. `auth.json` is neither opened nor hashed; auth-only
+V1 state is treated like a fresh V2 state and requires `/connect` after startup.
 
 Generated config, caches, logs, binaries, MCP auth, SSH files, Git config, shell
 history, custom plugins, project config, user hooks, and Home Assistant context
@@ -103,8 +103,7 @@ are never copied. Managed assets are regenerated from the image.
 
 ## Migration Sequence
 
-`init-opencode` performs the following before credential-bearing discovery or
-any V1 longrun is released:
+`init-opencode` performs the following before any V1 longrun is released:
 
 1. Prepare `/data/v2` roots with restrictive modes and reject unsafe path types.
 2. Select the deployment-CPU V2 binary and probe its exact version once with a
@@ -114,23 +113,23 @@ any V1 longrun is released:
 4. Hash every selected source file.
 5. Copy the database and sidecars into a private candidate cache, then use
    SQLite's backup API to create the conversion database.
-6. Copy and validate provider auth only when the source database is present.
-7. Start the exact pinned `opencode2 serve` against the candidate with:
+6. Start the exact pinned `opencode2 serve` against the candidate with:
    - a random loopback-only authenticated endpoint;
    - an allowlisted environment;
    - project config disabled;
    - a deny-all conversion policy;
    - supplementary groups removed and UID/GID set to `60000`.
-8. Wait for V2's migration status endpoint and stop the entire conversion
+7. Wait for V2's migration status endpoint and stop the entire conversion
    process group.
-9. Validate SQLite integrity, foreign keys, migration state, the exact pinned
+8. Validate SQLite integrity, foreign keys, migration state, the exact pinned
    session/message projection (including aggregates and event watermarks), and
-   provider identity plus credential semantics.
-10. Re-hash the retained V1 source and reject any change or newly open writer.
-11. Write the protected generation marker, fsync the candidate tree, move it
-    into `generations/<id>`, and atomically replace `current`.
-12. Regenerate the root-owned native V2 policy and release the retained V1
-    services regardless of V2 success.
+   that the candidate contains zero provider credentials.
+9. Re-hash the retained V1 database source and reject any change or newly open
+   writer.
+10. Write the protected generation marker, fsync the candidate tree, move it
+   into `generations/<id>`, and atomically replace `current`.
+11. Regenerate the root-owned native V2 policy and release the retained V1
+   services regardless of V2 success.
 
 The migrator removes abandoned candidates and unselected generations under its
 own private roots. Unknown entries fail closed rather than being deleted.
@@ -167,7 +166,8 @@ tool output. Diagnostic capture is bounded and keyword-checked before the
 candidate can activate.
 
 The pinned-binary regression checks exact session, message, event-watermark, and
-credential projections while proving the source hashes remain unchanged. A
+zero-credential projections while proving the database source hashes remain
+unchanged. A
 bounded image-build fixture additionally runs conversion as `opencode-v2` and
 checks Linux source inaccessibility and privilege boundaries. Native amd64 and
 arm64 CI both run that full fault-injection target. Local QEMU builds are useful
@@ -263,7 +263,7 @@ temporary V1 fallback:
 Removing `/data/v2` is not an automatic rollback step. It may contain V2-only
 sessions once user-facing activation begins and must be treated as user data.
 
-The planned b8 beta removes V1 executables and service definitions from the
+The planned b9 beta removes V1 executables and service definitions from the
 image, so rollback after that point is an add-on downgrade to a prior image, not
 an in-container runtime switch. The V1 roots remain byte-for-byte untouched and
 must not be automatically deleted; the downgraded image continues to read those
@@ -280,8 +280,10 @@ original roots rather than attempting a V2-to-V1 database conversion.
 - b5 removes the ID-mapped mount and uses direct root access for HAOS compatibility.
 - b6 makes the active V2 policy self-test provider-free.
 - b7 makes the V1/V2 and terminal/OpenChamber compatibility matrix explicit.
-- b8 removes the V1 package, launchers, generated config, and s6 paths after the
-  b7 real-system soak passes.
+- b8 stops importing V1 provider credentials into new V2 generations while
+  preserving sessions, retained V1 state, and credentials already created in V2.
+- b9 removes the V1 package, launchers, generated config, and s6 paths after the
+  b8 real-system soak passes.
 - Stable 3.0 ships V2 only; V1 remains available as the separate stable 2.5.x
   add-on release line, not as hidden code inside the 3.0 image.
 - V1 persistent data survives code removal until a later explicit retention

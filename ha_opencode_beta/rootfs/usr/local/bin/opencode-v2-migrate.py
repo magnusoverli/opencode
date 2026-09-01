@@ -28,7 +28,6 @@ import uuid
 
 FORMAT = "ha-opencode-v2-migration/v1"
 GENERATION_RE = re.compile(r"^[a-f0-9]{32}$")
-MAX_AUTH_BYTES = 16 * 1024 * 1024
 MAX_DATABASE_BYTES = 16 * 1024 * 1024 * 1024
 SOURCE_SESSION_COLUMNS = (
     "id",
@@ -185,7 +184,6 @@ def selected_source_files(source: Path) -> list[tuple[str, Path]]:
         ("database", "opencode.db"),
         ("database_wal", "opencode.db-wal"),
         ("database_shm", "opencode.db-shm"),
-        ("provider_auth", "auth.json"),
     ):
         path = source / name
         if path.exists() or path.is_symlink():
@@ -1124,127 +1122,15 @@ def read_string_list_kv(
     return [item for item in value if isinstance(item, str)]
 
 
-def credential_method(integration_id: str) -> str:
-    if integration_id == "openai":
-        return "chatgpt-browser"
-    if integration_id in {"github-copilot", "opencode", "xai"}:
-        return "device"
-    return "oauth"
-
-
-def expected_credential(integration_id: str, source: dict) -> dict:
-    kind = source.get("type")
-    if kind == "api":
-        result = {"type": "key", "key": source["key"]}
-        if "metadata" in source:
-            result["metadata"] = source["metadata"]
-        return result
-    if kind == "wellknown":
-        return {"type": "key", "key": source["token"]}
-    result = {
-        "type": "oauth",
-        "methodID": credential_method(integration_id),
-        "refresh": source["refresh"],
-        "access": source["access"],
-        "expires": source["expires"],
-    }
-    metadata = {}
-    if source.get("accountId"):
-        metadata["accountID"] = source["accountId"]
-    if source.get("enterpriseUrl"):
-        metadata["enterpriseUrl"] = source["enterpriseUrl"]
-    if metadata:
-        result["metadata"] = metadata
-    return result
-
-
-def validate_provider_credential(credential: object) -> dict:
-    if not isinstance(credential, dict):
-        raise MigrationError("invalid_provider_auth")
-    kind = credential.get("type")
-    if kind == "api":
-        if not isinstance(credential.get("key"), str):
-            raise MigrationError("invalid_provider_auth")
-        if "metadata" in credential:
-            metadata = credential["metadata"]
-            if not isinstance(metadata, dict) or any(
-                not isinstance(key, str) or not isinstance(value, str)
-                for key, value in metadata.items()
-            ):
-                raise MigrationError("invalid_provider_auth")
-    elif kind == "oauth":
-        expires = credential.get("expires")
-        if (
-            not isinstance(credential.get("refresh"), str)
-            or not isinstance(credential.get("access"), str)
-            or isinstance(expires, bool)
-            or not isinstance(expires, int)
-            or expires < 0
-        ):
-            raise MigrationError("invalid_provider_auth")
-        validate_optional(credential, "accountId", str, "invalid_provider_auth")
-        validate_optional(credential, "enterpriseUrl", str, "invalid_provider_auth")
-    elif kind == "wellknown":
-        if not isinstance(credential.get("key"), str) or not isinstance(credential.get("token"), str):
-            raise MigrationError("invalid_provider_auth")
-    else:
-        raise MigrationError("invalid_provider_auth")
-    return credential
-
-
-def normalize_provider_credentials(source_credentials: dict) -> dict[str, dict]:
-    normalized = {}
-    for provider, credential in source_credentials.items():
-        credential = validate_provider_credential(credential)
-        integration_id = provider.rstrip("/")
-        if not integration_id:
-            raise MigrationError("invalid_provider_auth_id")
-        if integration_id in normalized:
-            raise MigrationError("provider_auth_id_collision")
-        normalized[integration_id] = credential
-    return normalized
-
-
-def validate_credentials(
-    database: Path,
-    source_credentials: dict,
-    source_database: Path | None = None,
-) -> int:
-    expected: dict[str, dict] = {}
-    origins = []
-    for integration_id, credential in normalize_provider_credentials(source_credentials).items():
-        if credential.get("type") == "wellknown" and integration_id not in origins:
-            origins.append(integration_id)
-        expected[integration_id] = expected_credential(integration_id, credential)
-
+def validate_no_credentials(database: Path, source_database: Path | None = None) -> int:
     uri = database.resolve().as_uri() + "?mode=ro"
     connection = sqlite3.connect(uri, uri=True, timeout=30)
     try:
-        rows = connection.execute(
-            "SELECT id, integration_id, label, value, connector_id, method_id FROM credential"
-        ).fetchall()
+        credential_count = connection.execute("SELECT count(*) FROM credential").fetchone()[0]
     finally:
         connection.close()
-    if len(rows) != len(expected):
+    if credential_count != 0:
         raise MigrationError("provider_auth_count_mismatch")
-    found = set()
-    for row in rows:
-        integration_id = row[1]
-        if not isinstance(integration_id, str) or integration_id in found or integration_id not in expected:
-            raise MigrationError("provider_auth_mismatch")
-        target_value = decode_object(row[3], "invalid_target_credential")
-        expected_value = expected[integration_id]
-        expected_label = "OAuth" if expected_value["type"] == "oauth" else "API key"
-        if (
-            row[2] != expected_label
-            or row[4] is not None
-            or row[5] is not None
-            or not json_equal(expected_value, target_value)
-        ):
-            raise MigrationError("provider_auth_mismatch")
-        found.add(integration_id)
-    if found != set(expected):
-        raise MigrationError("provider_auth_mismatch")
 
     baseline = read_string_list_kv(
         source_database,
@@ -1252,14 +1138,10 @@ def validate_credentials(
         "invalid_source_wellknown_sources",
         strict=False,
     )
-    expected_origins = []
-    for value in baseline + origins:
-        if value not in expected_origins:
-            expected_origins.append(value)
     target_origins = read_string_list_kv(database, "wellknown:sources", "invalid_target_wellknown_sources")
-    if target_origins != expected_origins:
+    if target_origins != baseline:
         raise MigrationError("provider_auth_mismatch")
-    return len(rows)
+    return credential_count
 
 
 def inventory(source: Path) -> dict:
@@ -1283,7 +1165,6 @@ def inventory(source: Path) -> dict:
     if storage.exists() or storage.is_symlink():
         ensure_plain_directory(storage)
     database = files.get("database")
-    provider_auth = files.get("provider_auth")
     database_bytes = sum(
         path.stat().st_size
         for name, path in files.items()
@@ -1295,8 +1176,9 @@ def inventory(source: Path) -> dict:
         "database": database is not None,
         "database_bytes": database_bytes,
         "database_sidecars": "database_wal" in files or "database_shm" in files,
-        "provider_auth": provider_auth is not None,
-        "provider_auth_count": len(read_provider_auth(provider_auth)) if provider_auth else 0,
+        # Provider credentials are deliberately outside the migration inventory.
+        "provider_auth": False,
+        "provider_auth_count": 0,
         # Counting opens SQLite and may create a shared-memory file for a WAL.
         # The count is filled from the private cold copy instead.
         "session_count": None if database else 0,
@@ -1409,35 +1291,6 @@ def migration_lock(path: Path):
             except OSError:
                 pass
         handle.close()
-
-
-def read_provider_auth(source: Path) -> dict:
-    ensure_plain_file(source)
-    if source.stat().st_size > MAX_AUTH_BYTES:
-        raise MigrationError("provider_auth_too_large")
-    try:
-        with source.open("r", encoding="utf-8") as handle:
-            value = json.load(handle)
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise MigrationError("invalid_provider_auth") from error
-    if not isinstance(value, dict):
-        raise MigrationError("invalid_provider_auth")
-    normalize_provider_credentials(value)
-    return value
-
-
-def copy_provider_auth(source: Path, target: Path) -> dict:
-    value = read_provider_auth(source)
-    ensure_plain_directory(target.parent, create=True)
-    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-    with temporary.open("x", encoding="utf-8") as handle:
-        json.dump(value, handle, separators=(",", ":"))
-        handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, target)
-    return value
 
 
 def available_port() -> int:
@@ -1823,7 +1676,6 @@ def prepare(args: argparse.Namespace) -> dict:
         generation = uuid.uuid4().hex
         candidate = work / generation
         source_before = {}
-        source_credentials = {}
         validation_database = candidate / ".v1-validation.db"
         try:
             source_info = inventory(args.source_data)
@@ -1835,9 +1687,6 @@ def prepare(args: argparse.Namespace) -> dict:
                 raise MigrationError("orphan_database_sidecar")
             if source_info["legacy_json_store"] and not source_info["database"]:
                 raise MigrationError("legacy_json_requires_v1")
-            if source_info["provider_auth"] and not source_info["database"]:
-                raise MigrationError("provider_auth_requires_v1_database")
-
             required = source_info["database_bytes"] * 3 + 256 * 1024 * 1024
             if shutil.disk_usage(root).free < required:
                 raise MigrationError("insufficient_space")
@@ -1879,11 +1728,6 @@ def prepare(args: argparse.Namespace) -> dict:
                 source_info["content_part_count"] = source_content_part_count(
                     validation_database
                 )
-            if "provider_auth" in source_files:
-                source_credentials = copy_provider_auth(
-                    source_files["provider_auth"], target_data / "auth.json"
-                )
-
             atomic_json(
                 journal,
                 {
@@ -1919,9 +1763,8 @@ def prepare(args: argparse.Namespace) -> dict:
                     raise MigrationError("fresh_state_not_empty")
             if validated_content_parts != source_info["content_part_count"]:
                 raise MigrationError("part_count_mismatch")
-            target_credentials = validate_credentials(
+            target_credentials = validate_no_credentials(
                 target_database,
-                source_credentials,
                 validation_database if source_info["database"] else None,
             )
 

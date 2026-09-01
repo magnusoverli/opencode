@@ -164,9 +164,12 @@ closed.
   without creating temporary model sessions or misleading authorization errors.
 - `3.0.0b7` makes the configuration matrix explicit: V2 always serves the
   terminal, while V1 honors the saved terminal or OpenChamber preference.
-- `3.0.0b8` targets removal of the V1 `opencode-ai` package, V1 session/server
+- `3.0.0b8` stops importing V1 provider credentials into new V2 generations;
+  sessions still migrate, existing V2 generations remain untouched, and users
+  authenticate providers directly in V2 with `/connect`.
+- `3.0.0b9` targets removal of the V1 `opencode-ai` package, V1 session/server
   launchers, V1 s6 service paths, and V1 config generation from the beta image.
-  This happens only after b7 proves provider authentication, migrated sessions,
+  This happens only after b8 proves fresh provider authentication, migrated sessions,
   `/homeassistant` work, read-only policy, shutdown, and rollback on real Home
   Assistant.
 - Stable `3.0.0` is V2-only. It must not contain a dormant V1 executable or a
@@ -525,8 +528,8 @@ visual and irrelevant. The initial target is:
   model can answer, invoke one allowed Home Assistant MCP tool, consume its
   result, and complete the response.
 - Copy-on-write V2 migration preserves the existing beta V1 data byte-for-byte,
-  validates sessions and provider credentials before activation, and leaves the
-  V1 roots usable by the previous beta image.
+  validates sessions and the absence of imported provider credentials before
+  activation, and leaves the V1 roots usable by the previous beta image.
 - OpenChamber is not started against V2.
 
 ## Investigation and Delivery Phases
@@ -561,7 +564,8 @@ visual and irrelevant. The initial target is:
 - Track working LSP and formatter execution upstream.
 - Revalidate PPQ/custom-provider configuration in native V2 form.
 - Test LAN authentication and replace V1 attach/CORS assumptions.
-- Test V1 session/auth migration on copied data and document rollback.
+- Test V1 session migration plus fresh V2 provider authentication and document
+  rollback.
 - Add native MCP and screenshot/access-token paths to the privileged sidecar.
 - Integrate an OpenChamber release that explicitly supports V2, then rerun all
   Ingress, OAuth, streaming, service-worker, update-policy, and asset tests.
@@ -575,8 +579,8 @@ Stable 3.0.0 requires all of the following:
 3. HA YAML LSP and formatting work without regression.
 4. Terminal, LAN, read-only, MCP profiles, native MCP, PPQ, and OpenChamber all
    pass automated and real Home Assistant smoke tests.
-5. V1 session/config/auth migration and rollback are demonstrated on copied
-   persistent data.
+5. V1 session/config migration, fresh V2 provider authentication, and rollback
+   are demonstrated on copied persistent data.
 6. Plan/read-only modes enforce non-mutation under native V2 permissions.
 7. Both architectures complete a soak in the V2 beta channel.
 

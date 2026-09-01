@@ -531,26 +531,9 @@ with tempfile.TemporaryDirectory(prefix="opencode-v2-validation-") as temporary:
             "INSERT INTO kv VALUES (?,?,?,?)",
             ("wellknown:sources", json.dumps(["existing", 1]), 1, 1),
         )
-        credentials = {
-            "anthropic/": {"type": "api", "key": "credential-sentinel", "metadata": {"region": "us"}},
-            "openai": {"type": "oauth", "refresh": "refresh", "access": "access", "expires": 10, "accountId": "account", "enterpriseUrl": "https://enterprise"},
-            "opencode": {"type": "oauth", "refresh": "device-refresh", "access": "device-access", "expires": 20},
-            "builtin/": {"type": "wellknown", "key": "origin-key", "token": "wellknown-token"},
-        }
-        credential_rows = [
-            ("cred_api", "anthropic", "API key", {"type": "key", "key": "credential-sentinel", "metadata": {"region": "us"}}),
-            ("cred_openai", "openai", "OAuth", {"type": "oauth", "methodID": "chatgpt-browser", "refresh": "refresh", "access": "access", "expires": 10, "metadata": {"accountID": "account", "enterpriseUrl": "https://enterprise"}}),
-            ("cred_device", "opencode", "OAuth", {"type": "oauth", "methodID": "device", "refresh": "device-refresh", "access": "device-access", "expires": 20}),
-            ("cred_builtin", "builtin", "API key", {"type": "key", "key": "wellknown-token"}),
-        ]
-        for credential_id, integration_id, label, value in credential_rows:
-            target.execute(
-                "INSERT INTO credential VALUES (?,?,?,?,?,?)",
-                (credential_id, integration_id, label, json.dumps(value), None, None),
-            )
         target.execute(
             "INSERT INTO kv VALUES (?,?,?,?)",
-            ("wellknown:sources", json.dumps(["existing", "builtin"]), 1, 1),
+            ("wellknown:sources", json.dumps(["existing"]), 1, 1),
         )
         source.commit()
         target.commit()
@@ -560,7 +543,7 @@ with tempfile.TemporaryDirectory(prefix="opencode-v2-validation-") as temporary:
         assert MIGRATOR.synthetic_id(user_id, {user_id}) == synthetic_id
         assert MIGRATOR.source_content_part_count(source_path) == expected_parts
         assert MIGRATOR.validate_session_projection(source_path, target_path) == (4, 7, expected_parts)
-        assert MIGRATOR.validate_credentials(target_path, credentials, source_path) == 4
+        assert MIGRATOR.validate_no_credentials(target_path, source_path) == 0
         assert source_path.read_bytes() == source_before
 
         # Every copied or transformed session field is checked against the same
@@ -697,79 +680,21 @@ with tempfile.TemporaryDirectory(prefix="opencode-v2-validation-") as temporary:
         source.execute("UPDATE part SET data=? WHERE id='tool_07'", (original_part,))
         source.commit()
 
-        # Exact credential root values, method, integration ownership, and KV
-        # origin mapping all fail closed when independently corrupted.
-        original_api = target.execute("SELECT value FROM credential WHERE id='cred_api'").fetchone()[0]
+        # New migrations must contain no imported provider credentials.
         target.execute(
-            "UPDATE credential SET value=? WHERE id='cred_api'",
-            (json.dumps({"type": "key", "key": "wrong", "metadata": {"key": "credential-sentinel", "metadata": {"region": "us"}}}),),
+            "INSERT INTO credential VALUES (?,?,?,?,?,?)",
+            ("unexpected", "anthropic", "API key", json.dumps({"type": "key", "key": "secret"}), None, None),
         )
         target.commit()
-        expect_error("provider_auth_mismatch", lambda: MIGRATOR.validate_credentials(target_path, credentials, source_path))
-        target.execute("UPDATE credential SET value=? WHERE id='cred_api'", (original_api,))
+        expect_error("provider_auth_count_mismatch", lambda: MIGRATOR.validate_no_credentials(target_path, source_path))
+        target.execute("DELETE FROM credential WHERE id='unexpected'")
 
-        target.execute("UPDATE credential SET integration_id='wrong', label='anthropic' WHERE id='cred_api'")
+        target.execute("UPDATE kv SET value=? WHERE key='wellknown:sources'", (json.dumps(["wrong"]),))
         target.commit()
-        expect_error("provider_auth_mismatch", lambda: MIGRATOR.validate_credentials(target_path, credentials, source_path))
-        target.execute("UPDATE credential SET integration_id='anthropic', label='API key' WHERE id='cred_api'")
-
-        original_oauth = target.execute("SELECT value FROM credential WHERE id='cred_openai'").fetchone()[0]
-        value = json.loads(original_oauth)
-        value["methodID"] = "oauth"
-        target.execute("UPDATE credential SET value=? WHERE id='cred_openai'", (json.dumps(value),))
-        target.commit()
-        expect_error("provider_auth_mismatch", lambda: MIGRATOR.validate_credentials(target_path, credentials, source_path))
-        target.execute("UPDATE credential SET value=? WHERE id='cred_openai'", (original_oauth,))
-
-        value = json.loads(original_oauth)
-        value["metadata"] = {"accountId": "account", "enterpriseUrl": "https://enterprise"}
-        target.execute("UPDATE credential SET value=? WHERE id='cred_openai'", (json.dumps(value),))
-        target.commit()
-        expect_error("provider_auth_mismatch", lambda: MIGRATOR.validate_credentials(target_path, credentials, source_path))
-        target.execute("UPDATE credential SET value=? WHERE id='cred_openai'", (original_oauth,))
-
-        original_builtin = target.execute("SELECT value FROM credential WHERE id='cred_builtin'").fetchone()[0]
-        target.execute(
-            "UPDATE credential SET value=? WHERE id='cred_builtin'",
-            (json.dumps({"type": "key", "key": "origin-key"}),),
-        )
-        target.commit()
-        expect_error("provider_auth_mismatch", lambda: MIGRATOR.validate_credentials(target_path, credentials, source_path))
-        target.execute("UPDATE credential SET value=? WHERE id='cred_builtin'", (original_builtin,))
-
+        expect_error("provider_auth_mismatch", lambda: MIGRATOR.validate_no_credentials(target_path, source_path))
         target.execute("UPDATE kv SET value=? WHERE key='wellknown:sources'", (json.dumps(["existing"]),))
         target.commit()
-        expect_error("provider_auth_mismatch", lambda: MIGRATOR.validate_credentials(target_path, credentials, source_path))
-        target.execute("UPDATE kv SET value=? WHERE key='wellknown:sources'", (json.dumps(["existing", "builtin"]),))
-        target.commit()
-        assert MIGRATOR.validate_credentials(target_path, credentials, source_path) == 4
-
-        auth_source = Path(temporary) / "auth.json"
-        auth_target = Path(temporary) / "auth-copy.json"
-        auth_source.write_text(json.dumps(credentials), encoding="utf-8")
-        assert MIGRATOR.copy_provider_auth(auth_source, auth_target) == credentials
-        invalid_auth = Path(temporary) / "invalid-auth.json"
-        invalid_auth.write_text(json.dumps({"provider": {"type": "api", "key": "secret", "metadata": {"bad": 1}}}), encoding="utf-8")
-        expect_error("invalid_provider_auth", lambda: MIGRATOR.read_provider_auth(invalid_auth))
-        empty_provider = Path(temporary) / "empty-provider.json"
-        empty_provider.write_text(
-            json.dumps({"///": {"type": "api", "key": "secret"}}), encoding="utf-8"
-        )
-        expect_error("invalid_provider_auth_id", lambda: MIGRATOR.read_provider_auth(empty_provider))
-        colliding_providers = Path(temporary) / "colliding-providers.json"
-        colliding_providers.write_text(
-            json.dumps(
-                {
-                    "provider": {"type": "api", "key": "first"},
-                    "provider/": {"type": "api", "key": "second"},
-                }
-            ),
-            encoding="utf-8",
-        )
-        expect_error(
-            "provider_auth_id_collision",
-            lambda: MIGRATOR.read_provider_auth(colliding_providers),
-        )
+        assert MIGRATOR.validate_no_credentials(target_path, source_path) == 0
     finally:
         source.close()
         target.close()

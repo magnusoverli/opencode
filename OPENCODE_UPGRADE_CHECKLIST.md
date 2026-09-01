@@ -67,8 +67,10 @@ pass.**
 - [ ] `/connect` completes for at least one API-key provider.
 - [ ] A browser-OAuth provider (for example ChatGPT Pro/Plus) completes from
       **OpenChamber**, which is the path that has broken before.
-- [ ] An existing `auth.json` still works after the upgrade — do not only test a
-      fresh sign-in.
+- [ ] V2 starts with no credentials imported from V1 and `/connect` completes a
+      fresh V2 sign-in without changing the retained V1 `auth.json`.
+- [ ] Upgrading an existing V2 generation preserves provider sign-ins created in
+      V2; credentials copied by b0-b7 may warn but are not deleted automatically.
 
 ## 6. MCP
 

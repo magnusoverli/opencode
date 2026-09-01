@@ -623,6 +623,9 @@ elif [ "${V2_ROOTS_READY}" = "true" ] && [ "${V2_RUNTIME_BINARY_READY}" = "true"
         --target-version "${V2_CERTIFIED_VERSION}"; then
         V2_STATE_READY=true
         bashio::log.info "OpenCode V2 copy-on-write state generation is ready"
+        if jq -e '(.target.provider_auth_count // 0) > 0' /data/v2/migration.json >/dev/null 2>&1; then
+            bashio::log.warning "This V2 generation contains provider credentials copied by an earlier beta. Reconnect any provider that returns HTTP 401 from the V2 terminal."
+        fi
     else
         bashio::log.warning "OpenCode V2 state conversion was deferred; continuing with the untouched V1 runtime and state"
     fi
