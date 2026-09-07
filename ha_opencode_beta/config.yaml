@@ -38,6 +38,8 @@ map:
 hassio_api: true
 hassio_role: manager
 homeassistant_api: true
+discovery:
+  - mcp
 
 # Security and hardware access - keep permissions minimal
 host_network: false
@@ -100,6 +102,8 @@ options:
   # Requires a Home Assistant version that includes the native MCP keyed endpoint.
   native_ha_mcp_enabled: false
   native_ha_mcp_api_id: "assist"
+  # Independent inbound MCP endpoint, with administrator-approved OAuth.
+  ha_mcp_server_enabled: false
   # Home context: what OpenCode knows about this installation before you type.
   # The briefing is regenerated on every start (never appended to) and the
   # decision-notes digest is capped, so neither grows over time.
@@ -183,6 +187,7 @@ schema:
   access_token: password
   native_ha_mcp_enabled: bool
   native_ha_mcp_api_id: str?
+  ha_mcp_server_enabled: bool
   home_briefing_enabled: bool
   decision_notes_enabled: bool
 

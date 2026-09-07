@@ -266,6 +266,68 @@ In **Settings → Providers**, copy the whole `http://localhost:...` URL from yo
 
 The first V2 activation migrates sessions but does not copy V1 provider credentials because the V1 and V2 credential formats are not reliably compatible. Run `/connect` in the V2 terminal and authenticate each provider once; this does not change the retained V1 credential. If an earlier beta already copied credentials into your active V2 generation, they are preserved rather than deleted and the terminal shows a reminder to reconnect providers that return HTTP `401`.
 
+## Expose Read-Only MCP to Home Assistant
+
+This optional server lets **Home Assistant use tools from this app**. It is the
+opposite direction from the native Home Assistant MCP bridge and does not turn
+OpenCode into a conversation agent. It works with **both V2 and the retained V1
+runtime**, independently of local MCP enablement and terminal/OpenChamber mode.
+The private V2 MCP sidecar is unchanged and never advertised to Home Assistant.
+
+Automatic app discovery requires [Core PR #180378](https://github.com/home-assistant/core/pull/180378),
+merged into the **2026.10 development line** and absent from 2026.9.1. The expected
+first stable release is 2026.10.0; verify the shipped Core release before relying
+on discovery. Older MCP-capable installations can attempt manual setup using the
+endpoint shown after provisioning; existing OpenCode functionality is unchanged.
+
+### Setup
+
+1. Open Home Assistant over **HTTPS**, enable **Expose read-only MCP to Home Assistant** (`ha_mcp_server_enabled`), and restart the app. No Network port mapping is needed.
+2. Open the app through the Home Assistant sidebar and select **Home Assistant MCP setup**. Use an active Home Assistant administrator or owner account; LAN and unauthenticated requests cannot open setup.
+3. Register the exact OAuth callback displayed by Home Assistant. With My Home Assistant enabled, keep `https://my.home-assistant.io/redirect/oauth`; otherwise use your HTTPS Home Assistant address followed by `/auth/external/callback`.
+4. Approve **Provision client**. The generated client ID and secret appear once. Enter them when Home Assistant's **Model Context Protocol** integration requests application credentials. This is the MCP client integration, not **Model Context Protocol Server**.
+5. Confirm the discovered app in **Settings > Devices & Services**, then approve the read-only OAuth consent screen. Keep the app's Ingress session open in the same browser while authorizing.
+6. Select the resulting LLM API in your compatible conversation agent. Discovery does not automatically enable tools in every agent.
+
+Stable and beta have independent credentials and discovered APIs. Discovery-owned
+API IDs are `mcp-<full-app-slug>`, remaining stable across reinstallations with the
+same slug. An existing manually configured entry with the same URL is not
+automatically converted to discovery ownership.
+
+### Access and Lifecycle
+
+The fixed catalogue contains `get_states`, `search_entities`, `get_entity_details`,
+`get_home_context`, `get_areas`, `get_devices`, `get_calendars`, and
+`get_calendar_events`. Listing and execution both enforce this allowlist. Calendar
+ranges, request/result sizes, session counts, and execution time are bounded.
+There is no shell, file editing, service control, update, log, template, screenshot,
+or native-MCP forwarding tool. These reads are **installation-wide**, not limited
+by Assist's exposed-entity settings, and can reveal occupancy or other private data.
+
+Browser consent uses HTTPS Ingress. Core's authenticated MCP and OAuth traffic
+uses the **trusted, unencrypted internal app network** on port 8766; other apps
+can reach this port but must authenticate. Do not publish or reverse-proxy it.
+Port 8767 is loopback-only consent IPC. Tokens and client secrets are separate
+from OpenCode's credentials; the service retains the underlying privileged
+Supervisor token, so the allowlist is not an OS sandbox.
+
+HA currently uses a provisioned confidential client with `client_secret_post`,
+without PKCE. This server accepts that specific compatibility flow and enforces
+S256 when PKCE is supplied; it is not a general public-client OAuth service.
+Access tokens expire after 15 minutes; rotating refresh grants expire after
+30 days, requiring renewed authorization. Consent is installation access, not
+per-tool or per-HA-user approval on every invocation. Removing an approving user
+does not itself revoke an already issued grant.
+
+Disable the option and restart to close the listener and withdraw discovery;
+failed Supervisor withdrawal is retried. Normal restarts preserve registration
+and credentials. Reprovisioning revokes existing grants and requires updating HA
+application credentials. If an Ingress cookie expires, reopen the app and retry
+authorization; reprovision if the external origin or app Ingress path changes.
+Supervisor publication means only that the announcement was accepted, not that
+the user connected it. Uninstall cleanup depends on Supervisor reaching Core;
+after an outage, remove any stale integration manually if necessary.
+
 ## Zigbee2MQTT URL
 
 The add-on discovers a running Zigbee2MQTT add-on automatically, so **Zigbee2MQTT URL** is only needed as a manual override. Set it to the same address and port you open the Zigbee2MQTT UI on, including the scheme — for example `http://192.168.1.20:8080`. Host/IP-only values are accepted and treated as `http://`.

@@ -164,7 +164,6 @@ describe(`${CHANNEL} runtime pin`, () => {
     }
     for (const service of [
       "ha-openchamber",
-      "ha-openchamber-ingress",
       "ha-openchamber-lan",
       "ha-opencode-server",
     ]) {
@@ -177,6 +176,23 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(v2Session, /Rollback runtime retained: OpenCode V1 \$\{V1_VERSION\}/);
     assert.match(v2Session, /TUI runs as uid 60001; the V2 server runs as root/);
     assert.match(v2Session, /exec \/usr\/local\/bin\/opencode-v2-tui-launch \/run\/opencode-v2/);
+  });
+
+  it("keeps shared ingress active using init's resolved interface mode for V1 and V2", () => {
+    const serviceRoot = path.join(ROOTFS, "etc", "s6-overlay", "s6-rc.d");
+    const ingress = read(serviceRoot, "ha-openchamber-ingress", "run");
+    const terminal = read(serviceRoot, "ha-opencode", "run");
+
+    assert.deepEqual(fs.readdirSync(path.join(serviceRoot, "ha-openchamber-ingress", "dependencies.d")), ["init-opencode"]);
+    assert.match(ingress, /HA_INGRESS_UI=\$\(cat \/data\/\.interface_mode 2>\/dev\/null \|\| echo "terminal"\)/);
+    assert.doesNotMatch(ingress, /\.terminal_runtime|TERMINAL_RUNTIME|bashio::config 'interface_mode'|sleep infinity/);
+    assert.match(initService, /if \[ "\$\{TERMINAL_RUNTIME\}" = "v2" \]; then\s+INTERFACE_MODE="terminal"/);
+    assert.match(initService, /else\s+INTERFACE_MODE="\$\{SELECTED_INTERFACE_MODE\}"\s+fi\s+printf '%s\\n' "\$\{INTERFACE_MODE\}" > \/data\/\.interface_mode/);
+    assert.match(ingress, /if \[ "\$\{HA_INGRESS_UI\}" != "openchamber" \]; then\s+export HA_INGRESS_UI="terminal"\s+export OPENCHAMBER_UPSTREAM_PORT=8100\s+fi/);
+    assert.match(ingress, /^export OPENCHAMBER_INGRESS_PORT=8099$/m);
+    assert.match(ingress, /^export OPENCHAMBER_UPSTREAM_HOST="127\.0\.0\.1"$/m);
+    assert.match(terminal, /INTERFACE_MODE=\$\(cat \/data\/\.interface_mode/);
+    assert.match(terminal, /-i lo \\\n\s+-p 8100 \\/);
   });
 
   it("uses the direct Home Assistant workspace without elevated mount privileges", () => {

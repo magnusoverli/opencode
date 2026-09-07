@@ -2,7 +2,13 @@
 
 ## [Unreleased]
 
+## 3.0.0b11
+
+- Added opt-in read-only MCP tools for Home Assistant with Ingress administrator consent, OAuth authentication, app discovery, and disable cleanup.
+- Enable **Expose read-only MCP to Home Assistant**, restart, and use **Home Assistant MCP setup** in the app UI. Requires HTTPS Ingress; automatic discovery targets Core 2026.10, while older MCP-capable versions can use manual setup.
+- Kept the new service independent of V1/V2 and local OpenCode MCP settings, with eight enforced read-only tools, isolated sessions, and no published host ports. Reads cover the whole installation, not only Assist-exposed entities.
 - Consolidated the V2 readiness and migration roadmaps, documented selectable V1 as retained for rollback, LAN, and OpenChamber, and clarified the root V2 shell credential boundary.
+- Validation limitation: focused OAuth/browser, discovery, ingress, and service-contract tests pass; real Supervisor/Core Ingress lifecycle acceptance remains outstanding. The new MCP feature is off by default.
 
 ## 3.0.0b10
 

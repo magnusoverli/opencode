@@ -1,0 +1,19 @@
+#!/command/with-contenv bashio
+set -e
+umask 077
+
+enabled=false
+if [ "$(bashio::config 'ha_mcp_server_enabled' 2>/dev/null || echo false)" = "true" ]; then
+    enabled=true
+fi
+
+# Deliberately exclude user env files, NODE_OPTIONS, and UI/runtime MCP settings.
+exec /usr/bin/env -i \
+    PATH=/usr/local/bin:/usr/bin:/bin \
+    HOME=/data \
+    HA_MCP_ENABLED="${enabled}" \
+    HA_MCP_STATE_DIR=/data/ha-facing-mcp \
+    HA_MCP_PORT=8766 \
+    HA_MCP_INGRESS_PORT=8767 \
+    SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-}" \
+    node /opt/ha-mcp-server/ha-facing-service.js

@@ -2,6 +2,9 @@
 const http = require("http");
 const net = require("net");
 const zlib = require("zlib");
+const { routeHaMcp } = require("./ha-mcp-ingress.js");
+const TERMINAL = process.env.HA_INGRESS_UI === "terminal";
+const MCP_SETUP_ENABLED = process.env.HA_MCP_SETUP_ENABLED === "true";
 
 const LISTEN_HOST = process.env.OPENCHAMBER_INGRESS_HOST || "0.0.0.0";
 const LISTEN_PORT = Number.parseInt(process.env.OPENCHAMBER_INGRESS_PORT || "8099", 10);
@@ -236,6 +239,13 @@ function transformHtml(html, ingressPath) {
 function transformJavaScript(content, ingressPath) {
   return transformRootAssetUrls(content, ingressPath)
     .replace(/if\("serviceWorker"in navigator\)\{/g, 'if(false&&"serviceWorker"in navigator){');
+}
+
+function injectMcpSetupLink(html, ingressPath) {
+  const link = `<a data-ha-mcp-setup href="${ingressPath}/ha-mcp/" target="_blank" rel="noopener noreferrer"`
+    + ' title="Home Assistant MCP setup (opens in a new tab)"'
+    + ' style="position:fixed;top:8px;right:8px;z-index:1000;box-sizing:border-box;max-width:calc(100vw - 16px);min-height:44px;display:inline-flex;align-items:center;padding:8px 12px;border:1px solid #64748b;border-radius:6px;background:#0f172a;color:#fff;font:13px/1.4 system-ui,sans-serif;text-decoration:underline;box-shadow:0 2px 6px #0004">Home Assistant MCP setup</a>';
+  return /<\/body\s*>/i.test(html) ? html.replace(/<\/body\s*>/i, `${link}</body>`) : html + link;
 }
 
 function transformCss(content, ingressPath) {
@@ -584,6 +594,12 @@ function proxyRequest(req, res) {
   const ingressPath = ingressPathFromRequest(req);
   const upstreamPath = stripIngressPath(req.url || "/", ingressPath);
 
+  if (routeHaMcp(req, res, { ingressPath, upstreamPath, lan: ALLOW_ANY_REMOTE })) return;
+  if (TERMINAL) {
+    forwardRequest(req, res, { ingressPath, upstreamPath });
+    return;
+  }
+
   // Canned "you are up to date" response for OpenChamber's update check.
   // OpenChamber is pinned and Ingress-patched at image build time, and its
   // self-update (an npm reinstall of @openchamber/web) cannot persist across
@@ -706,7 +722,10 @@ function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oaut
     const isHtml = contentType.includes("text/html");
     const isJavaScript = /(?:application|text)\/javascript|\bmodule\b/.test(contentType);
     const isCss = contentType.includes("text/css");
-    if (!isHtml && !isJavaScript && !isCss) {
+    const showMcpSetup = MCP_SETUP_ENABLED && !ALLOW_ANY_REMOTE && isHtml
+      && req.method !== "HEAD" && upstreamRes.statusCode === 200
+      && /^\/api\/hassio_ingress\/[A-Za-z0-9_-]+$/.test(ingressPath);
+    if ((TERMINAL && !showMcpSetup) || (!isHtml && !isJavaScript && !isCss)) {
       if (clientClosed || !canWriteResponse(res)) {
         upstreamRes.destroy();
         return;
@@ -724,11 +743,12 @@ function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oaut
       if (clientClosed || !canWriteResponse(res)) return;
       const decoded = decodeBody(Buffer.concat(chunks), responseHeaders["content-encoding"]);
       const text = decoded.toString("utf8");
-      const body = isHtml
+      let body = TERMINAL ? text : isHtml
         ? transformHtml(text, ingressPath)
         : isCss
           ? transformCss(text, ingressPath)
           : transformJavaScript(text, ingressPath);
+      if (showMcpSetup) body = injectMcpSetupLink(body, ingressPath);
       delete responseHeaders["content-length"];
       delete responseHeaders["content-encoding"];
       delete responseHeaders.etag;
@@ -786,6 +806,10 @@ function proxyUpgrade(req, socket, head) {
 
   const ingressPath = ingressPathFromRequest(req);
   const upstreamPath = stripIngressPath(req.url || "/", ingressPath);
+  if (/^\/ha-mcp(?:[/?]|$)/.test(upstreamPath)) {
+    socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+    return;
+  }
   const headers = { ...req.headers };
   headers.host = `${UPSTREAM_HOST}:${UPSTREAM_PORT}`;
   headers["x-forwarded-host"] = req.headers["x-forwarded-host"] || req.headers.host || "";

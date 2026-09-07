@@ -2,6 +2,11 @@
 
 set -Eeuo pipefail
 
+# Choose ha_mcp_server_enabled before running; never change options or provision
+# clients here. Run each channel once disabled and once enabled. Browser OAuth
+# consent, discovery after manual provisioning, and destructive revoke/reprovision
+# remain manual checks. Beta acceptance requires V2; beta V1 is a manual gap.
+
 app=${1:-}
 case "${app}" in
     ha_opencode | ha_opencode_beta) ;;
@@ -132,7 +137,7 @@ if [ "${app}" = ha_opencode_beta ]; then
     mount_test=""
 fi
 
-services=(ha-opencode ha-opencode-server ha-openchamber ha-openchamber-ingress ha-openchamber-lan)
+services=(ha-opencode ha-opencode-server ha-openchamber ha-openchamber-ingress ha-openchamber-lan ha-facing-mcp)
 if [ "${app}" = ha_opencode_beta ]; then
     services+=(
         ha-opencode-v2-credential-broker
@@ -145,6 +150,93 @@ for service in "${services[@]}"; do
     state=$(docker exec "${container}" s6-svstat "/run/service/${service}")
     [[ "${state}" == up* ]] || fail "s6 service ${service} is not up: ${state}"
 done
+
+docker exec "${container}" test -x /etc/s6-overlay/s6-rc.d/ha-facing-mcp/run \
+    || fail "the HA-facing MCP service launcher is not executable"
+
+# Inspect actual bindings, not just image EXPOSE metadata. Host networking would
+# expose the Core listener even without an explicit port binding.
+docker inspect "${container}" | jq -e '
+    .[0] | .HostConfig.NetworkMode != "host" and
+    ([.HostConfig.PortBindings, .NetworkSettings.Ports] | all(.[];
+        (. // {} | to_entries | all(.[];
+            if (.key | split("/")[0]) as $port | ($port == "8766" or $port == "8767")
+            then (.value == null or .value == []) else true end))))
+' >/dev/null || fail "HA-facing MCP ports must not be host-published"
+
+ha_mcp_enabled=$(jq -r '.data.options.ha_mcp_server_enabled // false' <<<"${info}")
+if [ "${ha_mcp_enabled}" = false ]; then
+    # /proc covers wildcard, loopback and IPv6 listeners without relying on curl
+    # connection failures (which could also mean a broken HTTP handler).
+    docker exec "${container}" awk '
+        $4 == "0A" && $2 ~ /:(223E|223F)$/ { found = 1 }
+        END { exit found ? 1 : 0 }
+    ' /proc/net/tcp /proc/net/tcp6 \
+        || fail "disabled HA-facing MCP has a listener on 8766 or 8767"
+elif [ "${ha_mcp_enabled}" = true ]; then
+    ha_mcp_hostname=$(jq -r '.data.hostname // empty' <<<"${info}")
+    [[ "${ha_mcp_hostname}" =~ ^[a-z0-9]+([a-z0-9-]*[a-z0-9])?$ ]] \
+        && [ "${#ha_mcp_hostname}" -le 63 ] \
+        || fail "Supervisor did not report a valid app hostname"
+
+    # Read the admin IPC secret in-process: never shell-expand it into argv,
+    # environment, tracing, or output. A healthy unprovisioned listener is valid;
+    # ready:true is discovery readiness and requires user-driven provisioning.
+    docker exec -i "${container}" node --input-type=module - "${ha_mcp_hostname}" <<'NODE' \
+        || fail "HA-facing MCP authenticated IPC did not become available"
+import { readFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
+const deadline = Date.now() + 30000;
+while (Date.now() < deadline) {
+    try {
+        const secret = readFileSync("/run/ha-facing-mcp/ingress-secret", "utf8").trim();
+        if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) throw new Error();
+        const response = await fetch("http://127.0.0.1:8767/ha-mcp/status", {
+            headers: { "X-HA-MCP-Ingress-Secret": secret },
+            signal: AbortSignal.timeout(2000), redirect: "error",
+        });
+        const status = await response.json();
+        if (response.status === 200 && typeof status.ready === "boolean" &&
+            status.url === `http://${process.argv[2]}:8766/mcp`) {
+            console.log(`HA-facing MCP IPC available (client provisioned: ${status.ready})`);
+            process.exit(0);
+        }
+    } catch { /* Startup can still be probing the backend; never log secrets/errors. */ }
+    await sleep(250);
+}
+process.exit(1);
+NODE
+
+    # Use Core's network namespace and Supervisor's actual hostname. A loopback
+    # request or a guessed hostname can return 403 instead of testing MCP auth.
+    status=$(docker exec homeassistant curl -sS -o /dev/null \
+        --connect-timeout 2 --max-time 5 -X POST -w '%{http_code}' \
+        "http://${ha_mcp_hostname}:8766/mcp")
+    [ "${status}" = 401 ] || fail "unauthorized HA-facing MCP from Core returned ${status}, not 401"
+
+    # Spoof browser/Ingress identity, but never supply the real IPC secret or a
+    # valid CSRF nonce. No provisioning, approval, or revocation is performed.
+    for port in 8099 8767 8766; do
+        status=$(docker exec "${container}" curl -sS -o /dev/null \
+            --connect-timeout 2 --max-time 5 -w '%{http_code}' \
+            -H "Host: ${ha_mcp_hostname}:${port}" \
+            -H 'Origin: https://acceptance.invalid' \
+            -H 'X-Forwarded-Host: acceptance.invalid' -H 'X-Forwarded-Proto: https' \
+            -H 'X-Forwarded-For: 172.30.32.2' \
+            -H 'X-Ingress-Path: /api/hassio_ingress/acceptance' \
+            -H 'X-Remote-User-Id: 00000000000000000000000000000000' \
+            -H 'X-HA-MCP-User-Id: 00000000000000000000000000000000' \
+            -H 'X-HA-MCP-External-Origin: https://acceptance.invalid' \
+            -H 'X-HA-MCP-External-Path: /api/hassio_ingress/acceptance/ha-mcp/authorize' \
+            -H 'X-HA-MCP-Ingress-Secret: forged' \
+            --data 'csrf=forged&decision=approve' \
+            "http://127.0.0.1:${port}/ha-mcp/authorize")
+        [ "${status}" = 403 ] \
+            || fail "forged local consent on ${port} returned ${status}, not 403"
+    done
+else
+    fail "ha_mcp_server_enabled must be a boolean"
+fi
 
 docker exec -e OPENCODE_DISABLE_AUTOUPDATE=true "${container}" \
     /usr/local/bin/opencode-smoke-test

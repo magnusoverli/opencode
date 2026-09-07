@@ -62,6 +62,10 @@ configuration:
     name: "Native MCP API ID"
     description: "Applies only when the native bridge above is on. The default 'assist' targets /api/mcp/assist; leave it empty to use every LLM API selected in the MCP Server integration. Any registered API ID is reachable from here: Home Assistant requires admin access for keyed IDs other than 'assist', and the Supervisor calls Home Assistant Core as its own admin system user."
 
+  ha_mcp_server_enabled:
+    name: "Expose read-only MCP to Home Assistant"
+    description: "Requires HTTPS Home Assistant Ingress and administrator OAuth setup using the link in the app UI. Lets Home Assistant assistants read states, areas, devices and calendars across the installation, not just Assist-exposed entities; no control or coding tools are exposed. Independent of OpenCode's MCP integration and native bridge; automatic discovery requires Core's app MCP discovery support, targeted for 2026.10."
+
   home_briefing_enabled:
     name: "Install briefing"
     description: "Give OpenCode a short summary of this installation — Home Assistant version, areas, entity counts per domain, and how your configuration files are split up — so it does not rediscover them in every session. The summary is rebuilt from scratch on every start and capped at roughly 500 tokens, so it cannot grow over time. Run 'ha-context show' in the terminal to read exactly what is sent."

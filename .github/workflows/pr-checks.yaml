@@ -44,6 +44,9 @@ jobs:
       - name: Stable add-on contract tests
         run: node --test "ha_opencode/test/*.test.js"
 
+      - name: HA-facing MCP discovery and service lifecycle contracts
+        run: node --test scripts/ha-facing-discovery.test.mjs
+
       - name: Assert each channel declares every option its own code reads
         run: bash scripts/check-addon-options.sh ha_opencode ha_opencode_beta
 
@@ -76,6 +79,9 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Run tests
+        env:
+          # Exercise real OAuth form/redirect behavior on the hosted runner.
+          HA_MCP_BROWSER_EXECUTABLE: /usr/bin/google-chrome
         run: npm test
 
   lsp-server:

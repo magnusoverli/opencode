@@ -1,46 +1,30 @@
 #!/command/with-contenv bashio
-# ==============================================================================
-# OpenCode - OpenChamber Home Assistant Ingress Proxy Service
-# ==============================================================================
-
-export HOME="/data"
-export XDG_DATA_HOME="/data/.local/share"
-export XDG_CONFIG_HOME="/data/.config"
-export NPM_CONFIG_PREFIX="/data/.npm-global"
+# Shared ingress router. s6 owns each UI backend independently.
 export NODE_OPTIONS="--max-old-space-size=768"
-
-if [ -f /data/.env_vars ]; then
-    source /data/.env_vars
+export HA_INGRESS_UI=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
+export OPENCHAMBER_UPSTREAM_PORT=3010
+if [ "${HA_INGRESS_UI}" != "openchamber" ]; then
+    export HA_INGRESS_UI="terminal"
+    export OPENCHAMBER_UPSTREAM_PORT=8100
 fi
-
-INTERFACE_MODE=$(bashio::config 'interface_mode' 2>/dev/null || echo "terminal")
-if [ "${INTERFACE_MODE}" != "openchamber" ]; then
-    bashio::log.info "Interface mode is '${INTERFACE_MODE}'; OpenChamber ingress proxy is inactive."
-    exec sleep infinity
-fi
-
-OPENCHAMBER_INTERNAL_PORT=3010
-OPENCHAMBER_INGRESS_PORT=8099
-
-# The default Ingress proxy must not inherit a permissive setting from user
-# environment variables. Only the separate LAN service permits remote clients.
 export OPENCHAMBER_ALLOW_ANY_REMOTE="false"
+export HA_INGRESS_PROXY_IP="172.30.32.2"
 export OPENCHAMBER_INGRESS_HOST="0.0.0.0"
-export OPENCHAMBER_INGRESS_PORT
+export OPENCHAMBER_INGRESS_PORT=8099
 export OPENCHAMBER_UPSTREAM_HOST="127.0.0.1"
-export OPENCHAMBER_UPSTREAM_PORT="${OPENCHAMBER_INTERNAL_PORT}"
+HA_MCP_SETUP_ENABLED=false
+if [ "$(bashio::config 'ha_mcp_server_enabled' 2>/dev/null || echo false)" = "true" ]; then
+    HA_MCP_SETUP_ENABLED=true
+fi
 
-bashio::log.info "Waiting for OpenChamber server on 127.0.0.1:${OPENCHAMBER_INTERNAL_PORT}"
-for _ in $(seq 1 120); do
-    if curl -fsS --max-time 2 "http://127.0.0.1:${OPENCHAMBER_INTERNAL_PORT}/health" >/dev/null 2>&1; then
-        bashio::log.info "Starting OpenChamber ingress proxy on 0.0.0.0:${OPENCHAMBER_INGRESS_PORT}"
-        exec node /usr/local/bin/openchamber-ingress-proxy.js
-    fi
-    sleep 0.5
-done
-
-bashio::log.error "OpenChamber did not become ready within 60 seconds; restarting it."
-# Preserve the former coordinator's retry behaviour without making this proxy
-# the server's parent. s6 owns the server directly and restarts it after TERM.
-/command/s6-svc -r /run/service/ha-openchamber || bashio::log.error "Could not request OpenChamber server restart"
-exit 1
+# Do not wait for a UI or MCP backend: setup must survive independent restarts.
+# Do not inherit user runtime overrides, Supervisor credentials or MCP secrets.
+exec env -i PATH="/usr/local/bin:/usr/bin:/bin" NODE_OPTIONS="${NODE_OPTIONS}" \
+    HA_INGRESS_UI="${HA_INGRESS_UI}" HA_MCP_SETUP_ENABLED="${HA_MCP_SETUP_ENABLED}" \
+    HA_INGRESS_PROXY_IP="${HA_INGRESS_PROXY_IP}" \
+    OPENCHAMBER_ALLOW_ANY_REMOTE="${OPENCHAMBER_ALLOW_ANY_REMOTE}" \
+    OPENCHAMBER_INGRESS_HOST="${OPENCHAMBER_INGRESS_HOST}" \
+    OPENCHAMBER_INGRESS_PORT="${OPENCHAMBER_INGRESS_PORT}" \
+    OPENCHAMBER_UPSTREAM_HOST="${OPENCHAMBER_UPSTREAM_HOST}" \
+    OPENCHAMBER_UPSTREAM_PORT="${OPENCHAMBER_UPSTREAM_PORT}" \
+    node /usr/local/bin/openchamber-ingress-proxy.js
