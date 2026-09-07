@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Removed the injected Home Assistant MCP status badge and its unused UI plumbing; automatic discovery and existing OAuth access are unchanged.
 ## 3.0.0b12
 
 - Simplified opt-in MCP setup to automatic trusted-host discovery over HTTP or HTTPS without manual credentials; already-provisioned OAuth clients remain authenticated.

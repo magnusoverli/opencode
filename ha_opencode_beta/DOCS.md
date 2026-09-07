@@ -292,10 +292,10 @@ Publication begins automatically after service readiness, even if the installed
 Core does not yet support discovery. A supporting Core version is still needed
 to show the discovery confirmation.
 
-The optional **Home Assistant MCP status** link in the app's Ingress UI explains
-the access mode. It is restricted to an active HA administrator/owner and is not
-part of onboarding. On older MCP-capable Core versions, its endpoint can be used
-for manual client setup, but that does not test automatic discovery.
+No MCP badge or link is added to the app UI. The optional administrator status
+page remains at `/ha-mcp/` beneath the app's authenticated Ingress base URL; it is
+not part of onboarding. On older MCP-capable Core versions, the endpoint shown
+there can be used for manual client setup, but that does not test discovery.
 
 Stable and beta have independent state and discovered APIs. Discovery-owned
 API IDs are `mcp-<full-app-slug>`, remaining stable across reinstallations with the
@@ -339,8 +339,9 @@ not silently converted to credential-free access. New/unprovisioned installation
 use trusted-host mode automatically; malformed stored state fails closed.
 
 Existing OAuth users retain client-secret authentication, 15-minute access tokens,
-rotating 30-day refresh grants, and administrator consent. The status link exposes
-the retained setup page if credentials need replacement. HTTP or HTTPS Ingress is
+rotating 30-day refresh grants, and administrator consent. The retained setup page
+at `/ha-mcp/` beneath the app's authenticated Ingress base URL allows credential
+replacement. HTTP or HTTPS Ingress is
 accepted with exact-origin CSRF checks; direct callbacks must use the exact HA
 `/auth/external/callback` URL, or HTTPS My Home Assistant. Changing the external
 origin/path requires reprovisioning and updating HA application credentials.

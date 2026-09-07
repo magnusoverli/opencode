@@ -80,8 +80,7 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
         return http.request({ ...options, port: ipc.address().port }, callback);
       } },
     });
-    const disabledPages = {};
-    for (const [uiMode, setupEnabled] of [["terminal", false], ["terminal", true], ["openchamber", false], ["openchamber", true], ["lan", true]]) {
+    for (const uiMode of ["terminal", "openchamber", "lan"]) {
       let router;
       load(path.join(scripts(channel), "openchamber-ingress-proxy.js"), {
         "./ha-mcp-ingress.js": route,
@@ -96,7 +95,6 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
         } },
       }, { process: { env: {
         HA_INGRESS_UI: uiMode, OPENCHAMBER_UPSTREAM_PORT: String(ui.address().port),
-        HA_MCP_SETUP_ENABLED: String(setupEnabled),
         OPENCHAMBER_ALLOW_ANY_REMOTE: String(uiMode === "lan"),
       } } });
       await once(router, "listening");
@@ -110,7 +108,7 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
             ...headers, "x-forwarded-proto": proto, origin: `${proto}://ha.example:8443`,
           } })).status, 403, "even Supervisor cannot use LAN consent");
         }
-        assert.equal((await send(`${prefix}/`)).body.includes("data-ha-mcp-setup"), false);
+        assert.doesNotMatch((await send(`${prefix}/`)).body, /data-ha-mcp-setup|Home Assistant MCP status/);
         continue;
       }
       for (const pathname of ["/ha-mcp/", "/ha-mcp/authorize"]) {
@@ -206,26 +204,18 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
       const page = await send(`${prefix}/`);
       assert.equal(page.status, 200);
       assert.equal(page.body.includes("data-ha-ingress-runtime"), uiMode === "openchamber");
-      assert.equal(page.body.includes("data-ha-mcp-setup"), setupEnabled);
-      if (!setupEnabled) {
-        disabledPages[uiMode] = page.body;
-        if (uiMode === "terminal") {
-          assert.equal(page.body, uiHtml, "disabled terminal HTML is byte-for-byte unchanged");
-          assert.equal(page.headers.etag, '"ui"');
-          assert.equal(Number(page.headers["content-length"]), Buffer.byteLength(uiHtml));
-        }
+      assert.doesNotMatch(page.body, /data-ha-mcp-setup|Home Assistant MCP status/);
+      if (uiMode === "terminal") {
+        assert.equal(page.body, uiHtml, "terminal HTML is byte-for-byte unchanged");
+        assert.equal(page.headers.etag, '"ui"');
+        assert.equal(Number(page.headers["content-length"]), Buffer.byteLength(uiHtml));
       } else {
-        assert.ok(page.body.includes(`href="${prefix}/ha-mcp/"`));
-        assert.ok(page.body.includes('title="Home Assistant MCP status (opens in a new tab)"'));
-        assert.ok(page.body.includes('target="_blank" rel="noopener noreferrer"'));
-        assert.equal(page.body.replace(/<a data-ha-mcp-setup\b[^>]*>Home Assistant MCP status<\/a>/, ""), disabledPages[uiMode],
-          "enabled HTML differs only by the setup link, preserving existing UI substitutions");
         assert.equal(page.headers.etag, undefined);
         assert.equal(page.headers["content-length"], undefined);
-        assert.equal((await request(port, "/", { headers: {} })).body.includes("data-ha-mcp-setup"), false);
-        assert.equal((await send("/", { headers: { ...headers, "x-ingress-path": '/bad/\"path' } })).body.includes("data-ha-mcp-setup"), false);
-        if (uiMode === "openchamber") assert.ok(page.body.includes(`src="${prefix}/assets/test.js"`));
+        assert.ok(page.body.includes(`src="${prefix}/assets/test.js"`));
       }
+      assert.doesNotMatch((await request(port, "/", { headers: {} })).body, /data-ha-mcp-setup|Home Assistant MCP status/);
+      assert.doesNotMatch((await send("/", { headers: { ...headers, "x-ingress-path": '/bad/\"path' } })).body, /data-ha-mcp-setup|Home Assistant MCP status/);
       for (const url of ["/socket?arg=1", "/ha-mcp/authorize"]) {
         const result = await new Promise((resolve, reject) => {
           const socket = net.connect(port, "127.0.0.1", () => socket.write(
@@ -251,8 +241,9 @@ test("router implementation parity and service graph", () => {
     assert.match(run, /OPENCHAMBER_INGRESS_PORT=8099/);
     assert.match(run, /OPENCHAMBER_UPSTREAM_PORT=8100/);
     assert.doesNotMatch(run, /sleep infinity|source \/data|curl/);
-    assert.match(run, /bashio::config 'ha_mcp_server_enabled'/);
-    assert.match(run, /HA_MCP_SETUP_ENABLED=false/);
+    assert.doesNotMatch(run, /HA_MCP_SETUP_ENABLED|ha_mcp_server_enabled/);
+    assert.doesNotMatch(fs.readFileSync(path.join(scripts(channel), "openchamber-ingress-proxy.js"), "utf8"),
+      /MCP_SETUP_ENABLED|injectMcpSetupLink|showMcpSetup|data-ha-mcp-setup|Home Assistant MCP status/);
     assert.match(run, /exec env -i PATH=/);
     assert.doesNotMatch(run.slice(run.indexOf("exec env -i")), /SUPERVISOR_TOKEN|HA_MCP_INGRESS_SECRET|NODE_PATH/);
     assert.ok(fs.existsSync(path.join(services, "ha-openchamber-ingress/dependencies.d/init-opencode")));
