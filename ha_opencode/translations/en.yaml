@@ -64,7 +64,7 @@ configuration:
 
   ha_mcp_server_enabled:
     name: "Expose read-only MCP to Home Assistant"
-    description: "Requires HTTPS Home Assistant Ingress and administrator OAuth setup using the link in the app UI. Lets Home Assistant assistants read states, areas, devices and calendars across the installation, not just Assist-exposed entities; no control or coding tools are exposed. Independent of OpenCode's MCP integration and native bridge; automatic discovery requires Core's app MCP discovery support, targeted for 2026.10."
+    description: "Enable and restart, then confirm the discovered MCP integration in Home Assistant (app discovery targets Core 2026.10). HTTP and HTTPS work; no credentials are needed for new setups. Allows installation-wide state, device, area and calendar reads from the HA host network, including other host-network apps, not just Assist-exposed entities. No control/coding tools or host ports. Existing OAuth setups remain authenticated; independent of OpenCode's own MCP settings."
 
   home_briefing_enabled:
     name: "Install briefing"

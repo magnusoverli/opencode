@@ -1,7 +1,7 @@
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { mkdirSync, lstatSync, openSync, readFileSync, writeFileSync, fsyncSync, closeSync, renameSync, constants } from "node:fs";
 import { join, resolve } from "node:path";
-import { createServer } from "node:net";
+import { createServer, isIP } from "node:net";
 import WebSocket from "ws";
 
 export const SCOPE = "ha:read";
@@ -17,6 +17,25 @@ export class HttpError extends Error {
 }
 export function requireThat(condition, status = 400, code = "invalid_request") {
   if (!condition) throw new HttpError(status, code);
+}
+
+export function selectAuthMode(state) {
+  requireThat(state.data.client === null || (typeof state.data.client === "object" && state.data.client !== null), 500, "invalid_state");
+  return state.data.client !== null ? "oauth" : "trusted_host";
+}
+
+export async function resolveCorePeer(token) {
+  requireThat(Boolean(token), 500, "supervisor_token_required");
+  const response = await fetch("http://supervisor/core/info", {
+    headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000), redirect: "error",
+  });
+  requireThat(response.ok, 500, "supervisor_unavailable");
+  const address = (await response.json()).data?.ip_address;
+  requireThat(typeof address === "string" && isIP(address) === 4, 500, "invalid_core_peer");
+  const [a, b] = address.split(".").map(Number);
+  // Core's reported gateway is shared by host-network processes, not Core alone.
+  requireThat(a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168), 500, "invalid_core_peer");
+  return address;
 }
 
 function privatePath(path, directory = false) {
@@ -52,6 +71,7 @@ export function openState(directory) {
     privatePath(path);
     data = JSON.parse(readFileSync(path, "utf8"));
     requireThat(data.version === 1 && Array.isArray(data.grants), 500, "invalid_state");
+    selectAuthMode({ data });
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     data = { version: 1, client: null, grants: [] };
@@ -139,8 +159,9 @@ export function createAuthorization(state, resource, { now = Date.now } = {}) {
     try { url = new URL(uri); } catch { throw new HttpError(400, "invalid_redirect_uri"); }
     // The canonical callback is also a CSP form-action source. Reject CSP
     // delimiters rather than allowing a registered hostname to inject policy.
-    requireThat(url.protocol === "https:" && !/[;'\s]/.test(url.href) && !url.username && !url.password && !url.hash && !url.search &&
-      (url.href === "https://my.home-assistant.io/redirect/oauth" || url.pathname === "/auth/external/callback"), 400, "invalid_redirect_uri");
+    requireThat(!/[;'\s]/.test(url.href) && !url.username && !url.password && !url.hash && !url.search &&
+      (url.href === "https://my.home-assistant.io/redirect/oauth" ||
+        (["http:", "https:"].includes(url.protocol) && url.pathname === "/auth/external/callback")), 400, "invalid_redirect_uri");
     return uri;
   }
   function provision(redirect, authorizationUrl) {

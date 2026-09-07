@@ -105,32 +105,55 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
       const send = (url = "/ha-mcp/", extra = {}, body = "") => request(port, url, { headers, ...extra }, body);
 
       if (uiMode === "lan") {
-        assert.equal((await send()).status, 403, "even Supervisor cannot use LAN consent");
+        for (const proto of ["http", "https"]) {
+          assert.equal((await send("/ha-mcp/", { headers: {
+            ...headers, "x-forwarded-proto": proto, origin: `${proto}://ha.example:8443`,
+          } })).status, 403, "even Supervisor cannot use LAN consent");
+        }
         assert.equal((await send(`${prefix}/`)).body.includes("data-ha-mcp-setup"), false);
         continue;
       }
       for (const pathname of ["/ha-mcp/", "/ha-mcp/authorize"]) {
-        for (const full of [false, true]) {
+        for (const [full, proto] of [[false, "http"], [true, "http"], [false, "https"], [true, "https"]]) {
           remote = "::ffff:172.30.32.2";
-          const response = await send(`${full ? prefix : ""}${pathname}?state=a%2Bb&repeat=1&repeat=2`, { method: "POST" }, "csrf=a%2Bb&decision=approve");
+          const origin = `${proto}://ha.example:8443`;
+          const response = await send(`${full ? prefix : ""}${pathname}?state=a%2Bb&repeat=1&repeat=2`, {
+            method: "POST", headers: { ...headers, "x-forwarded-proto": proto, origin },
+          }, "csrf=a%2Bb&decision=approve");
           assert.equal(response.status, 303);
           assert.equal(response.headers.location, "https://ha.example/callback?code=untouched");
           assert.equal(response.body, '<html><head></head><form action="/unchanged"></form></html>');
           const hit = hits.at(-1);
           assert.equal(hit.url, `${pathname}?state=a%2Bb&repeat=1&repeat=2`);
           assert.equal(hit.method, "POST"); assert.equal(hit.body, "csrf=a%2Bb&decision=approve");
-          assert.equal(hit.headers.origin, headers.origin);
+          assert.equal(hit.headers.origin, origin);
+          assert.equal(hit.headers["x-forwarded-proto"], proto);
           assert.equal(hit.headers["x-ha-mcp-ingress-secret"], secret);
           assert.equal(hit.headers["x-ha-mcp-user-id"], user);
-          assert.equal(hit.headers["x-ha-mcp-external-origin"], "https://ha.example:8443");
+          assert.equal(hit.headers["x-ha-mcp-external-origin"], origin);
           assert.equal(hit.headers["x-ha-mcp-external-path"], prefix + pathname);
         }
       }
       const before = hits.length;
       for (remote of ["127.0.0.1", "::1", "::ffff:127.0.0.1", "127.0.0.2", "172.30.32.3"]) {
-        assert.equal((await send()).status, 403);
+        for (const proto of ["http", "https"]) {
+          assert.equal((await send("/ha-mcp/", { headers: {
+            ...headers, "x-forwarded-proto": proto, origin: `${proto}://ha.example:8443`,
+          } })).status, 403);
+        }
       }
       remote = "172.30.32.2";
+      // Forged IPC headers cannot substitute for missing or ambiguous metadata,
+      // even on navigations where the browser does not send Origin.
+      for (const proto of [undefined, "", "HTTP", "HTTPS", "ftp", "https, http", "http, https", "ht tp", ["http", "http"], ["https", "https"], ["http", "https"]]) {
+        const h = { ...headers, "x-forwarded-proto": proto };
+        delete h.origin;
+        if (proto === undefined) delete h["x-forwarded-proto"];
+        assert.equal((await send("/ha-mcp/", { headers: h })).status, 403);
+      }
+      for (const name of ["x-forwarded-host", "x-ingress-path", "origin"]) {
+        assert.equal((await send("/ha-mcp/", { headers: { ...headers, [name]: [headers[name], headers[name]] } })).status, 403);
+      }
       for (const delta of [
         { "x-remote-user-id": "" }, { "x-remote-user-id": "admin" },
         { "x-forwarded-proto": "http" }, { "x-forwarded-proto": "https, http" },
@@ -157,14 +180,27 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
       for (const method of ["GET", "POST"]) {
         assert.equal((await send("/ha-mcp/", { method, headers: { ...headers, origin: "https://evil.example" } })).status, 403);
         assert.equal((await send("/ha-mcp/", { method, headers: { ...headers, "x-forwarded-host": "evil.example" } })).status, 403);
+        for (const proto of ["http", "https"]) {
+          assert.equal((await send("/ha-mcp/", { method, headers: {
+            ...headers, "x-forwarded-proto": proto,
+            origin: `${proto === "http" ? "https" : "http"}://ha.example:8443`,
+          } })).status, 403, "Origin must match the forwarded scheme");
+        }
       }
       const noOrigin = { ...headers }; delete noOrigin.origin;
-      assert.equal((await send("/ha-mcp/", { method: "POST", headers: noOrigin })).status, 403);
+      for (const proto of ["http", "https"]) {
+        assert.equal((await send("/ha-mcp/", { method: "POST", headers: { ...noOrigin, "x-forwarded-proto": proto } })).status, 403);
+      }
       assert.equal(hits.length, beforeOriginChecks);
       const navigationHeaders = { ...headers, "x-forwarded-host": "HA.example:443" };
       delete navigationHeaders.origin;
       assert.equal((await send("/ha-mcp/", { headers: navigationHeaders })).status, 303);
       assert.equal(hits.at(-1).headers["x-ha-mcp-external-origin"], "https://ha.example");
+      assert.equal(hits.at(-1).headers.origin, undefined);
+      navigationHeaders["x-forwarded-proto"] = "http";
+      navigationHeaders["x-forwarded-host"] = "HA.example:80";
+      assert.equal((await send("/ha-mcp/", { headers: navigationHeaders })).status, 303);
+      assert.equal(hits.at(-1).headers["x-ha-mcp-external-origin"], "http://ha.example");
       assert.equal(hits.at(-1).headers.origin, undefined);
 
       const page = await send(`${prefix}/`);
@@ -180,9 +216,9 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
         }
       } else {
         assert.ok(page.body.includes(`href="${prefix}/ha-mcp/"`));
-        assert.ok(page.body.includes('title="Home Assistant MCP setup (opens in a new tab)"'));
+        assert.ok(page.body.includes('title="Home Assistant MCP status (opens in a new tab)"'));
         assert.ok(page.body.includes('target="_blank" rel="noopener noreferrer"'));
-        assert.equal(page.body.replace(/<a data-ha-mcp-setup\b[^>]*>Home Assistant MCP setup<\/a>/, ""), disabledPages[uiMode],
+        assert.equal(page.body.replace(/<a data-ha-mcp-setup\b[^>]*>Home Assistant MCP status<\/a>/, ""), disabledPages[uiMode],
           "enabled HTML differs only by the setup link, preserving existing UI substitutions");
         assert.equal(page.headers.etag, undefined);
         assert.equal(page.headers["content-length"], undefined);
@@ -193,7 +229,7 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
       for (const url of ["/socket?arg=1", "/ha-mcp/authorize"]) {
         const result = await new Promise((resolve, reject) => {
           const socket = net.connect(port, "127.0.0.1", () => socket.write(
-            `GET ${prefix}${url} HTTP/1.1\r\nHost: test\r\nX-Ingress-Path: ${prefix}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`));
+            `GET ${prefix}${url} HTTP/1.1\r\nHost: test\r\nX-Ingress-Path: ${prefix}\r\nX-Remote-User-Id: ${user}\r\nX-Forwarded-Proto: http\r\nX-Forwarded-Host: ha.example:8443\r\nOrigin: http://ha.example:8443\r\nX-Ha-Mcp-Ingress-Secret: forged\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`));
           let data = "";
           socket.on("data", (chunk) => { data += chunk; });
           socket.on("end", () => resolve(data)); socket.on("error", reject);

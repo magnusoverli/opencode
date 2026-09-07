@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 # Choose ha_mcp_server_enabled before running; never change options or provision
 # clients here. Run each channel once disabled and once enabled. Browser OAuth
-# consent, discovery after manual provisioning, and destructive revoke/reprovision
+# consent and destructive revoke/reprovision
 # remain manual checks. Beta acceptance requires V2; beta V1 is a manual gap.
 
 app=${1:-}
@@ -180,10 +180,9 @@ elif [ "${ha_mcp_enabled}" = true ]; then
         || fail "Supervisor did not report a valid app hostname"
 
     # Read the admin IPC secret in-process: never shell-expand it into argv,
-    # environment, tracing, or output. A healthy unprovisioned listener is valid;
-    # ready:true is discovery readiness and requires user-driven provisioning.
-    docker exec -i "${container}" node --input-type=module - "${ha_mcp_hostname}" <<'NODE' \
-        || fail "HA-facing MCP authenticated IPC did not become available"
+    # environment, tracing, or output. Readiness is availability for discovery,
+    # not provisioning state: trusted_host must be ready without an OAuth client.
+    ha_mcp_auth_mode=$(docker exec -i "${container}" node --input-type=module - "${ha_mcp_hostname}" <<'NODE'
 import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 const deadline = Date.now() + 30000;
@@ -196,9 +195,10 @@ while (Date.now() < deadline) {
             signal: AbortSignal.timeout(2000), redirect: "error",
         });
         const status = await response.json();
-        if (response.status === 200 && typeof status.ready === "boolean" &&
+        if (response.status === 200 && status.ready === true &&
+            ["trusted_host", "oauth"].includes(status.authMode) &&
             status.url === `http://${process.argv[2]}:8766/mcp`) {
-            console.log(`HA-facing MCP IPC available (client provisioned: ${status.ready})`);
+            console.log(status.authMode);
             process.exit(0);
         }
     } catch { /* Startup can still be probing the backend; never log secrets/errors. */ }
@@ -206,13 +206,96 @@ while (Date.now() < deadline) {
 }
 process.exit(1);
 NODE
+    ) || fail "HA-facing MCP authenticated IPC did not become ready"
 
     # Use Core's network namespace and Supervisor's actual hostname. A loopback
     # request or a guessed hostname can return 403 instead of testing MCP auth.
-    status=$(docker exec homeassistant curl -sS -o /dev/null \
+    if [ "${ha_mcp_auth_mode}" = oauth ]; then
+        status=$(docker exec homeassistant curl -sS -o /dev/null \
         --connect-timeout 2 --max-time 5 -X POST -w '%{http_code}' \
         "http://${ha_mcp_hostname}:8766/mcp")
-    [ "${status}" = 401 ] || fail "unauthorized HA-facing MCP from Core returned ${status}, not 401"
+        [ "${status}" = 401 ] || fail "unauthorized HA-facing MCP from Core returned ${status}, not 401"
+    else
+        # Exercise the running SDK transport, not a fixture. Only enumerate tools;
+        # never invoke one or print response bodies, session IDs or credentials.
+        docker exec -i homeassistant python3 - "${ha_mcp_hostname}" <<'PY' \
+            || fail "trusted-host MCP initialization/session/tools list from Core failed"
+import asyncio
+import logging
+import sys
+
+logging.disable(logging.CRITICAL)
+try:
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+    from probatio import from_openapi
+except ImportError:
+    print("Core lacks the required MCP client or probatio API; enable the MCP integration through Home Assistant and rerun acceptance. Do not pip-install packages in Core.", file=sys.stderr)
+    sys.exit(1)
+
+async def check():
+    async with asyncio.timeout(30):
+        async with streamablehttp_client(f"http://{sys.argv[1]}:8766/mcp") as (read, write, get_session_id):
+            async with ClientSession(read, write) as session:
+                initial = await session.initialize()
+                session_id = get_session_id()
+                assert session_id and initial.capabilities.tools is not None
+                repeated = await session.initialize()
+                assert get_session_id() == session_id
+                assert repeated == initial
+                result = await session.list_tools()
+                assert len(result.tools) == 8 and not result.nextCursor
+                assert {tool.name for tool in result.tools} == {
+                    "get_states", "search_entities", "get_entity_details", "get_home_context",
+                    "get_areas", "get_devices", "get_calendars", "get_calendar_events",
+                }
+                for tool in result.tools:
+                    from_openapi(tool.inputSchema)
+
+try:
+    asyncio.run(check())
+except Exception:
+    sys.exit(1)
+PY
+    fi
+
+    # Trusted mode rejects the TCP peer; OAuth preserves its Bearer challenge.
+    # Check headers in-process so even unexpected response headers are not logged.
+    docker exec -i "${container}" node --input-type=module - "${ha_mcp_hostname}" "${ha_mcp_auth_mode}" <<'NODE' \
+        || fail "loopback MCP status, challenge or cache policy did not match auth mode"
+import assert from "node:assert/strict";
+import { request } from "node:http";
+try {
+    for (const forged of [false, true]) {
+        const headers = { Host: `${process.argv[2]}:8766` };
+        if (forged) Object.assign(headers, {
+            "X-Forwarded-For": "172.30.32.1", "X-Real-IP": "172.30.32.1",
+            Forwarded: "for=172.30.32.1", "X-HA-MCP-Ingress-Secret": "forged",
+        });
+        // Node fetch strips Host overrides; use the HTTP client to test the
+        // authentication boundary rather than failing the virtual-host guard.
+        const response = await new Promise((resolve, reject) => {
+            const req = request("http://127.0.0.1:8766/mcp", {
+                method: "POST", headers, signal: AbortSignal.timeout(5000),
+            }, (res) => {
+                resolve({ status: res.statusCode, headers: res.headers });
+                res.destroy();
+            });
+            req.on("error", reject);
+            req.end();
+        });
+        assert.match(response.headers["cache-control"] ?? "", /(?:^|,)\s*no-store\s*(?:,|$)/i);
+        if (process.argv[3] === "trusted_host") {
+            assert.equal(response.status, 403);
+            assert.equal(response.headers["www-authenticate"], undefined);
+        } else {
+            assert.equal(process.argv[3], "oauth");
+            assert.equal(response.status, 401);
+            assert.match(response.headers["www-authenticate"] ?? "", /^Bearer(?:\s|$)/i);
+        }
+    }
+} catch { process.exit(1); }
+NODE
 
     # Spoof browser/Ingress identity, but never supply the real IPC secret or a
     # valid CSRF nonce. No provisioning, approval, or revocation is performed.

@@ -243,8 +243,8 @@ function transformJavaScript(content, ingressPath) {
 
 function injectMcpSetupLink(html, ingressPath) {
   const link = `<a data-ha-mcp-setup href="${ingressPath}/ha-mcp/" target="_blank" rel="noopener noreferrer"`
-    + ' title="Home Assistant MCP setup (opens in a new tab)"'
-    + ' style="position:fixed;top:8px;right:8px;z-index:1000;box-sizing:border-box;max-width:calc(100vw - 16px);min-height:44px;display:inline-flex;align-items:center;padding:8px 12px;border:1px solid #64748b;border-radius:6px;background:#0f172a;color:#fff;font:13px/1.4 system-ui,sans-serif;text-decoration:underline;box-shadow:0 2px 6px #0004">Home Assistant MCP setup</a>';
+    + ' title="Home Assistant MCP status (opens in a new tab)"'
+    + ' style="position:fixed;top:8px;right:8px;z-index:1000;box-sizing:border-box;max-width:calc(100vw - 16px);min-height:44px;display:inline-flex;align-items:center;padding:8px 12px;border:1px solid #64748b;border-radius:6px;background:#0f172a;color:#fff;font:13px/1.4 system-ui,sans-serif;text-decoration:underline;box-shadow:0 2px 6px #0004">Home Assistant MCP status</a>';
   return /<\/body\s*>/i.test(html) ? html.replace(/<\/body\s*>/i, `${link}</body>`) : html + link;
 }
 

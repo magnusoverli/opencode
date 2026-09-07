@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { openState, acquireStateLock, createIngressSecret, verifyAdministrator, requireThat } from "./lib/ha-facing-auth.js";
+import { openState, acquireStateLock, createIngressSecret, verifyAdministrator, requireThat, selectAuthMode, resolveCorePeer } from "./lib/ha-facing-auth.js";
 import { openBackend, createReadServer } from "./lib/ha-facing-backend.js";
 import { startHaFacing } from "./lib/ha-facing-http.js";
 
@@ -9,6 +9,8 @@ import { startHaFacing } from "./lib/ha-facing-http.js";
 // GET http://supervisor/addons/self/info). HA_MCP_PORT=8766 and
 // HA_MCP_INGRESS_PORT=8767 are internal-only ports, never host mappings.
 // IPC secret: /run/ha-facing-mcp/ingress-secret, regenerated on every start.
+// Auth mode is fixed at startup: provisioned client => OAuth; otherwise trust
+// only the private IPv4 host gateway reported by authenticated GET /core/info.
 // Discovery is owned by the parent: publish ONLY after authenticated IPC
 // GET /ha-mcp/status returns ready:true. Never log the authorization URL,
 // request queries, headers, credentials, code, token or state file contents.
@@ -32,12 +34,14 @@ export async function launch(env = process.env) {
   let state;
   try {
     state = openState(directory);
+    const authMode = selectAuthMode(state);
+    const trustedPeer = authMode === "trusted_host" ? await resolveCorePeer(env.SUPERVISOR_TOKEN) : undefined;
     const probe = await openBackend(env.SUPERVISOR_TOKEN);
     try { await (await createReadServer(probe)).close(); } finally { await probe.close(); }
     const ingressSecret = createIngressSecret("/run/ha-facing-mcp/ingress-secret");
     const listener = await startHaFacing({ state, resourceUrl: `http://${hostname}:${port}/mcp`, ingressSecret,
       verifyAdmin: (id) => verifyAdministrator(env.SUPERVISOR_TOKEN, id), backendFactory: () => openBackend(env.SUPERVISOR_TOKEN),
-      corePort: port, ipcPort,
+      corePort: port, ipcPort, authMode, trustedPeer,
     });
     return { async close() { await listener.close(); state.close(); await unlock(); } };
   } catch (error) { state?.close(); await unlock(); throw error; }

@@ -12,10 +12,12 @@ function routeHaMcp(req, res, { ingressPath, upstreamPath, lan = false }) {
   const remote = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
   const user = req.headers["x-remote-user-id"];
   const host = req.headers["x-forwarded-host"];
+  const proto = req.headers["x-forwarded-proto"];
   let origin;
   try {
+    if (proto !== "http" && proto !== "https") throw new Error();
     if (typeof host !== "string" || /[\s,/@\\?#%]/.test(host)) throw new Error();
-    origin = new URL(`https://${host}`);
+    origin = new URL(`${proto}://${host}`);
     if (!origin.hostname || origin.username || origin.password) throw new Error();
   } catch { reject(403); return true; }
   // Reject duplicate security metadata rather than selecting one interpretation.
@@ -24,7 +26,6 @@ function routeHaMcp(req, res, { ingressPath, upstreamPath, lan = false }) {
   if (lan || remote !== "172.30.32.2"
       || securityHeaders.some((name) => names.filter((entry) => entry === name).length > 1)
       || typeof user !== "string" || !/^[a-f0-9]{32}$/.test(user)
-      || req.headers["x-forwarded-proto"] !== "https"
       // Core can retain caller-supplied forwarding headers. This origin is only
       // a candidate: browser Origin and the service's bound nonce must agree.
       || ((req.method === "POST" || req.headers.origin !== undefined) && req.headers.origin !== origin.origin)

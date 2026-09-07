@@ -17,7 +17,7 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
     const directory = join(temp, "state");
     const secretPath = join(temp, "secret");
     writeFileSync(secretPath, "test-ipc-secret", { mode: 0o600 });
-    const state = { ready: false, ipcStatus: 200, postStatus: 200, deleteStatus: 200,
+    const state = { ready: false, authMode: "trusted_host", ipcStatus: 200, postStatus: 200, deleteStatus: 200,
       uuid: "uuid-one", calls: [], ipcCalls: 0 };
     const server = createServer(async (req, res) => {
       const chunks = [];
@@ -28,7 +28,7 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
         assert.equal(req.headers["x-ha-mcp-ingress-secret"], readFileSync(secretPath, "utf8"));
         assert.equal(req.headers.authorization, undefined);
         res.writeHead(state.ipcStatus);
-        res.end(JSON.stringify({ ready: state.ready, url: "http://test-addon:8766/mcp" }));
+        res.end(JSON.stringify({ ready: state.ready, url: "http://test-addon:8766/mcp", authMode: state.authMode }));
         return;
       }
       state.calls.push({ method: req.method, url: req.url, body: Buffer.concat(chunks).toString() });
@@ -47,10 +47,11 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
       read: () => JSON.parse(readFileSync(path, "utf8")) };
   }
 
-  test(`${channel}: authenticated readiness, periodic POST and atomic UUID replacement`, async (t) => {
+  test(`${channel}: trusted readiness without OAuth artifacts, periodic POST and atomic UUID replacement`, async (t) => {
     const f = await fixture(t);
     assert.equal(await f.publisher.tick(), false);
     assert.equal(f.state.calls.length, 0);
+    assert.deepEqual(readdirSync(f.options.directory), []);
     f.state.ready = true;
     assert.equal(await f.publisher.tick(), true);
     assert.deepEqual(f.read(), { uuid: "uuid-one" });
@@ -69,6 +70,17 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
       assert.equal(statSync(f.path).mode & 0o777, 0o600);
       assert.equal(statSync(f.options.directory).mode & 0o777, 0o700);
     }
+  });
+
+  test(`${channel}: OAuth status uses discovery readiness, not auth mode as a provisioning signal`, async (t) => {
+    const f = await fixture(t);
+    f.state.authMode = "oauth";
+    assert.equal(await f.publisher.tick(), false);
+    assert.equal(f.state.calls.length, 0);
+    f.state.ready = true;
+    assert.equal(await f.publisher.tick(), true);
+    assert.deepEqual(f.read(), { uuid: "uuid-one" });
+    assert.deepEqual(readdirSync(f.options.directory), ["discovery.json"]);
   });
 
   test(`${channel}: auth errors, malformed UUID and temporary readiness loss retain registration`, async (t) => {
@@ -190,6 +202,7 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
     assert.match(script, /HA_MCP_INGRESS_PORT=8767/);
     assert.match(script, /HA_MCP_ENABLED="\$\{enabled\}"/);
     assert.doesNotMatch(script, /source |interface_mode|bashio::config 'mcp_enabled'|s6-setuidgid/);
+    assert.doesNotMatch(script, /HA_MCP_AUTH_MODE|trusted_host|oauth|provision/i);
     const assignments = [...script.slice(script.indexOf("exec ")).matchAll(/\b([A-Z_]+)=/g)].map((match) => match[1]);
     assert.deepEqual(assignments, ["PATH", "HOME", "HA_MCP_ENABLED", "HA_MCP_STATE_DIR", "HA_MCP_PORT", "HA_MCP_INGRESS_PORT", "SUPERVISOR_TOKEN"]);
   });

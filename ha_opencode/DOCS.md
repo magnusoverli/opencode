@@ -693,19 +693,27 @@ terminal/OpenChamber selection, and local MCP enablement.
 Automatic app discovery requires [Core PR #180378](https://github.com/home-assistant/core/pull/180378),
 merged into the **2026.10 development line** and absent from 2026.9.1. The expected
 first stable release is 2026.10.0; verify the shipped Core release before relying
-on discovery. Older MCP-capable installations can attempt manual setup using the
-endpoint shown after provisioning; existing OpenCode functionality is unchanged.
+on discovery. Existing OpenCode functionality is unchanged on older versions.
 
 #### Setup
 
-1. Open Home Assistant over **HTTPS**, enable **Expose read-only MCP to Home Assistant** (`ha_mcp_server_enabled`), and restart the app. No Network port mapping is needed.
-2. Open the app through the Home Assistant sidebar and select **Home Assistant MCP setup**. Use an active Home Assistant administrator or owner account; LAN and unauthenticated requests cannot open setup.
-3. Register the exact OAuth callback displayed by Home Assistant. With My Home Assistant enabled, keep `https://my.home-assistant.io/redirect/oauth`; otherwise use your HTTPS Home Assistant address followed by `/auth/external/callback`.
-4. Approve **Provision client**. The generated client ID and secret appear once. Enter them when Home Assistant's **Model Context Protocol** integration requests application credentials. This is the MCP client integration, not **Model Context Protocol Server**.
-5. Confirm the discovered app in **Settings > Devices & Services**, then approve the read-only OAuth consent screen. Keep the app's Ingress session open in the same browser while authorizing.
-6. Select the resulting LLM API in your compatible conversation agent. Discovery does not automatically enable tools in every agent.
+1. Enable **Expose read-only MCP to Home Assistant** (`ha_mcp_server_enabled`) and restart the app. The option is off by default. No Network port mapping is needed.
+2. On a supporting Core version, confirm the discovered **Model Context Protocol** integration in **Settings > Devices & Services**. This is the MCP client integration, not **Model Context Protocol Server**.
+3. Select the resulting LLM API in your compatible conversation agent. Discovery does not automatically enable tools in every agent.
 
-Stable and beta have independent credentials and discovered APIs. Discovery-owned
+**HTTP and HTTPS Home Assistant browser access both work.** New and previously
+unprovisioned installations use trusted-host access: no OAuth client registration,
+credential copying, callback configuration, or visit to a setup page is required.
+Publication begins automatically after service readiness, even if the installed
+Core does not yet support discovery. A supporting Core version is still needed
+to show the discovery confirmation.
+
+The optional **Home Assistant MCP status** link in the app's Ingress UI explains
+the access mode. It is restricted to an active HA administrator/owner and is not
+part of onboarding. On older MCP-capable Core versions, its endpoint can be used
+for manual client setup, but that does not test automatic discovery.
+
+Stable and beta have independent state and discovered APIs. Discovery-owned
 API IDs are `mcp-<full-app-slug>`, remaining stable across reinstallations with the
 same slug. An existing manually configured entry with the same URL is not
 automatically converted to discovery ownership.
@@ -720,29 +728,40 @@ There is no shell, file editing, service control, update, log, template, screens
 or native-MCP forwarding tool. These reads are **installation-wide**, not limited
 by Assist's exposed-entity settings, and can reveal occupancy or other private data.
 
-Browser consent uses HTTPS Ingress. Core's authenticated MCP and OAuth traffic
-uses the **trusted, unencrypted internal app network** on port 8766; other apps
-can reach this port but must authenticate. Do not publish or reverse-proxy it.
-Port 8767 is loopback-only consent IPC. Tokens and client secrets are separate
-from OpenCode's credentials; the service retains the underlying privileged
-Supervisor token, so the allowlist is not an OS sandbox.
-
-HA currently uses a provisioned confidential client with `client_secret_post`,
-without PKCE. This server accepts that specific compatibility flow and enforces
-S256 when PKCE is supplied; it is not a general public-client OAuth service.
-Access tokens expire after 15 minutes; rotating refresh grants expire after
-30 days, requiring renewed authorization. Consent is installation access, not
-per-tool or per-HA-user approval on every invocation. Removing an approving user
-does not itself revoke an already issued grant.
+The MCP listener uses **unencrypted internal HTTP** on port 8766. Trusted-host
+mode accepts only the actual socket peer matching the host gateway reported by
+Supervisor. Ordinary sibling containers and forged forwarding headers are
+rejected, but **other host-networked apps and host processes can also read the
+exposed data without credentials**. This is a network trust boundary, not unique
+Core identity or per-user authorization. Enable it only on a trusted installation.
+Do not publish or reverse-proxy this port. Port 8767 is loopback-only admin IPC.
+The backend retains its privileged Supervisor token; the allowlist is not an OS
+sandbox. HTTP browser traffic is unencrypted too; HTTPS remains preferable where
+available, but is not required.
 
 Disable the option and restart to close the listener and withdraw discovery;
 failed Supervisor withdrawal is retried. Normal restarts preserve registration
-and credentials. Reprovisioning revokes existing grants and requires updating HA
-application credentials. If an Ingress cookie expires, reopen the app and retry
-authorization; reprovision if the external origin or app Ingress path changes.
+and the chosen access mode. Removing only the HA integration does not close the
+trusted-host listener; disable the app option to remove network access.
 Supervisor publication means only that the announcement was accepted, not that
 the user connected it. Uninstall cleanup depends on Supervisor reaching Core;
 after an outage, remove any stale integration manually if necessary.
+
+#### Existing OAuth Installations
+
+An already provisioned OAuth client is detected at startup and **remains in OAuth
+mode**, including after disabling/re-enabling the option. It is not silently
+converted to credential-free access. New/unprovisioned installations use
+trusted-host mode automatically; malformed stored state fails closed.
+
+Existing OAuth users retain client-secret authentication, 15-minute access tokens,
+rotating 30-day refresh grants, and administrator consent. The status link exposes
+the retained setup page if credentials need replacement. HTTP or HTTPS Ingress is
+accepted with exact-origin CSRF checks; direct callbacks must use the exact HA
+`/auth/external/callback` URL, or HTTPS My Home Assistant. Changing the external
+origin/path requires reprovisioning and updating HA application credentials.
+Reprovisioning revokes old grants; removing an approving user does not itself
+revoke an issued grant. HTTP does not encrypt consent or OAuth codes.
 
 ### Model Tool Evaluation
 

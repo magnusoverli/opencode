@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## 3.0.0b12
+
+- Simplified opt-in MCP setup to automatic trusted-host discovery over HTTP or HTTPS without manual credentials; already-provisioned OAuth clients remain authenticated.
+- New and unprovisioned installations need only enable the feature, restart, and confirm the discovered integration on a supporting Core version (expected 2026.10). The optional Home Assistant MCP status page replaces the setup link.
+- Retained the eight-tool read-only allowlist and no published host ports. Trusted-host access permits the Supervisor-reported host gateway, including other host-networked apps and host processes; ordinary sibling-container connections and forged forwarding headers are rejected.
+- Added real-browser HTTP/HTTPS, socket-peer, OAuth-preservation, and session-expiry tests, and extended acceptance to use Core's MCP client. Real Supervisor/Core discovery and lifecycle acceptance remain outstanding.
+
 ## 3.0.0b11
 
 - Added opt-in read-only MCP tools for Home Assistant with Ingress administrator consent, OAuth authentication, app discovery, and disable cleanup.
