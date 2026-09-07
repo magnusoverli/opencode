@@ -14,7 +14,7 @@ args:
   OPENCODE_VERSION: "1.18.25"
   # V2 is the default beta runtime. V1 remains installed as the untouched
   # rollback, LAN, and OpenChamber path.
-  OPENCODE_V2_VERSION: "0.0.0-beta-18684"
+  OPENCODE_V2_VERSION: "0.0.0-beta-19242"
   # The other genuine per-channel pin: beta can lead stable while a new
   # OpenChamber soaks.
   OPENCHAMBER_VERSION: "1.21.0"

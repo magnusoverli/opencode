@@ -81,7 +81,7 @@ describe("real OpenCode V2 readiness probe", () => {
         timeout: 30_000,
       });
       assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout.trim(), /(?:^|\sv?)0\.0\.0-beta-18684$/);
+      assert.match(result.stdout.trim(), /(?:^|\sv?)0\.0\.0-beta-19242$/);
       assert.doesNotMatch(result.stdout + result.stderr, new RegExp(SENTINEL));
       for (const [name, path] of Object.entries(v1Roots)) {
         assert.deepEqual(await readdir(path), [`${name}.sentinel`]);

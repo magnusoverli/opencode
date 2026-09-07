@@ -30,7 +30,7 @@ const V2_BIN = join(
   "bin",
   "opencode2.exe",
 );
-const TARGET_VERSION = "0.0.0-beta-18684";
+const TARGET_VERSION = "0.0.0-beta-19242";
 const AUTH_SECRET = "migration-test-secret-must-not-leak";
 
 function findPython() {

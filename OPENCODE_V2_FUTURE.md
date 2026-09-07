@@ -7,13 +7,16 @@ V2 roadmap, not a claim that V2 is ready for stable users.
 
 ## Status Snapshot
 
-Updated on 2026-09-01:
+Updated on 2026-09-07:
 
 - Stable OpenCode is `opencode-ai@1.18.25` and remains the certified runtime in
   stable add-on 2.5.3.
 - V2 is an active beta published separately as `@opencode-ai/cli`. The selected
-  exact build is `0.0.0-beta-18684` and installs the
+  exact build is `0.0.0-beta-19242` and installs the
   `opencode2` command.
+- This pin update is limited to quick contract checks at the user's request;
+  the full V2 compatibility lane is deferred. It does not establish a fix for
+  missing tool outputs or restart-related `ChildProcess.spawn` failures.
 - Companion V2 packages use the same exact beta version. The beta integration must pin
   the CLI and its direct first-party plugin dependency graph; direct client or
   server dependencies are added only if add-on code imports them. It must never

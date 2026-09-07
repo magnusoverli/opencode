@@ -41,7 +41,7 @@ ARG OPENCODE_VERSION=1.18.25
 # OpenCode V2 and its plugin API are one matched, exact beta build. V1 remains
 # installed as the rollback, LAN, and OpenChamber runtime; no V2 process may use
 # the V1 data roots.
-ARG OPENCODE_V2_VERSION=0.0.0-beta-18684
+ARG OPENCODE_V2_VERSION=0.0.0-beta-19242
 ARG OPENCHAMBER_VERSION=1.21.0
 ARG PPQ_PROXY_VERSION=0.1.0
 ARG TSX_VERSION=4.20.6

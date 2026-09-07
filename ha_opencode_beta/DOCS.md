@@ -23,6 +23,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 
 ## Current Beta Changes
 
+- **V2 runtime update**: Beta `3.0.0b13` pins the CLI and plugin to `0.0.0-beta-19242`. This update has only quick contract verification; full runtime compatibility and the reported restart-related shell failures remain unverified.
 - **OpenCode V2 terminal cutover**: Beta `3.0.0b10` uses OpenCode V2 `0.0.0-beta-18684` for the terminal by default. For broad HAOS compatibility, the server runs as root and edits `/homeassistant` directly, matching the proven V1 filesystem model. Its attached TUI still runs separately as UID `60001`. Certified V1 `1.18.25` remains available through the **OpenCode runtime** option.
 - **Fresh V2 provider sign-in**: V1 sessions migrate into V2, but V1 provider credentials do not. Authenticate providers once with `/connect` in V2; the retained V1 credential remains untouched.
 - **Native Home Assistant MCP in V2**: Enabling the optional native bridge adds `homeassistant_native` alongside `homeassistant`. The sidecar keeps the Supervisor token out of inherited V2 environment, managed config, logs, and model context. Because allowed V2 shell commands run as container root, they remain trusted code rather than an OS-isolated boundary.
