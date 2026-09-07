@@ -7,6 +7,7 @@
 - Updated the pinned OpenCode V2 CLI and plugin to beta-19242; full runtime and restart validation remains pending.
 - Updated authentication health checks to the new runtime's protected `/api/health` endpoint, preserving unauthenticated rejection checks.
 - Adapted the MCP and runtime-guard plugins to the new directory-based loader, including the attached TUI configuration.
+- Fixed the policy self-test to recognize the runtime's nested plugin state while still rejecting inactive or malformed records.
 - Removed the injected Home Assistant MCP status badge and its unused UI plumbing; automatic discovery and existing OAuth access are unchanged.
 - This beta does not claim to resolve missing tool outputs or the reported post-restart ChildProcess.spawn failure; verification is intentionally limited pending in-app testing.
 

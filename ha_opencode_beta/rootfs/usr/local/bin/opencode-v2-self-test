@@ -256,7 +256,9 @@ def exercise_policy(client, expected_version, mcp_enabled, native_mcp_enabled, r
         active = {
             plugin.get("id")
             for plugin in plugins
-            if isinstance(plugin, dict) and plugin.get("status") == "active"
+            if isinstance(plugin, dict)
+            and isinstance(plugin.get("state"), dict)
+            and plugin["state"].get("status") == "active"
         }
         if "homeassistant.runtime-guard" not in active:
             return None

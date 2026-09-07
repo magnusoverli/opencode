@@ -25,6 +25,13 @@ it("checks authentication on the V2 API health route, not the web UI fallback", 
   assert.doesNotMatch(fixture + selfTest, /\/global\/health/);
 });
 
+it("requires the certified V2 nested plugin state without a legacy status fallback", () => {
+  const selfTest = read(ROOTFS, "usr", "local", "bin", "opencode-v2-self-test");
+  assert.match(selfTest, /isinstance\(plugin\.get\("state"\), dict\)/);
+  assert.match(selfTest, /plugin\["state"\]\.get\("status"\) == "active"/);
+  assert.doesNotMatch(selfTest, /plugin\.get\("status"\)/);
+});
+
 /** Every shipped shell script and s6 run file, as [relative path, contents]. */
 function shellSources() {
   const roots = [
