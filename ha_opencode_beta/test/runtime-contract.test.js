@@ -17,6 +17,14 @@ const ROOTFS = path.join(ADDON_DIR, "rootfs");
 
 const read = (...parts) => fs.readFileSync(path.join(...parts), "utf8");
 
+it("checks authentication on the V2 API health route, not the web UI fallback", () => {
+  const fixture = read(ADDON_DIR, "test", "v2-boundary-fixture.sh");
+  const selfTest = read(ROOTFS, "usr", "local", "bin", "opencode-v2-self-test");
+  assert.match(fixture, /wait_for_status 401 "http:\/\/127\.0\.0\.1:\$\{SERVER_PORT\}\/api\/health"/);
+  assert.match(selfTest, /client\.request\("\/api\/health", expected=401, authenticated=False/);
+  assert.doesNotMatch(fixture + selfTest, /\/global\/health/);
+});
+
 /** Every shipped shell script and s6 run file, as [relative path, contents]. */
 function shellSources() {
   const roots = [

@@ -147,7 +147,7 @@ test -S "${RUNTIME_ROOT}/credential.sock"
 /usr/local/bin/opencode-v2-launch "${RUNTIME_ROOT}" "${GENERATION_ROOT}" \
     "${CACHE_ROOT}" "${SERVER_PORT}" "${RUNTIME_ROOT}/workspace" >"${BOUNDARY_ROOT}/v2.log" 2>&1 &
 SECURE_PID=$!
-wait_for_status 401 "http://127.0.0.1:${SERVER_PORT}/global/health"
+wait_for_status 401 "http://127.0.0.1:${SERVER_PORT}/api/health"
 kill -0 "${BROKER_PID}"
 test ! -e "${RUNTIME_ROOT}/v2.pid"
 test "$(awk '/^Uid:/ {print $2":"$3":"$4}' "/proc/${SECURE_PID}/status")" = "0:0:0"

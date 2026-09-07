@@ -5,6 +5,7 @@
 ## 3.0.0b13
 
 - Updated the pinned OpenCode V2 CLI and plugin to beta-19242; full runtime and restart validation remains pending.
+- Updated authentication health checks to the new runtime's protected `/api/health` endpoint, preserving unauthenticated rejection checks.
 - Removed the injected Home Assistant MCP status badge and its unused UI plumbing; automatic discovery and existing OAuth access are unchanged.
 - This beta does not claim to resolve missing tool outputs or the reported post-restart ChildProcess.spawn failure; verification is intentionally limited pending in-app testing.
 

@@ -238,7 +238,7 @@ def wait_for(description, probe):
 
 def exercise_policy(client, expected_version, mcp_enabled, native_mcp_enabled, reporter):
     def authentication_boundary():
-        client.request("/global/health", expected=401, authenticated=False, decode=False)
+        client.request("/api/health", expected=401, authenticated=False, decode=False)
         return True
 
     wait_for("V2 authentication boundary", authentication_boundary)
