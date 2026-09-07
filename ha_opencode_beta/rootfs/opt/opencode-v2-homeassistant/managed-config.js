@@ -1,8 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { TOOL_PROFILES } from "../ha-mcp-server/lib/tool-profiles.js";
 
-export const DEFAULT_PLUGIN_PACKAGE = "file:///opt/opencode-v2-homeassistant/plugin.js";
-export const DEFAULT_RUNTIME_GUARD_PACKAGE = "file:///opt/opencode-v2-homeassistant/runtime-guard.js";
+export const DEFAULT_PLUGIN_PACKAGE = "file:///opt/opencode-v2-homeassistant/mcp-plugin";
+export const DEFAULT_RUNTIME_GUARD_PACKAGE = "file:///opt/opencode-v2-homeassistant/runtime-guard-plugin";
 export const DEFAULT_MCP_ENDPOINT = "http://127.0.0.1:8765/mcp";
 export const DEFAULT_NATIVE_MCP_ENDPOINT = "http://127.0.0.1:8765/native-mcp";
 export const DEFAULT_WORKSPACE = "/homeassistant";

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
@@ -28,6 +29,30 @@ const GENERATOR = join(
 );
 
 describe("OpenCode V2 managed configuration", () => {
+  it("uses plugin directories with importable entries that preserve the original plugins", async () => {
+    for (const [packageUrl, directory, original] of [
+      [DEFAULT_PLUGIN_PACKAGE, "mcp-plugin", "plugin.js"],
+      [DEFAULT_RUNTIME_GUARD_PACKAGE, "runtime-guard-plugin", "runtime-guard.js"],
+    ]) {
+      assert.equal(packageUrl, `file:///opt/opencode-v2-homeassistant/${directory}`);
+      const root = new URL(`../rootfs/opt/opencode-v2-homeassistant/${directory}/`, import.meta.url);
+      assert.ok((await stat(root)).isDirectory());
+      assert.deepEqual(JSON.parse(await readFile(new URL("package.json", root), "utf8")), {
+        type: "module",
+      });
+      assert.ok((await stat(new URL("index.js", root))).isFile());
+      const entry = await import(new URL("index.js", root).href);
+      const implementation = await import(new URL(`../${original}`, root).href);
+      assert.equal(entry.default, implementation.default);
+    }
+  });
+
+  it("configures the TUI with the same runtime guard directory", async () => {
+    const init = await readFile(join(ADDON_ROOT, "rootfs/etc/s6-overlay/s6-rc.d/init-opencode/run"), "utf8");
+    assert.ok(init.includes(`'    { "package": "${DEFAULT_RUNTIME_GUARD_PACKAGE}" }'`));
+    assert.doesNotMatch(init, /file:\/\/\/opt\/opencode-v2-homeassistant\/(?:plugin|runtime-guard)\.js/);
+  });
+
   it("translates the V1 safety policy into ordered native V2 rules", () => {
     const config = buildManagedConfig();
 

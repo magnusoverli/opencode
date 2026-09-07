@@ -666,7 +666,7 @@ if [ "${TERMINAL_RUNTIME}" = "v2" ] && [ "${V2_STATE_READY}" = "true" ] && openc
             '  "$schema": "https://opencode.ai/config.json",' \
             '  "autoupdate": false,' \
             '  "plugins": [' \
-            '    { "package": "file:///opt/opencode-v2-homeassistant/runtime-guard.js" }' \
+            '    { "package": "file:///opt/opencode-v2-homeassistant/runtime-guard-plugin" }' \
             '  ]' \
             '}' > "${V2_RUNTIME_ROOT}/tui/config/opencode/opencode.json" \
         && chmod 0444 "${V2_RUNTIME_ROOT}/tui/config/opencode/opencode.json" \
