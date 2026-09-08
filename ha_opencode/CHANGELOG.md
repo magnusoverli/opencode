@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 2.5.4
+
+- Pinned OpenCode to 1.18.29, including fixes for GPT-6 model discovery with OpenAI subscription authentication.
 - Removed the injected Home Assistant MCP status badge and its unused UI plumbing; automatic discovery and existing OAuth access are unchanged.
 - Added opt-in read-only MCP tools with automatic trusted-host discovery, HTTP/HTTPS support, and no manual credentials for new setups; existing OAuth access is preserved.
 - Made the official Home Assistant Supervisor devcontainer the default workflow and added repeatable app, s6, smoke-test, and Home Assistant Core Ingress acceptance.
