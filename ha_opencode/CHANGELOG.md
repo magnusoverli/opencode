@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Add `openchamber_lan_native_apps` so the OpenChamber desktop and mobile apps can sign in to the OpenChamber LAN UI through the HTTPS proxy; only OpenChamber's packaged app origins are accepted ([#135](https://github.com/magnusoverli/opencode/issues/135)).
+
 ## 3.0.10
 
 - Explain first-boot migration progress and temporary Ingress 502s while large histories convert, so users know when startup finishes without restarting ([#130](https://github.com/magnusoverli/opencode/issues/130)).

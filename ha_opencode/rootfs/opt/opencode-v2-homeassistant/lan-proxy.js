@@ -17,7 +17,11 @@ function cleanHeaders(headers, websocket = false) {
   return result;
 }
 
-export function createLanProxy({ mode, origin, proxies, corsOrigins = [], password, backendPassword, upstreamPort }) {
+// Origins of OpenChamber's packaged clients (desktop, iOS, Android WebViews).
+// OpenChamber's own server grants CORS to exactly these.
+export const NATIVE_APP_ORIGINS = Object.freeze(["openchamber-ui://app", "capacitor://localhost", "https://localhost"]);
+
+export function createLanProxy({ mode, origin, proxies, corsOrigins = [], nativeApps = false, password, backendPassword, upstreamPort }) {
   if (!["api", "ui"].includes(mode)) throw new Error("Invalid LAN proxy mode");
   const publicUrl = new URL(origin);
   const trusted = new BlockList();
@@ -25,7 +29,9 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], passwo
     const ip = normalizeIp(value);
     trusted.addAddress(ip, isIP(ip) === 6 ? "ipv6" : "ipv4");
   }
-  const allowedOrigins = new Set([origin, ...(mode === "api" ? corsOrigins : [])]);
+  const nativeApp = mode === "ui" && nativeApps === true;
+  const nativeOrigins = new Set(nativeApp ? NATIVE_APP_ORIGINS : []);
+  const allowedOrigins = new Set([origin, ...(mode === "api" ? corsOrigins : []), ...nativeOrigins]);
   const lanAuthorization = hash(`Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`);
   const upstreamAuthorization = mode === "api" ? `Basic ${Buffer.from(`opencode:${backendPassword}`).toString("base64")}` : null;
   const sockets = new Set();
@@ -38,7 +44,10 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], passwo
     if (req.headers["x-forwarded-host"] && req.headers["x-forwarded-host"].toLowerCase() !== publicUrl.host) return 403;
     const originHeader = req.headers.origin;
     if (originHeader !== undefined && !allowedOrigins.has(originHeader)) return 403;
-    if (mode === "ui" && (upgrade || !["GET", "HEAD", "OPTIONS"].includes(req.method)) && originHeader !== origin) return 403;
+    if (mode === "ui" && (upgrade || !["GET", "HEAD", "OPTIONS"].includes(req.method)) && originHeader !== origin
+      // Browsers always send Origin on writes, so a missing one is a non-browser
+      // client (the desktop shell's main-process login) that cannot be forged cross-site.
+      && !(nativeApp && (originHeader === undefined || nativeOrigins.has(originHeader)))) return 403;
     // The nearest trusted proxy must overwrite X-Forwarded-For with one IP.
     // Do not let an arbitrary list become OpenChamber's login rate-limit key.
     if (typeof req.headers["x-forwarded-for"] !== "string" || !isIP(req.headers["x-forwarded-for"])) return 403;
@@ -84,7 +93,10 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], passwo
 
   function responseHeaders(req, source) {
     const result = cleanHeaders(source);
-    for (const name of Object.keys(result)) if (name.startsWith("access-control-")) delete result[name];
+    // OpenChamber answers packaged-app origins with its own CORS headers; keep them.
+    if (!nativeOrigins.has(req.headers.origin)) {
+      for (const name of Object.keys(result)) if (name.startsWith("access-control-")) delete result[name];
+    }
     return { ...result, ...cors(req), "cache-control": "no-store" };
   }
 

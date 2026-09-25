@@ -110,6 +110,10 @@ configuration:
     name: "LAN server CORS origins"
     description: "Additional exact HTTPS browser origins allowed to call the authenticated LAN API. No wildcards. Empty allows only the API's own origin; non-browser authenticated clients do not need an entry."
 
+  openchamber_lan_native_apps:
+    name: "OpenChamber LAN native apps"
+    description: "Lets the OpenChamber desktop and mobile apps sign in to the OpenChamber LAN UI through your HTTPS proxy. Allows only OpenChamber's packaged app origins; browsers still need the public origin. Requires OpenChamber LAN web UI."
+
   ppq_private_enabled:
     name: "PPQ private TEE models (beta)"
     description: "Starts the internal proxy and registers native ppq-private models when a key is configured. Select a private model explicitly; this does not switch existing sessions or verify upstream private inference."

@@ -130,6 +130,8 @@ options:
   openchamber_public_url: ""
   # Additional exact HTTPS browser origins for the API frontend.
   cors_origins: []
+  # Let OpenChamber desktop/mobile apps sign in to the OpenChamber LAN UI.
+  openchamber_lan_native_apps: false
 
   # --- 6. Model providers ------------------------------------------------
   # Starts the internal PPQ proxy and registers native ppq-private models when
@@ -203,6 +205,7 @@ schema:
   openchamber_public_url: str?
   cors_origins:
     - str
+  openchamber_lan_native_apps: bool?
 
   # --- 6. Model providers ------------------------------------------------
   ppq_private_enabled: bool

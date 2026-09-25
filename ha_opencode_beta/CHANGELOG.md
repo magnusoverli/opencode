@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add `openchamber_lan_native_apps` so the OpenChamber desktop and mobile apps can sign in to the OpenChamber LAN UI through the HTTPS proxy; only OpenChamber's packaged app origins are accepted ([#135](https://github.com/magnusoverli/opencode/issues/135)).
+
 - Restore device and entity room assignments in OpenChamber via approved Home Assistant registry tools in the full profile ([#132](https://github.com/magnusoverli/opencode/issues/132)).
 - Add a bounded `external_mcp_config` option for remote and local MCP servers. Credentials stay in secured root-owned files, local processes run unprivileged with only their declared environment, external tools default to confirmation, and optional ordered tool rules are translated to native V2 permissions.
 

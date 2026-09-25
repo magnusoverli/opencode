@@ -41,7 +41,7 @@ async function fixture(t, settings = {}) {
     }
     const data = [];
     req.on("data", (chunk) => data.push(chunk));
-    req.on("end", () => res.end(JSON.stringify({ method: req.method, body: Buffer.concat(data).toString(),
+    req.on("end", () => res.writeHead(200, req.headers.origin ? { "access-control-allow-origin": req.headers.origin } : {}).end(JSON.stringify({ method: req.method, body: Buffer.concat(data).toString(),
       authenticated: req.headers.authorization === `Basic ${Buffer.from(`opencode:${backendPassword}`).toString("base64")}`,
       cookie: req.headers.cookie, origin: req.headers.origin, ingress: req.headers["x-ingress-path"],
       forwarded: req.headers.forwarded, proto: req.headers["x-forwarded-proto"], client: req.headers["x-forwarded-for"],
@@ -122,6 +122,38 @@ test("UI frontend retains native authentication, secure cookies and strict same-
   assert.ok(res.headers["set-cookie"][0].includes("Secure"));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].headers.authorization, "");
+});
+
+test("OpenChamber native-app access is opt-in, UI-only and limited to packaged origins", async (t) => {
+  const { parseLanOptions } = await import(`${root}lan-config.js`);
+  const options = { enable_openchamber_lan: true, interface_mode: "openchamber", lan_password: password,
+    lan_trusted_proxies: ["127.0.0.1"], openchamber_public_url: origin };
+  assert.equal(parseLanOptions(options).nativeApps, false);
+  assert.equal(parseLanOptions({ ...options, openchamber_lan_native_apps: true }).nativeApps, true);
+  assert.equal(parseLanOptions({ ...options, enable_openchamber_lan: false, enable_server: true,
+    server_public_url: origin, openchamber_lan_native_apps: true }).nativeApps, false);
+  assert.throws(() => parseLanOptions({ ...options, openchamber_lan_native_apps: "yes" }), /openchamber_lan_native_apps/);
+
+  const { port, calls } = await fixture(t, { mode: "ui", nativeApps: true });
+  const login = { path: "/api/fixture", method: "POST", headers: { authorization: "" } };
+  assert.equal((await request(port, login)).status, 200);
+  const app = await request(port, { ...login, headers: { authorization: "", origin: "openchamber-ui://app" } });
+  assert.equal(app.status, 200);
+  assert.equal(app.headers["access-control-allow-origin"], "openchamber-ui://app");
+  assert.equal((await request(port, { ...login, headers: { authorization: "", origin: "https://localhost" } })).status, 200);
+  const own = await request(port, { ...login, headers: { authorization: "", origin } });
+  assert.equal(own.headers["access-control-allow-origin"], undefined);
+  const before = calls.length;
+  for (const bad of ["null", "https://evil.test", "openchamber-ui://evil", "http://localhost"]) {
+    assert.equal((await request(port, { ...login, headers: { authorization: "", origin: bad } })).status, 403);
+  }
+  assert.equal(calls.length, before);
+
+  const off = await fixture(t, { mode: "ui" });
+  assert.equal((await request(off.port, { ...login, headers: { authorization: "", origin: "openchamber-ui://app" } })).status, 403);
+  assert.equal((await request(off.port, login)).status, 403);
+  const api = await fixture(t, { nativeApps: true });
+  assert.equal((await request(api.port, { headers: { origin: "openchamber-ui://app" } })).status, 403);
 });
 
 test("closing a frontend terminates existing SSE streams for app-restart credential rotation", async (t) => {

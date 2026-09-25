@@ -558,6 +558,18 @@ Set `interface_mode: openchamber`, enable `enable_openchamber_lan`, and configur
 your HTTPS proxy at mapped `4097/tcp`. Sign in using OpenChamber's native password
 screen; enabling this mode also requires that login through HA Ingress.
 
+To use the OpenChamber desktop or mobile app instead of a browser, also enable
+`openchamber_lan_native_apps`, then add the server in the app using
+`openchamber_public_url`. The app signs in from outside the page, so the strict
+same-origin rule would otherwise refuse it. This option additionally accepts
+requests without an `Origin` header (non-browser clients; browsers always send
+one on writes) and OpenChamber's packaged app origins `openchamber-ui://app`,
+`capacitor://localhost` and `https://localhost`, and passes through the CORS
+headers OpenChamber returns for them. Other origins remain refused, and the
+native password or paired-client token is still required. It has no effect on
+the API frontend. The desktop app's "Home network only" pairing stays
+unavailable because OpenChamber listens on loopback inside the app.
+
 Native UI sessions and paired-client tokens are scoped to one app activation.
 Every app restart, including a password change, invalidates them and closes
 existing streams; sign in or pair again. Conversation history, UI settings and
