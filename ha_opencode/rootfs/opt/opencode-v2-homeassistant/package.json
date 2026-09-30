@@ -15,5 +15,10 @@
   },
   "devDependencies": {
     "@opencode-ai/cli": "0.0.0-beta-18684"
+  },
+  "overrides": {
+    "minimatch": {
+      "brace-expansion": "5.0.12"
+    }
   }
 }
