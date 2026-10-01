@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Patch `brace-expansion` (CVE-2026-102276) within each minimatch major's own compatible range instead of a blanket override, since forcing minimatch 9's dependency chain onto brace-expansion 5.x broke its CommonJS interop.
+
 ## 3.1.0
 
 - Restore supported V1 OpenAI-compatible provider settings through validated, in-memory V2 conversion; thanks @nomonkeynodeal for reporting [#141](https://github.com/magnusoverli/opencode/issues/141).
