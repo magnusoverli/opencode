@@ -24,9 +24,9 @@ class ManagedCliTest(unittest.TestCase):
     def test_version_is_metadata_only(self):
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "version"
-            marker.write_text("2.0.13\n")
+            marker.write_text("2.0.21\n")
             with patch.dict(GLOBALS, VERSION_FILE=str(marker)), patch("os.execv") as execute:
-                self.assertEqual(self.invoke(["--version"]), (0, "opencode v2.0.13\n"))
+                self.assertEqual(self.invoke(["--version"]), (0, "opencode v2.0.21\n"))
                 execute.assert_not_called()
 
     def test_service_management_cannot_start_a_daemon(self):
@@ -50,7 +50,7 @@ class ManagedCliTest(unittest.TestCase):
                 self.url = url
             def request(self, path):
                 requested.append((self.url, path))
-                return {"version": "2.0.13", "private": "must-not-be-printed"}
+                return {"version": "2.0.21", "private": "must-not-be-printed"}
         policy = {
             "Reporter": lambda _: None, "SelfTestError": Failure,
             "harden_process": lambda _: None,
@@ -59,7 +59,7 @@ class ManagedCliTest(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "version"
-            marker.write_text("2.0.13")
+            marker.write_text("2.0.21")
             with patch.dict(GLOBALS, VERSION_FILE=str(marker)), patch("os.geteuid", return_value=0), patch("runpy.run_path", return_value=policy), patch("os.execv") as execute, patch("subprocess.Popen", side_effect=AssertionError("status spawned a process")):
                 code, output = self.invoke(["service", "status"])
                 self.assertEqual(code, 0)

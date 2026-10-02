@@ -64,7 +64,7 @@ elif mode == "verify":
     assert not previous.exists()
     marker = json.loads((directory / "generation.json").read_text())
     assert "previous_generation" not in marker
-    assert marker["target_version"] == "2.0.13"
+    assert marker["target_version"] == "2.0.21"
     connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         credential = connection.execute("SELECT value FROM credential WHERE id='upgrade-fixture'").fetchone()[0]

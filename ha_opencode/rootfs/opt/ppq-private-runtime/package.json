@@ -5,10 +5,10 @@
   "description": "Image-owned standalone PPQ proxy and TypeScript launcher",
   "dependencies": {
     "ppq-private-mode": "0.1.0",
-    "tsx": "4.20.6"
+    "tsx": "4.23.15"
   },
   "overrides": {
     "tinfoil": "1.2.1",
-    "@ai-sdk/openai-compatible": "3.0.53"
+    "@ai-sdk/openai-compatible": "3.0.62"
   }
 }

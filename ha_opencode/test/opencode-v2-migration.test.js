@@ -31,7 +31,7 @@ const V2_BIN = join(
   "bin",
   "opencode.exe",
 );
-const TARGET_VERSION = "2.0.13";
+const TARGET_VERSION = "2.0.21";
 const PREVIOUS_VERSION = "0.0.0-beta-18684";
 const PREVIOUS_BIN = join(ADDON_ROOT, "rootfs", "opt", "opencode-v2-homeassistant",
   "node_modules", "@opencode-ai", "cli", "bin", "opencode2.exe");

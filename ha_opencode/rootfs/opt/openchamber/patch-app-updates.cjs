@@ -6,7 +6,7 @@ const path = require("node:path");
 const key = "opencodeUpdate.toast.available.manualDescription";
 // Exact upstream values make drift visible when changing the preview revision.
 // Every locale overrides this key, so an English-only patch is insufficient.
-const messages = {
+const messages = { nl: ["", "Versie {version} beschikbaar. Werk OpenCode bij op de manier waarop u het hebt geïnstalleerd en herstart daarna OpenChamber.", "OpenCode {version} is beschikbaar vanuit de bron. Home Assistant Supervisor beheert de OpenCode- en OpenChamber-versies van deze applicatie. Controleer op updates op de pagina van de applicatie in Home Assistant; deze release betekent niet dat een update beschikbaar is."],
   en: [
     "Version {version} available. Update OpenCode the way you installed it, then restart OpenChamber.",
     "OpenCode {version} is available upstream. Home Assistant Supervisor manages this app's OpenCode and OpenChamber versions. Check the app's page in Home Assistant for updates; this upstream release does not mean an app update is available.",
@@ -54,6 +54,10 @@ const messages = {
   tr: [
     "{version} sürümü mevcut. OpenCode’u kurduğunuz yöntemle güncelleyin, ardından OpenChamber’ı yeniden başlatın.",
     "OpenCode projesi {version} sürümünü yayımladı. Bu uygulamanın OpenCode ve OpenChamber sürümlerini Home Assistant Supervisor yönetir. Güncellemeler için Home Assistant içindeki uygulama sayfasını kontrol edin; bu OpenCode sürümü, bir uygulama güncellemesinin mevcut olduğu anlamına gelmez.",
+  ],
+  nl: [
+    "Versie {version} beschikbaar. Werk OpenCode bij op de manier waarop u het hebt geïnstalleerd en herstart daarna OpenChamber.",
+    "OpenCode heeft versie {version} uitgebracht. Home Assistant Supervisor beheert de OpenCode- en OpenChamber-versies van deze app. Controleer de app-pagina in Home Assistant op updates; deze nieuwe versie betekent niet dat er een app-update beschikbaar is.",
   ],
 };
 

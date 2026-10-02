@@ -30,8 +30,8 @@ FORMAT = "ha-opencode-v2-migration/v1"
 GENERATION_RE = re.compile(r"^[a-f0-9]{32}$")
 # Shipped beta generations whose native V2 schema is covered by the upgrade
 # fixture. Unknown builds and downgrades must not open a user's database.
-V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242"}
-V2_UPGRADE_TARGET = "2.0.13"
+V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242", "2.0.13"}
+V2_UPGRADE_TARGET = "2.0.21"
 MAX_DATABASE_BYTES = 32 * 1024 * 1024 * 1024
 SOURCE_SESSION_COLUMNS = (
     "id",
@@ -654,7 +654,7 @@ def synthetic_id(source: str, used: set[str]) -> str:
 
 
 def v1_message_sort_key(message: dict) -> tuple:
-    # OpenCode 2.0.13 sorts equal-timestamp V1 messages by id.localeCompare().
+    # OpenCode 2.0.21 sorts equal-timestamp V1 messages by id.localeCompare().
     # Python's default ordering puts uppercase before lowercase; for the
     # base62 message IDs used by V1, localeCompare orders case-insensitively
     # first and lowercase before uppercase when the folded IDs are equal.

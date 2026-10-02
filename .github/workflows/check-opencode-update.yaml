@@ -23,12 +23,12 @@ jobs:
       - name: Get pinned OpenCode versions
         id: pinned
         run: |
-          # build.yaml is the CI-read pin; the Dockerfile ARG default is what a
-          # local `docker build` uses. Stable follows the V1 package while beta
-          # follows the separately published V2 beta package.
-          STABLE_BUILD=$(sed -n 's/^[[:space:]]*OPENCODE_VERSION:[[:space:]]*"\([^"]*\)".*/\1/p' ha_opencode/build.yaml)
+          # build.yaml is the CI-read pin; the Dockerfile ARG default is what
+          # a local `docker build` uses. Both channels now ship the official V2
+          # package (@opencode/cli); no V1 runtime is installed in either image.
+          STABLE_BUILD=$(sed -n 's/^[[:space:]]*OPENCODE_V2_VERSION:[[:space:]]*"\([^"]*\)".*/\1/p' ha_opencode/build.yaml)
           BETA_BUILD=$(sed -n 's/^[[:space:]]*OPENCODE_V2_VERSION:[[:space:]]*"\([^"]*\)".*/\1/p' ha_opencode_beta/build.yaml)
-          STABLE_ARG=$(sed -n 's/^ARG OPENCODE_VERSION=\(.*\)$/\1/p' ha_opencode/Dockerfile)
+          STABLE_ARG=$(sed -n 's/^ARG OPENCODE_V2_VERSION=\(.*\)$/\1/p' ha_opencode/Dockerfile)
           BETA_ARG=$(sed -n 's/^ARG OPENCODE_V2_VERSION=\(.*\)$/\1/p' ha_opencode_beta/Dockerfile)
 
           for pair in "stable build.yaml:${STABLE_BUILD}" "beta build.yaml:${BETA_BUILD}" \
@@ -45,32 +45,22 @@ jobs:
             echo "stable_arg=${STABLE_ARG}"
             echo "beta_arg=${BETA_ARG}"
           } >> "$GITHUB_OUTPUT"
-          echo "Pinned OpenCode: stable V1=${STABLE_BUILD} beta V2=${BETA_BUILD}"
+          echo "Pinned OpenCode: stable V2=${STABLE_BUILD} beta V2=${BETA_BUILD}"
 
-      - name: Get latest V1 and V2 releases
+      - name: Get latest official V2 release
         id: latest
         run: |
-          V1_META=$(curl -fsSL https://registry.npmjs.org/opencode-ai)
-          V1_LATEST=$(echo "$V1_META" | jq -r '."dist-tags".latest')
-          V1_PUBLISHED=$(echo "$V1_META" | jq -r --arg v "$V1_LATEST" '.time[$v]')
           V2_META=$(curl -fsSL https://registry.npmjs.org/@opencode%2Fcli)
           V2_LATEST=$(echo "$V2_META" | jq -r '."dist-tags".latest')
           V2_PUBLISHED=$(echo "$V2_META" | jq -r --arg v "$V2_LATEST" '.time[$v]')
-          if [ -z "${V1_LATEST}" ] || [ "${V1_LATEST}" = "null" ]; then
-            echo "::error::Could not read the opencode-ai latest dist-tag from the npm registry"
-            exit 1
-          fi
           if [ -z "${V2_LATEST}" ] || [ "${V2_LATEST}" = "null" ]; then
             echo "::error::Could not read the @opencode/cli latest dist-tag from the npm registry"
             exit 1
           fi
           {
-            echo "v1_version=${V1_LATEST}"
-            echo "v1_published=${V1_PUBLISHED}"
             echo "v2_version=${V2_LATEST}"
             echo "v2_published=${V2_PUBLISHED}"
           } >> "$GITHUB_OUTPUT"
-          echo "Latest V1: ${V1_LATEST} (${V1_PUBLISHED})"
           echo "Latest official V2: ${V2_LATEST} (${V2_PUBLISHED})"
 
       - name: Summary
@@ -79,8 +69,6 @@ jobs:
           BETA_BUILD: ${{ steps.pinned.outputs.beta_build }}
           STABLE_ARG: ${{ steps.pinned.outputs.stable_arg }}
           BETA_ARG: ${{ steps.pinned.outputs.beta_arg }}
-          V1_LATEST: ${{ steps.latest.outputs.v1_version }}
-          V1_PUBLISHED: ${{ steps.latest.outputs.v1_published }}
           V2_LATEST: ${{ steps.latest.outputs.v2_version }}
           V2_PUBLISHED: ${{ steps.latest.outputs.v2_published }}
         run: |
@@ -89,8 +77,7 @@ jobs:
             echo
             echo "| | Value |"
             echo "|---|---|"
-            echo "| Certified stable V1 | \`${STABLE_BUILD}\` |"
-            echo "| Latest V1 | [\`${V1_LATEST}\`](https://www.npmjs.com/package/opencode-ai/v/${V1_LATEST}) (${V1_PUBLISHED}) |"
+            echo "| Certified stable V2 | \`${STABLE_BUILD}\` |"
             echo "| Certified beta V2 | \`${BETA_BUILD}\` |"
             echo "| Latest official V2 | [\`${V2_LATEST}\`](https://www.npmjs.com/package/@opencode/cli/v/${V2_LATEST}) (${V2_PUBLISHED}) |"
             echo
@@ -107,14 +94,14 @@ jobs:
             echo "❌ A channel's two pins disagree:${drift}. Fix before releasing." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          if [ "${STABLE_BUILD}" != "${V1_LATEST}" ]; then
+          if [ "${STABLE_BUILD}" != "${V2_LATEST}" ]; then
             {
-              echo "⚠️ Stable V1 is behind the latest V1 release. Certify it independently; beta no longer soaks V1."
+              echo "⚠️ Stable V2 is behind the latest official V2 release. Certify it independently; the add-on ships no V1 runtime, so the V1 package is not installed. Re-run the complete V2 compatibility lane before changing the pin."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "${BETA_BUILD}" != "${V2_LATEST}" ]; then
             echo "⚠️ A newer V2 beta exists. Re-run the complete V2 compatibility lane before changing the pin." >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [ "${STABLE_BUILD}" = "${V1_LATEST}" ] && [ "${BETA_BUILD}" = "${V2_LATEST}" ]; then
-            echo "✅ Stable V1 and beta V2 pins match their respective release streams." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${STABLE_BUILD}" = "${V2_LATEST}" ] && [ "${BETA_BUILD}" = "${V2_LATEST}" ]; then
+            echo "✅ Both stable and beta V2 pins match the latest official V2 release." >> "$GITHUB_STEP_SUMMARY"
           fi

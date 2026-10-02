@@ -94,7 +94,7 @@ describe(`${CHANNEL} runtime pin`, () => {
   it("pins the same exact OpenChamber version in the Dockerfile and build.yaml", () => {
     assert.ok(dockerfileOpenchamberPin, "Dockerfile has no ARG OPENCHAMBER_VERSION");
     assert.ok(buildYamlOpenchamberPin, "build.yaml has no OPENCHAMBER_VERSION");
-    assert.match(dockerfileOpenchamberPin, /^2\.\d+\.\d+-preview\.\d+$/);
+    assert.match(dockerfileOpenchamberPin, /^2\.\d+\.\d+(?:-preview\.\d+)?$/);
     assert.equal(buildYamlOpenchamberPin, dockerfileOpenchamberPin);
     const revision = /^ARG OPENCHAMBER_REVISION=([a-f0-9]{40})$/m.exec(dockerfile)?.[1];
     assert.ok(revision);

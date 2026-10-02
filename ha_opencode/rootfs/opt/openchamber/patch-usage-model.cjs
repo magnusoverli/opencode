@@ -14,49 +14,6 @@ function patchUsageModel(root) {
     const source = files.get(file) ?? fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n");
     files.set(file, replaceOnce(source, before, after, file));
   };
-  const auth = "packages/web/server/lib/opencode/auth.js";
-  edit(auth, `  const legacy = readLegacyAuthFile();
-  const stored = readCredentialsFromDb({
-    dbPath: resolveCredentialDbPath({ dataDir: OPENCODE_DATA_DIR, path }),
-    fs,
-  });
-  return stored ? { ...legacy, ...stored } : legacy;`, `  // The HA launcher supplies the active V2 generation's database path only.
-  // Never merge retained V1 auth, including after disconnect or a read failure.
-  const dbPath = process.env.OPENCODE_DB;
-  if (!dbPath || !path.isAbsolute(dbPath)) throw new Error('Managed provider credentials unavailable');
-  const stored = readCredentialsFromDb({ dbPath, fs });
-  if (stored === null) throw new Error('Managed provider credentials unavailable');
-  return stored;`);
-  edit(auth, "readCredentialsFromDb, resolveCredentialDbPath", "readCredentialsFromDb");
-  edit(auth, `function readLegacyAuthFile() {
-  if (!fs.existsSync(AUTH_FILE)) {
-    return {};
-  }
-  try {
-    const content = fs.readFileSync(AUTH_FILE, 'utf8');
-    const trimmed = content.trim();
-    if (!trimmed) {
-      return {};
-    }
-    return JSON.parse(trimmed);
-  } catch (error) {
-    console.error('Failed to read auth file:', error);
-    throw new Error('Failed to read OpenCode auth configuration');
-  }
-}
-`, "// Legacy paths remain exported for upstream compatibility, but auth is V2-only.\n");
-  const db = "packages/web/server/lib/opencode/credential-db.js";
-  // Match OpenCode 2.0.13's active / creation-time / ID selection, not refresh time.
-  edit(db, "ORDER BY integration_id, active DESC, time_updated DESC",
-    "ORDER BY integration_id, active DESC, time_created DESC, id DESC");
-  edit(db, `    const result = {};
-    for (const row of rows) {`, `    const result = {};
-    const selected = new Set();
-    for (const row of rows) {`);
-  edit(db, "      if (!id || id in result) continue;", `      if (!id || selected.has(id)) continue;
-      selected.add(id); // An unsupported active value must not resurrect an inactive account.`);
-  edit(db, "console.warn('Could not read OpenCode credentials database:', error instanceof Error ? error.message : error);",
-    "console.warn('Could not read managed OpenCode credentials database');");
   const quota = "packages/web/server/lib/quota/providers/codex.js";
   edit(quota, "Session expired \\u2014 please re-authenticate with OpenAI",
     "OpenAI usage authorization expired. Send a message to refresh your OpenCode sign-in, then refresh Usage. Reconnect OpenAI if chat also fails.");

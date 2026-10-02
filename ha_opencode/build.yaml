@@ -7,16 +7,16 @@ build_from:
   aarch64: ghcr.io/home-assistant/base-debian:trixie
   amd64: ghcr.io/home-assistant/base-debian:trixie
 args:
-  NODE_VERSION: "24.15.0"
+  NODE_VERSION: "24.21.0"
   # The only OpenCode runtime in this channel; CLI and plugin pins must match.
-  OPENCODE_V2_VERSION: "2.0.13"
+  OPENCODE_V2_VERSION: "2.0.21"
   # Preview identity and immutable source; backend CLI remains pinned separately.
-  OPENCHAMBER_VERSION: "2.0.0-preview.8"
-  OPENCHAMBER_REVISION: "9fba129ddf968df1e5fb6916b84d3ceb35493198"
+  OPENCHAMBER_VERSION: "2.1.0"
+  OPENCHAMBER_REVISION: "90726f9949da3408b2baf0f997e24bd71455946e"
   PPQ_PROXY_VERSION: "0.1.0"
-  TSX_VERSION: "4.20.6"
+  TSX_VERSION: "4.23.15"
   TTYD_VERSION: "1.7.7"
-  YQ_VERSION: "v4.53.3"
+  YQ_VERSION: "v4.54.1"
   ZIGPORTER_VERSION: "1.4.2"
 labels:
   org.opencontainers.image.title: "OpenCode"

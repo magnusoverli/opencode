@@ -8,9 +8,9 @@
     "verify:versions": "node scripts/verify-versions.js"
   },
   "dependencies": {
-    "@opencode/cli": "2.0.13",
-    "@opencode/plugin": "2.0.13",
-    "prettier": "3.9.8",
+    "@opencode/cli": "2.0.21",
+    "@opencode/plugin": "2.0.21",
+    "prettier": "3.9.9",
     "vscode-jsonrpc": "8.2.1"
   },
   "devDependencies": {

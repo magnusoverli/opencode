@@ -18,8 +18,8 @@ function patchEditorLsp(root, support = path.join(__dirname, 'editor-lsp')) {
     ["import { runtimeFetch } from '@/lib/runtime-fetch';", "import { runtimeFetch } from '@/lib/runtime-fetch';\nimport { createHaEditorLsp } from '@/lib/ha-editor-lsp/editor';"],
     ['    const language = staticLanguageExtension ?? dynamicLanguageExtension;',
       '    if (canEdit) extensions.push(createHaEditorLsp(selectedFile.path, runtimeFetch));\n    const language = staticLanguageExtension ?? dynamicLanguageExtension;'],
-    ['}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize]);',
-      '}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, canEdit, runtimeKey]);'],
+    ['}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap]);',
+      '}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, canEdit, runtimeKey]);'],
   ]);
   stage('packages/web/server/lib/opencode/bootstrap-runtime.js', [
     ['export const createBootstrapRuntime = (dependencies) => {',

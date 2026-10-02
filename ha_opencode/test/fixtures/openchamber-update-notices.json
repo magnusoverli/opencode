@@ -1,5 +1,5 @@
 {
-  "revision": "9fba129ddf968df1e5fb6916b84d3ceb35493198",
+  "revision": "90726f9949da3408b2baf0f997e24bd71455946e",
   "source": "packages/ui/src/lib/i18n/messages/*.ts: opencodeUpdate.toast.available.manualDescription",
   "messages": {
     "en": "Version {version} available. Update OpenCode the way you installed it, then restart OpenChamber.",
@@ -13,6 +13,7 @@
     "ko": "버전 {version} 사용 가능. 설치했던 방식으로 OpenCode를 업데이트한 뒤 OpenChamber를 다시 시작하세요.",
     "pl": "Wersja {version} dostępna. Zaktualizuj OpenCode w ten sam sposób, w jaki go zainstalowano, a następnie uruchom ponownie OpenChamber.",
     "ja": "バージョン{version}が利用可能です。インストール時と同じ方法で OpenCode を更新し、OpenChamber を再起動してください。",
-    "tr": "{version} sürümü mevcut. OpenCode’u kurduğunuz yöntemle güncelleyin, ardından OpenChamber’ı yeniden başlatın."
+    "tr": "{version} sürümü mevcut. OpenCode’u kurduğunuz yöntemle güncelleyin, ardından OpenChamber’ı yeniden başlatın.",
+    "nl": "Versie {version} beschikbaar. Werk OpenCode bij op de manier waarop u het hebt geïnstalleerd en herstart daarna OpenChamber."
   }
 }

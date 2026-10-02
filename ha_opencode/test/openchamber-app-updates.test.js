@@ -38,10 +38,10 @@ function assertUnchanged(originals) {
 }
 
 for (const newline of ["\n", "\r\n"]) {
-  test(`patches only the notice value in all 12 locales (${JSON.stringify(newline)})`, (t) => {
+  test(`patches only the notice value in all 13 locales (${JSON.stringify(newline)})`, (t) => {
     const { root, originals } = fixture(t, newline);
     assert.deepEqual(Object.keys(messages).sort(), Object.keys(upstream.messages).sort());
-    assert.equal(patchAppUpdates(root), 12);
+    assert.equal(patchAppUpdates(root), 13);
     for (const [target, original] of originals) {
       const locale = path.basename(target, ".ts");
       const before = upstream.messages[locale];
