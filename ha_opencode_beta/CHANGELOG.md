@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 3.2.2b0
+
+- Pass native amd64/arm64 checks and installed beta upgrade, TUI persistence and Ingress continuation checks; retain disclosure of the vendor-mitigated braces advisory.
+- Reliability beta based on stable 3.2.1; stable and beta retain separate histories and settings ([#181](https://github.com/magnusoverli/opencode/issues/181), [#182](https://github.com/magnusoverli/opencode/pull/182)).
 - Identify unexpected migration work by bounded name/type and show recovery guidance in the terminal while preserving unknown files and conversation history ([#130](https://github.com/magnusoverli/opencode/issues/130)).
 - Save TUI settings atomically and retain client preferences/model state across restarts and updates, with root-protected managed configuration and plugin sources ([#162](https://github.com/magnusoverli/opencode/issues/162), [#155](https://github.com/magnusoverli/opencode/issues/155)).
 - Make whole-file YAML formatting opt-in with a targeted setting; explicit custom formatter preferences take precedence ([#154](https://github.com/magnusoverli/opencode/issues/154)).
