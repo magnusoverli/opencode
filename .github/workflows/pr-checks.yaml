@@ -68,6 +68,9 @@ jobs:
       - name: Beta external MCP root boundary
         run: sudo "$(command -v node)" --test ha_opencode_beta/test/opencode-v2-external-mcp.test.js
 
+      - name: Beta durable TUI preference boundary
+        run: sudo "$(command -v node)" --test ha_opencode_beta/test/opencode-v2-tui-state.test.js
+
       - name: Native provider credential loader boundary
         run: sudo env HA_NATIVE_TESTS_REQUIRED=1 "$(command -v node)" --test ha_opencode_beta/test/opencode-v2-provider-environment.test.js
 

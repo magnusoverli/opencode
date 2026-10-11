@@ -295,7 +295,17 @@ const FLOW_SENSITIVE_KEY = `(?:\"${SENSITIVE_FIELD_NAME}\"|'${SENSITIVE_FIELD_NA
 const FLOW_SENSITIVE_FIELD_RE = new RegExp(`(${FLOW_SENSITIVE_KEY}\\s*:\\s*)(\"(?:\\\\.|[^\"])*\"|'(?:''|[^'])*'|[^,}\\]]+)`, "gi");
 const PLACEHOLDER_HMAC_KEY = randomBytes(32);
 
-export function maskESPHomeSensitiveText(content) {
+function sensitivePlaceholder(index) {
+  const id = createHmac("sha256", PLACEHOLDER_HMAC_KEY).update(String(index)).digest("hex").slice(0, 12);
+  return `__OPENCODE_SECRET_${id}_${index}__`;
+}
+
+function isIssuedPlaceholder(value) {
+  const match = /^__OPENCODE_SECRET_[a-f0-9]{12}_(\d+)__$/.exec(value);
+  return Boolean(match && value === sensitivePlaceholder(match[1]));
+}
+
+export function maskESPHomeSensitiveText(content, { redact = false } = {}) {
   if (typeof content !== "string") return { content, replacements: new Map() };
   const replacements = new Map();
   const sensitiveSubstitutions = new Set();
@@ -324,9 +334,11 @@ export function maskESPHomeSensitiveText(content) {
   }
   let occurrence = 0;
   const placeholderFor = (value) => {
+    // Output redaction must preserve authentic edit tokens, but never mint a
+    // second set: its indexes would collide with tokens already in the text.
+    if (redact) return isIssuedPlaceholder(value.trim()) ? value : "<redacted>";
     const index = occurrence++;
-    const id = createHmac("sha256", PLACEHOLDER_HMAC_KEY).update(String(index)).digest("hex").slice(0, 12);
-    const placeholder = `__OPENCODE_SECRET_${id}_${index}__`;
+    const placeholder = sensitivePlaceholder(index);
     replacements.set(placeholder, value);
     return placeholder;
   };
@@ -439,10 +451,8 @@ export function restoreESPHomeSensitivePlaceholders(candidate, original) {
 }
 
 export function redactESPHomeSensitiveText(content) {
-  const masked = maskESPHomeSensitiveText(String(content ?? ""));
-  let redacted = masked.content;
-  for (const placeholder of masked.replacements.keys()) redacted = redacted.replace(placeholder, "<redacted>");
-  return redacted;
+  return maskESPHomeSensitiveText(String(content ?? ""), { redact: true }).content
+    .replace(SENSITIVE_PLACEHOLDER_RE, (token) => isIssuedPlaceholder(token) ? token : "<redacted>");
 }
 
 export function sanitizeESPHomeResult(value, knownSecretValues = []) {

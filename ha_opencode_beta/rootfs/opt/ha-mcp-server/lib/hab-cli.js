@@ -1,6 +1,6 @@
 import { createCommandOutputContent } from "./command-output.js";
 
-// The upstream 1.7.x schema is >7 MB before compaction. Bound subprocess memory
+// Full recursive schemas can exceed 7 MB. Bound subprocess memory
 // independently from the much smaller model-facing preview/artifact threshold.
 export const HAB_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
@@ -80,7 +80,7 @@ export function prepareHabRequest({ command, args, timeout_seconds = 60 } = {}) 
   if (root === "schema") {
     const target = [];
     for (let i = index + 1; i < values.length; i++) {
-      if (values[i] === "--config") { i++; continue; }
+      if (["--config", "--search", "--limit", "--offset"].includes(values[i])) { i++; continue; }
       if (values[i].startsWith("-") && values[i] !== "--") continue;
       if (values[i] !== "--") target.push(values[i]);
     }
@@ -89,6 +89,11 @@ export function prepareHabRequest({ command, args, timeout_seconds = 60 } = {}) 
   }
 
   const argv = [...values];
+  // Native compact discovery avoids generating the full recursive schema and
+  // retains upstream payload/output contracts. Honour explicit discovery modes.
+  if (root === "schema" && !values.some((value) => /^--(?:compact|index)(?:=|$)/.test(value))) {
+    argv.splice(index + 1, 0, "--compact");
+  }
   if (!values.some((value) => /^--(?:json|text)(?:=|$)/.test(value))) argv.unshift("--json");
   argv.unshift("--skip-update-check");
   return { argv, root, schemaDepth, timeoutMs: timeout_seconds * 1000 };
@@ -101,6 +106,11 @@ export function compactHabDiscovery(envelope) {
   if (envelope?.success !== true) return envelope;
   if (envelope.operation === "schema" && envelope.data?.path) {
     const node = envelope.data;
+    if (node.schema_id && node.envelope_ref) {
+      // Native compact schemas have string child paths, versioned contracts and
+      // a content hash. Keep the complete data intact, including that hash.
+      return { ...envelope, metadata: { ...envelope.metadata, compact_schema: true } };
+    }
     const data = pick(node, ["path", "use", "summary", "aliases", "args", "flag_constraints", "output_mode", "capabilities", "guide_topic"]);
     for (const key of ["flags", "inherited_flags"]) {
       if (node[key]) data[key] = node[key].filter((flag) => !flag.hidden);
@@ -109,7 +119,7 @@ export function compactHabDiscovery(envelope) {
     data.upstream_side_effect = node.side_effect;
     data.contract_notes = [
       "This is a compact command index/schema. Request schema for a child path for its arguments and flags.",
-      "Upstream side-effect/capability annotations are advisory, not permission checks. Inspect the operation; some mutations are labelled read.",
+      "Upstream side-effect/capability annotations are advisory, not permission checks. Inspect the operation.",
       "--plan may be a static execution preview, not a live diff or full HA validation. Read back after applying.",
       "JSON results carry success, data, error, partial_result, warnings, missing_sections and verification_commands. Streams use NDJSON.",
     ];

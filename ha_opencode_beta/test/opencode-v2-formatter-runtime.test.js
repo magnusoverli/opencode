@@ -14,7 +14,7 @@ import { buildManagedConfig, READ_ONLY_AGENT_ID } from "../rootfs/opt/opencode-v
 const runtime = fileURLToPath(new URL("../rootfs/opt/opencode-v2-homeassistant/", import.meta.url));
 const input = "outer:\n x: 1\nsecret: !secret fixture_value\ninclude: !include fixture.yaml\n";
 
-test("pinned V2 formats approved YAML writes with Prettier, honors preferences, and denies read-only writes", { timeout: 30000 }, async () => {
+test("pinned V2 preserves YAML by default, formats on opt-in, and denies read-only writes", { timeout: 45000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "ha-v2-format-"));
   const project = join(root, "project");
   let server;
@@ -82,8 +82,12 @@ test("pinned V2 formats approved YAML writes with Prettier, honors preferences, 
       await client.session.wait({ sessionID: session.id }, { signal: AbortSignal.timeout(8000) });
     }
     await run("default");
-    const formatted = await readFile(join(project, "default.yaml"), "utf8");
-    assert.equal(formatted, input.replace("\n x:", "\n  x:"), logs);
+    assert.equal(await readFile(join(project, "default.yaml"), "utf8"), input, logs);
+    config.formatter = buildManagedConfig({ yamlFormatting: true }).formatter;
+    await writeFile(configPath, JSON.stringify(config));
+    await client.location.reload();
+    await run("enabled");
+    assert.equal(await readFile(join(project, "enabled.yaml"), "utf8"), input.replace("\n x:", "\n  x:"), logs);
     await writeFile(join(project, ".prettierrc.json"), '{"tabWidth":4}');
     await run("preferences");
     assert.equal(await readFile(join(project, "preferences.yaml"), "utf8"), input.replace("\n x:", "\n    x:"), logs);

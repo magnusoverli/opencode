@@ -809,4 +809,30 @@ with tempfile.TemporaryDirectory(prefix="opencode-v2-validation-") as temporary:
     assert validation_path.is_file()
     assert source_path.read_bytes() == source_before
 
+with tempfile.TemporaryDirectory(prefix="migration-work-") as temporary:
+    root = Path(temporary)
+    work, generations = root / "work", root / "generations"
+    work.mkdir()
+    generations.mkdir()
+    active = "a" * 32
+    (generations / active).mkdir()
+    (generations / active / "retained").write_text("existing-history")
+    unknown = work / "unknown-entry"
+    unknown.mkdir()
+    (unknown / "private").write_text("private-content-must-not-be-logged")
+    for attempt in range(2):
+        error = expect_error("unexpected_migration_work", lambda: MIGRATOR.reconcile_private_state(root, active))
+        assert error.details == ("entry=unknown-entry", "type=directory")
+        assert "private-content" not in str(error.details)
+        assert (unknown / "private").read_text() == "private-content-must-not-be-logged"
+        assert (generations / active / "retained").read_text() == "existing-history"
+    (unknown / "private").unlink()
+    unknown.rmdir()
+    for name in (".runtime-probe.Abc12345", "." + "b" * 32 + ".conversion.log", "c" * 32):
+        (work / name).mkdir()
+        (work / name / "interrupted").write_text("fixture")
+    MIGRATOR.reconcile_private_state(root, active)
+    assert list(work.iterdir()) == []
+    assert (generations / active / "retained").read_text() == "existing-history"
+
 print("ok")

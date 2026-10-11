@@ -32,6 +32,12 @@ const WATCHER_IGNORES = Object.freeze([
   "*.log",
 ]);
 
+// Pinned 2.0.26 Prettier/Biome built-in extensions, minus YAML. A project-local
+// formatter must not silently undo the add-on's minimal-diff default.
+const NON_YAML_EXTENSIONS = [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts",
+  ".html", ".htm", ".css", ".scss", ".sass", ".less", ".vue", ".svelte", ".json", ".jsonc",
+  ".toml", ".xml", ".md", ".mdx", ".graphql", ".gql"];
+
 const SENSITIVE_READ_PATTERNS = Object.freeze([
   "*secrets.yaml",
   "*.storage/*",
@@ -76,6 +82,7 @@ export function buildManagedConfig({
   userHooks = false,
   lspEnabled = false,
   assistEnabled = false,
+  yamlFormatting = false,
 } = {}) {
   const permissions = [
     { action: "read", resource: "*", effect: "allow" },
@@ -137,7 +144,11 @@ export function buildManagedConfig({
     permissions,
     watcher: { ignore: [...WATCHER_IGNORES] },
     formatter: {
-      "ha-yaml": { command: ["prettier", "--write", "$FILE"], extensions: [".yaml", ".yml"] },
+      ...(!yamlFormatting ? {
+        prettier: { extensions: [...NON_YAML_EXTENSIONS] },
+        biome: { extensions: [...NON_YAML_EXTENSIONS] },
+      } : {}),
+      "ha-yaml": { command: ["prettier", "--write", "$FILE"], extensions: [".yaml", ".yml"], disabled: !yamlFormatting },
     },
     lsp: false,
     skills: ["/data/.config/opencode/skills"],
@@ -218,6 +229,8 @@ export function parseArguments(argv) {
       options.userHooks = parseBoolean(value, name);
     } else if (name === "--lsp-enabled") {
       options.lspEnabled = parseBoolean(value, name);
+    } else if (name === "--yaml-formatting") {
+      options.yamlFormatting = parseBoolean(value, name);
     } else {
       throw new TypeError(`Unknown managed-config option: ${name}`);
     }
@@ -241,6 +254,11 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
       // Only the validated allowlist can override defaults. No policy fields
       // survive validation, so managed plugins/read-only rules remain mandatory.
       Object.assign(managed, prepared.config);
+      // Explicit false disables all formatting. Explicit true opts into YAML
+      // as well; otherwise the targeted add-on setting controls YAML alone.
+      if (prepared.config.formatter === true) {
+        managed.formatter = buildManagedConfig({ yamlFormatting: true }).formatter;
+      }
       externalMcp = prepared.externalMcp;
       applyExternalMcpConfig(managed, externalMcp);
       writeFileSync(args.environmentOutput, prepared.providerEnvironment, { mode: 0o600 });

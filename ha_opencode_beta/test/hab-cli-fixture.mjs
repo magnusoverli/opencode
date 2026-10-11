@@ -71,6 +71,11 @@ const server = createServer(async (req, res) => {
   res.writeHead(404).end();
 });
 const dashboard = { views: [{ title: "Retain every card", cards: Array.from({ length: 4000 }, (_, i) => ({ type: "markdown", content: `${i}: ${"x".repeat(350)}` })) }] };
+const initialPatchDashboard = { title: "Keep dashboard", views: [{ title: "Keep view", cards: [
+  { type: "tile", entity: "light.fixture", name: "Before", icon: "mdi:lightbulb", options: { keep: true } },
+  { type: "markdown", content: "Untouched sibling" },
+] }] };
+let patchDashboard = structuredClone(initialPatchDashboard), saves = 0, saveMode = "normal";
 const websocket = new WebSocketServer({ server });
 websocket.on("connection", (socket) => {
   socket.send(JSON.stringify({ type: "auth_required", ha_version: "2026.10.0" }));
@@ -83,7 +88,25 @@ websocket.on("connection", (socket) => {
       socket.send(JSON.stringify({ type: authenticated ? "auth_ok" : "auth_invalid" }));
       return;
     }
-    if (!authenticated || data.type !== "lovelace/config") violations.push(`Unexpected WS command ${data.type}`);
+    if (!authenticated) violations.push("Unauthenticated WS command");
+    if (data.url_path === "patch-fixture") {
+      if (data.type === "lovelace/config") {
+        socket.send(JSON.stringify({ id: data.id, type: "result", success: true, result: patchDashboard }));
+        return;
+      }
+      if (data.type === "lovelace/config/save") {
+        saves++;
+        if (saveMode === "reject") {
+          socket.send(JSON.stringify({ id: data.id, type: "result", success: false, error: { code: "permission_denied", message: "Fixture rejection" } }));
+          return;
+        }
+        patchDashboard = data.config;
+        if (saveMode === "lost-ack") { socket.close(); return; }
+        socket.send(JSON.stringify({ id: data.id, type: "result", success: true, result: null }));
+        return;
+      }
+    }
+    if (data.type !== "lovelace/config" || data.url_path !== "fixture") violations.push(`Unexpected WS command ${data.type}`);
     socket.send(JSON.stringify({ id: data.id, type: "result", success: true, result: dashboard }));
   });
 });
@@ -105,14 +128,28 @@ try {
   };
   const payload = (result) => JSON.parse(result.content[0].text);
   const version = payload(await call(["version"]));
-  assert.equal(version.data.data.version, "1.7.1");
+  assert.equal(version.data.data.version, "1.7.2");
   const root = await call(["schema"]);
   assert.ok(root.content[0].text.length < 15000);
   assert.equal(payload(root).data.metadata.compact_schema, true);
-  assert.ok(payload(root).data.data.subcommands.some((entry) => entry.path === "hab marketplace"));
+  assert.ok(payload(root).data.data.subcommands.includes("hab marketplace"));
+  assert.equal(payload(root).data.data.schema_version, "hab.command.v1.1");
+  assert.ok(payload(root).data.data.schema_id.startsWith("sha256:"));
   const card = payload(await call(["schema", "dashboard", "card", "update"]));
   assert.ok(card.data.data.flags.some((flag) => flag.name === "section"));
   assert.equal(card.meta.truncated, false);
+  const patchSchema = payload(await call(["schema", "dashboard", "patch", "--compact"])).data.data;
+  assert.equal(patchSchema.payload_schema.type, "object");
+  assert.ok(patchSchema.output_contract.variants.length > 0);
+  const search = payload(await call(["schema", "--index", "--search", "dashboard patch", "--limit", "1"])).data.data;
+  assert.equal(search.commands[0].path, "hab dashboard patch");
+  assert.equal(search.complete, true);
+  const page = payload(await call(["schema", "--index", "--limit", "1"])).data.data;
+  assert.equal(page.complete, false);
+  assert.equal(page.next_offset, 1);
+  const nextPage = payload(await call(["schema", "--index", "--limit", "1", "--offset", String(page.next_offset)])).data.data;
+  assert.equal(nextPage.offset, 1);
+  assert.notEqual(nextPage.commands[0].path, page.commands[0].path);
   await call(["schema", "device", "typo"], true);
   const guides = payload(await call(["guide", "list"]));
   assert.equal(guides.data.metadata.compact_guide_index, true);
@@ -135,8 +172,49 @@ try {
   const complete = JSON.parse(await readFile(large.meta.full_output_path, "utf8"));
   assert.equal(complete.success, true);
   assert.deepEqual(complete.data, dashboard);
+  const patchArgs = ["dashboard", "patch", "patch-fixture", "--target", "/views/0/cards/0", "--data", '{"name":"After"}'];
+  const plan = payload(await call([...patchArgs, "--plan"])).data.data;
+  assert.equal(plan.status, "planned");
+  assert.equal(plan.would_change, true);
+  assert.equal(plan.saved, false);
+  assert.equal(plan.change_count, 1);
+  assert.equal(plan.diff_complete, true);
+  assert.equal(saves, 0);
+  const applied = payload(await call([...patchArgs, "--if-match", plan.base_revision])).data.data;
+  assert.equal(applied.status, "verified");
+  assert.equal(applied.saved, true);
+  assert.equal(applied.verified, true);
+  assert.equal(applied.reloaded, "not_applicable");
+  assert.equal(saves, 1);
+  const expected = structuredClone(initialPatchDashboard);
+  expected.views[0].cards[0].name = "After";
+  assert.deepEqual(patchDashboard, expected);
+  const noop = payload(await call([...patchArgs, "--if-match", applied.result_revision])).data.data;
+  assert.equal(noop.status, "noop");
+  assert.equal(noop.saved, false);
+  assert.equal(saves, 1);
+  const conflict = payload(await call([...patchArgs, "--if-match", plan.base_revision], true)).data.error;
+  assert.equal(conflict.code, "CONFLICT");
+  assert.equal(conflict.details.result.saved, false);
+  assert.equal(saves, 1);
+  const furtherPatch = ["dashboard", "patch", "patch-fixture", "--target", "/views/0/cards/0", "--set", '/name="Final"'];
+  const furtherPlan = payload(await call([...furtherPatch, "--plan"])).data.data;
+  saveMode = "reject";
+  const rejected = payload(await call([...furtherPatch, "--if-match", furtherPlan.base_revision], true)).data.error;
+  assert.equal(rejected.code, "SAVE_REJECTED");
+  assert.equal(rejected.details.result.saved, false);
+  assert.equal(saves, 2);
+  assert.deepEqual(patchDashboard, expected);
+  saveMode = "lost-ack";
+  const uncertain = payload(await call([...furtherPatch, "--if-match", furtherPlan.base_revision, "--timeout", "2s"], true)).data.error;
+  assert.equal(uncertain.code, "VERIFICATION_UNAVAILABLE");
+  assert.equal(uncertain.details.result.saved, null);
+  assert.equal(uncertain.details.result.verified, false);
+  assert.equal(uncertain.details.retryable, false);
+  assert.equal(saves, 3, "Uncertain writes must never be automatically retried");
+  assert.equal(patchDashboard.views[0].cards[0].name, "Final", "Lost acknowledgement does not mean unapplied");
   assert.deepEqual(violations, []);
-  console.log(`PASS hab 1.7.1: ${examples} documented examples, real MCP argv/legacy dispatch, template quoting, action responses, errors, full dashboard retention; schema ${Buffer.byteLength(rawSchema)} bytes -> ${Buffer.byteLength(root.content[0].text)} bytes.`);
+  console.log(`PASS hab ${version.data.data.version}: ${examples} documented examples, native compact/searchable contracts, MCP dispatch and dashboard patch safety.`);
 } finally {
   await client.close();
   for (const socket of websocket.clients) socket.terminate();

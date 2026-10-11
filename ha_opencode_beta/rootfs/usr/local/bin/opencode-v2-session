@@ -39,6 +39,11 @@ if [ ! -f /run/opencode-v2/ready ] || [ ! -f /run/opencode-v2-homeassistant.read
         echo -e "${GRAY}Check the add-on logs for 'opencode_config' or 'external_mcp_config'.${NC}"
         echo -e "${GRAY}Correct the corresponding option in the Configuration tab, then restart the add-on.${NC}"
         echo -e "${GRAY}The Home Assistant sidecar waits for valid configuration; reinstalling is not required.${NC}"
+    elif jq -e '.error == "unexpected_migration_work"' /data/v2/startup-error.json >/dev/null 2>&1; then
+        echo -e "${YELLOW}${BOLD}OpenCode could not start: unrecognized migration work needs attention.${NC}"
+        echo -e "${GRAY}Your conversations and the unknown entry were preserved.${NC}"
+        echo -e "${GRAY}The add-on log identifies its bounded name and type beside 'unexpected_migration_work'.${NC}"
+        echo -e "${GRAY}Keep your backup and share that diagnostic in the issue; do not delete unknown work entries.${NC}"
     elif jq -e '.status == "failed" and .error == "session_projection_mismatch"' /data/v2/migration.json >/dev/null 2>&1; then
         echo -e "${YELLOW}${BOLD}OpenCode could not start: conversation migration needs attention.${NC}"
         echo -e "${GRAY}The V1-to-V2 session check found a mismatch. Your existing state was preserved.${NC}"

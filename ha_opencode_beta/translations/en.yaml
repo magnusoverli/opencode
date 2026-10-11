@@ -50,6 +50,10 @@ configuration:
     name: "Screenshot tool"
     description: "Requires the Home Assistant access token below, and a model that accepts image input - many fast models cannot see pictures at all. Lets OpenCode photograph Home Assistant pages in a headless browser to check the result of dashboard changes; each capture takes about 5-10 seconds."
 
+  yaml_formatting:
+    name: "Format YAML after edits"
+    description: "Opt into whole-file Prettier formatting after native YAML edits. Off preserves unrelated formatting. An explicit formatter true or false in Custom OpenCode configuration takes precedence. Other formatters and YAML diagnostics are unaffected."
+
   access_token:
     name: "Home Assistant access token"
     description: "Long-lived access token for talking to Home Assistant Core directly. Required by the screenshot tool above and by the ESPHome commands — leave empty if you use neither. Create one in Home Assistant under Profile → Long-lived access tokens."

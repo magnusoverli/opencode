@@ -42,6 +42,12 @@ test(`failed configuration staging explains recovery (temporary data path: ${und
     assert.equal(fallback.status, 0, fallback.stderr);
     assert.match(fallback.stdout, /V2 server is not ready/);
     assert.doesNotMatch(fallback.stdout, /custom configuration could not be prepared/);
+    const unexpectedWork = session.replace(/jq -e '.error == "unexpected_migration_work"'[^;]+;/, "true;");
+    await writeFile(script, `clear() { :; }; jq() { return 1; };\n${unexpectedWork}`);
+    const diagnostic = spawnSync("bash", [script], { encoding: "utf8", timeout: 5000 });
+    assert.equal(diagnostic.status, 0, diagnostic.stderr);
+    assert.match(diagnostic.stdout, /unrecognized migration work needs attention/);
+    assert.match(diagnostic.stdout, /do not delete unknown work entries/);
   } finally {
     await rm(parent, { recursive: true, force: true });
   }

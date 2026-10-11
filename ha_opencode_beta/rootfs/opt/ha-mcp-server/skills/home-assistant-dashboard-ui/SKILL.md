@@ -24,11 +24,29 @@ Find out before proposing anything — the two are not interchangeable.
 `hab dashboard get <url_path> --json` gives you the current structure to modify;
 read it before writing, exactly as with any config file.
 
-Use `hab_run(args=["schema","dashboard","card","update"])` to learn the exact
-operation. Prefer an individual view/section/card/badge operation; 1.7.1 accepts
-view paths as well as indices. Re-read positional indices before applying. A
-`--data`/`--file` update replaces the selected object, so preserve existing options.
-`--plan` describes intended execution but is not necessarily a current-state diff.
+Use `hab_run(args=["schema","dashboard","patch"])` for the exact compact contract.
+Prefer **`dashboard patch`** for field-level edits to existing objects:
+
+1. Read the dashboard and select an exact JSON Pointer, such as `/views/0/cards/0`
+   or `/views/0/sections/1/cards/2`; re-check indices rather than guessing names.
+2. Preview with `--target <pointer> --data <object> --plan` and review `changes`,
+   `change_count`, `diff_complete` and `base_revision`. Unlike generic static plans,
+   this preview reads the live config and returns a real diff.
+3. After approval, apply the same patch with the exact `base_revision` as `--if-match`.
+   Objects merge deeply; explicitly supplied arrays replace. `--set '/name="Kitchen"'`
+   uses JSON values and `--remove /icon` removes an object field. Null remains a value.
+4. Inspect `status`, `saved`, `verified`; on failure inspect `error.details.result`.
+   `verified` confirms stored JSON, `noop` makes no save, and `saved: null` is uncertain.
+   Do not retry writes automatically. Conflicts require fresh inspection and diff review.
+
+Preview does not establish write permission or server acceptance. HA has no atomic
+conditional save: an edit between the final freshness check and save can be overwritten.
+Read-back proves stored JSON at observation time, not rendering, references or resources.
+YAML dashboards may reject saves; patches do not expand generated strategy layouts.
+
+Use existing view/section/card/badge commands for creation/deletion or deliberate
+replacement. Their `update --data`/`--file` replaces the selected object; preserve
+existing options. Generic `--plan` may be static rather than a current-state diff.
 Large result artifacts contain a CLI envelope: inspect `success`, then extract
 the configuration from `data` before saving. Verify with a read-back and rendering.
 

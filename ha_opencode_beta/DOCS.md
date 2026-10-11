@@ -138,7 +138,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **Forward state upgrades**: Earlier V2 data upgrades through a validated private copy, preserving conversations, sign-ins and permissions. Successful upgrades remove obsolete generations; failed conversion preserves its input and reports an error. There is no application runtime fallback or rollback selector.
 - **V2-only runtime**: Beta `3.0.0b18` runs one pinned OpenCode V2 server. V1 and the runtime selector have been removed. The server runs as root for Home Assistant filesystem compatibility; its attached terminal runs as UID `60001`.
 - **Managed CLI**: `opencode` and `opencode2` address the same V2 server. `opencode status`, `opencode service status`, and `opencode api GET /api/info` inspect the existing server without starting another daemon.
-- **YAML language assistance**: The `ha_yaml_*` tools provide credentialed HA diagnostics, completion, hover and definitions through a supervised language-server worker. Approved native YAML writes use pinned Prettier formatting.
+- **YAML language assistance**: The `ha_yaml_*` tools provide credentialed HA diagnostics, completion, hover and definitions through a supervised language-server worker. Whole-file YAML formatting is opt-in.
 - **Fresh V2 provider sign-in**: V1 sessions migrate into V2, but V1 provider credentials do not. Authenticate providers once with `/connect` in V2; the retained V1 credential remains untouched.
 - **Native Home Assistant MCP in V2**: Enabling the optional native bridge adds `homeassistant_native` alongside `homeassistant`. The sidecar keeps the Supervisor token out of inherited V2 environment, managed config, logs, and model context. Because allowed V2 shell commands run as container root, they remain trusted code rather than an OS-isolated boundary.
 - **Complete entity history**: `get_history` can page through every recorded state change as compact value/timestamp pairs and reports complete-window numeric summaries while preserving the bounded newest-200 default.
@@ -254,9 +254,23 @@ localhost browser origin); browsers that omit this metadata, commonly on plain
 HTTP LAN origins, receive an unavailable result rather than weakening the origin
 check. Agent `ha_yaml_*` tools do not have this browser restriction.
 
-Approved native `.yaml`/`.yml` writes use pinned Prettier and honor the file's
-`.prettierrc` preferences. Formatting does not reload Home Assistant or replace
-configuration validation. The read-only agent denies edits and LSP dispatch.
+Native `.yaml`/`.yml` edits preserve unrelated formatting by default. Enable
+`yaml_formatting` to run pinned Prettier after edits, honoring `.prettierrc`.
+An explicit `"formatter": false` in `opencode_config` disables every formatter;
+explicit `"formatter": true` opts into YAML formatting as well and overrides
+the add-on setting. Existing explicit preferences are retained on upgrades.
+The targeted setting leaves other formatters and YAML diagnostics available.
+Formatting does not reload Home Assistant or replace configuration validation.
+The read-only agent denies edits and LSP dispatch.
+
+### Terminal preferences
+
+TUI Settings, favourites and recent-model/client state are stored privately in
+this app's `/data/opencode-tui` and survive restarts and image updates. Stable
+and beta have separate `/data` mounts. Existing ephemeral preferences are copied
+when still available; files already lost by an earlier container replacement
+cannot be recovered. The managed server configuration remains root-owned.
+Persistent CLI preferences cannot enable custom TUI plugins.
 
 ## Desktop Browser Tools versus HA Screenshots
 

@@ -210,23 +210,37 @@ Use these prompts for complex tasks:
 
 The `hab_run` MCP tool provides access to the full Home Assistant admin CLI. It wraps the `hab` (Home Assistant Builder) CLI as a native MCP tool.
 
-The beta pins **hab 1.7.1**. Prefer `hab_run(args=[...])`: each argument stays literal,
+The app pins **hab 1.7.2**. Prefer `hab_run(args=[...])`: each argument stays literal,
 including JSON, templates, apostrophes and spaces. The legacy `command` string is
 also accepted; pass exactly one form. The gateway defaults to JSON and disables
 CLI update checks. Shell hab defaults to JSON when non-interactive, text otherwise.
 
-Start with `args=["schema"]` for a compact command index, then request only the
-chosen command's schema. `args=["guide","list"]` returns a compact topic index;
-load one guide when needed. The gateway compacts schema output without changing
-the installed CLI; upstream schema annotations are advisory, not permission rules.
+Start with `args=["schema"]` for compact discovery, or use
+`args=["schema","--index","--search","dashboard patch","--limit","10"]`.
+Follow `next_offset` while `complete` is false; a page is not the whole catalog.
+Request only the chosen command's schema: the gateway requests native `--compact`
+by default and preserves payload/output contracts, schema versions and identities.
+`args=["guide","list"]` returns a compact topic index; load one guide when needed.
+Upstream schema annotations describe behavior, not permission grants.
 Use `--brief`, `--count`, `--limit` and specific filters where the schema supports
 them. The full gateway is available only in the full MCP profile.
 
 Read before changing, choose the smallest resource-level operation, preview when
 supported, apply with the standing approval rules, and read back. A `--plan` can
 be a static description rather than a live diff or complete HA validation.
-Dashboard `--data`/`--file` updates can replace an entire card/view: retain its
-existing fields. Entity rename changes its friendly name, not its entity ID.
+For dashboard fields, prefer `dashboard patch`: its `--plan` reads the current
+config and returns an actual diff. Review it, then pass the same `base_revision`
+to `--if-match` on apply. Exact JSON Pointer targets select objects; deep merges
+preserve unrelated fields, supplied arrays replace, and `--remove` deletes fields.
+Existing card/view `update --data` commands still replace the selected object.
+Entity rename changes its friendly name, not its entity ID.
+
+Patch `status: verified` confirms stored JSON; `noop` performs no save. On failures,
+inspect `error.details.result.saved` and `.verified`: `saved: null` is uncertain,
+not proof the write failed. No automatic retry; a conflict requires reinspection
+and review of a new diff. Preview does not prove write permission or server acceptance;
+read-back does not verify rendering, entity references or resources. HA has no atomic
+conditional save, so an edit between the final read and save can still be overwritten.
 
 Read the nested CLI `success`, `error`, `partial_result`, `warnings`,
 `missing_sections` and `verification_commands`; process completion alone does not
@@ -244,6 +258,8 @@ for long builds/uploads/logs. JSON streams are NDJSON, not one final envelope.
 
 ```
 # Discover one command contract or workflow
+hab_run(args=["schema", "--index", "--search", "dashboard patch", "--limit", "10"])
+hab_run(args=["schema", "dashboard", "patch", "--compact"])
 hab_run(args=["schema", "dashboard", "card", "update"])
 hab_run(args=["guide", "dashboard"])
 

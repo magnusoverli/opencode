@@ -261,12 +261,19 @@ describe("ESPHome source workflow", () => {
       };
     });
 
-    const result = await migrateESPHomeConfig(client, "kitchen.yaml");
+    const read = sanitizeESPHomeResult(await readESPHomeConfig(client, "kitchen.yaml"));
+    expect(await validateESPHomeConfig(client, "kitchen.yaml", read.content)).toMatchObject({ valid: true });
+    const result = sanitizeESPHomeResult(await migrateESPHomeConfig(client, "kitchen.yaml"));
     expect(result).toMatchObject({ migration_available: true, valid: true, ready_to_update: true, expected_sha256: sha256Text(source) });
     expect(result.content).toContain("voc_index: voc_sensor");
     expect(result.content).not.toContain("private-value");
     expect(client.getSource()).toBe(source);
     expect(client.calls.some((call) => call.command === "devices/update_config")).toBe(false);
+    expect(await updateESPHomeConfig(client, {
+      configuration: "kitchen.yaml", content: result.content,
+      expectedSha256: result.expected_sha256, apply: true,
+    })).toMatchObject({ applied: true, valid: true });
+    expect(client.getSource()).toBe(source.replace("voc:", "voc_index:"));
   });
 
   it("returns a compact no-op migration result", async () => {
@@ -506,6 +513,28 @@ describe("ESPHome source workflow", () => {
       output: "connection failed for known-plain-value",
     }, ["known-plain-value"]);
     expect(sanitized).toEqual({ password: "<redacted>", output: "connection failed for <redacted>" });
+  });
+
+  it("preserves edit tokens through the shared sanitizer repeatedly without leaking other secrets", () => {
+    const source = "wifi:\n  password: wifi-value\nmqtt:\n  password: mqtt-value\napi:\n  encryption:\n    key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n";
+    const masked = maskESPHomeSensitiveText(source);
+    let result = { content: masked.content, output: "token: newly-returned-secret", other: "known-secret" };
+    for (let pass = 0; pass < 3; pass++) {
+      result = sanitizeESPHomeResult(result, ["known-secret"]);
+      expect(result.content).toBe(masked.content);
+      expect(result.output).toBe("token: <redacted>");
+      expect(result.other).toBe("<redacted>");
+      expect(restoreESPHomeSensitivePlaceholders(result.content, source)).toBe(source);
+    }
+    const tokens = [...masked.replacements.keys()];
+    for (const invalid of [
+      masked.content.replace(tokens[0], ""),
+      masked.content.replace(tokens[0], tokens[1]),
+      masked.content.replace(tokens[0], "__OPENCODE_SECRET_000000000000_0__"),
+      masked.content + `other: ${tokens[0]}\n`,
+      masked.content.replace("wifi:", "foreign:"),
+    ]) expect(() => restoreESPHomeSensitivePlaceholders(invalid, source)).toThrow();
+    expect(sanitizeESPHomeResult("password: __OPENCODE_SECRET_000000000000_0__")).toBe("password: <redacted>");
   });
 
   it("rejects moving a sensitive placeholder to another YAML field", () => {

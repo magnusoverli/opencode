@@ -75,8 +75,8 @@ RUN --mount=type=bind,source=test/openchamber-request-body.mjs,target=/tmp/openc
 FROM --platform=$BUILDPLATFORM golang:1.24-trixie AS hab-builder
 
 ARG BUILD_ARCH
-ARG HAB_VERSION=1.7.1
-ARG HAB_REVISION=41edb473ebf2eab1502c3f3075a3b0c91ec0eff7
+ARG HAB_VERSION=1.7.2
+ARG HAB_REVISION=0bc138c6ab9f1bbe87914a0ffccbb038c0767e82
 RUN git clone --depth 1 --branch "${HAB_VERSION}" https://github.com/balloob/home-assistant-build-cli.git /src \
     && test "$(git -C /src rev-parse HEAD)" = "${HAB_REVISION}"
 WORKDIR /src

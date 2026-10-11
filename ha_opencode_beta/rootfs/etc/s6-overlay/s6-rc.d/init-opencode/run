@@ -579,6 +579,10 @@ fi
 # the bundled plugin only through an inherited descriptor; it is never written
 # to config or the inherited server environment.
 V2_RUNTIME_ROOT=/run/opencode-v2
+V2_TUI_STATE_READY=false
+if python3 /usr/local/bin/opencode-v2-tui-state.py; then
+    V2_TUI_STATE_READY=true
+fi
 rm -rf -- "${V2_RUNTIME_ROOT}"
 if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
     V2_RESTRICT_BOOL=$([ "${RESTRICT_SENSITIVE_FILES}" = "true" ] && echo "true" || echo "false")
@@ -634,6 +638,7 @@ if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
                 --home-briefing "${HOME_BRIEFING_ENABLED}" \
                 --decision-notes "${DECISION_NOTES_ENABLED}" \
                 --lsp-enabled "${LSP_ENABLED}" \
+                --yaml-formatting "$([ "$(bashio::config 'yaml_formatting' 2>/dev/null || true)" = "true" ] && echo true || echo false)" \
                 --user-hooks "${USER_HOOKS_ENABLED}" > "${V2_CONFIG_TEMP}" \
                 || { touch "${V2_RUNTIME_ROOT}/configuration-error"; false; }; } \
             && node /opt/opencode-v2-homeassistant/lan-config.js --write /data/options.json "${V2_RUNTIME_ROOT}/lan.json" \
@@ -676,6 +681,10 @@ if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
             chmod 600 "${V2_RUNTIME_ROOT}/native-mcp-enabled"
             printf '%s\n' "${LSP_ENABLED}" > "${V2_RUNTIME_ROOT}/lsp-enabled"
             chmod 600 "${V2_RUNTIME_ROOT}/lsp-enabled"
+            if [ "${V2_TUI_STATE_READY}" = "true" ]; then
+                touch "${V2_RUNTIME_ROOT}/tui-state-ready"
+                chmod 600 "${V2_RUNTIME_ROOT}/tui-state-ready"
+            fi
             bashio::log.info "OpenCode V2 managed configuration and private loopback server are ready"
             if [ "${MCP_ENABLED}" = "true" ]; then
                 bashio::log.info "OpenCode V2 Home Assistant MCP is ready behind a credential-isolated sidecar"

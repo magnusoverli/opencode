@@ -21,6 +21,7 @@
 #define NON_DUMPABLE_LIBRARY "/usr/local/lib/opencode-v2-non-dumpable.so"
 #define PASSWORD_LIMIT 1024
 #define NATIVE_CLI "/usr/local/libexec/opencode-v2"
+#define CLIENT_ROOT "/data/opencode-tui"
 
 extern char **environ;
 
@@ -40,7 +41,7 @@ static void require_file(const char *path, uid_t uid, mode_t mode) {
   struct stat info;
   if (lstat(path, &info) != 0 || !S_ISREG(info.st_mode) ||
       info.st_uid != uid || info.st_nlink != 1 ||
-      (info.st_mode & 0777) != mode) {
+      (info.st_mode & 07777) != mode) {
     fail("required runtime file has an unsafe identity");
   }
 }
@@ -50,7 +51,7 @@ static void require_directory(const char *path, uid_t uid, gid_t gid,
   struct stat info;
   if (lstat(path, &info) != 0 || !S_ISDIR(info.st_mode) ||
       info.st_uid != uid || info.st_gid != gid ||
-      (info.st_mode & 0777) != mode) {
+      (info.st_mode & 07777) != mode) {
     fail("required runtime directory has an unsafe identity");
   }
 }
@@ -80,9 +81,9 @@ static void set_environment(const char *runtime_root, const char *password,
   char cache[PATH_MAX];
   char managed_config[PATH_MAX];
   join_path(home, runtime_root, "tui/home");
-  join_path(config, runtime_root, "tui/config");
-  join_path(data, runtime_root, "tui/data");
-  join_path(state, runtime_root, "tui/state");
+  join_path(config, CLIENT_ROOT, "config");
+  join_path(data, CLIENT_ROOT, "data");
+  join_path(state, CLIENT_ROOT, "state");
   join_path(cache, runtime_root, "tui/cache");
   join_path(managed_config, runtime_root, "tui/config/opencode/opencode.json");
 
@@ -109,6 +110,9 @@ static void set_environment(const char *runtime_root, const char *password,
   SET_ENV("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS", "1");
   SET_ENV("OPENCODE_DISABLE_AUTOUPDATE", "true");
   SET_ENV("OPENCODE_CONFIG", managed_config);
+  // Inline arrays override persisted arrays. Preferences may not load code
+  // with the managed server credential; local discovery is root-protected too.
+  SET_ENV("OPENCODE_CLI_CONFIG_CONTENT", "{\"plugins\":[]}");
   SET_ENV("OPENCODE_PASSWORD", password);
   SET_ENV("LD_PRELOAD", NON_DUMPABLE_LIBRARY);
   if (term && *term) SET_ENV("TERM", term);
@@ -190,6 +194,17 @@ int main(int argc, char **argv) {
   require_directory(tui_root, 0, 0, 0755);
   require_directory(tui_config, 0, 0, 0755);
   require_file(managed_config, 0, 0444);
+  char client_ready[PATH_MAX];
+  join_path(client_ready, argv[1], "tui-state-ready");
+  require_file(client_ready, 0, 0600);
+  require_directory(CLIENT_ROOT, 0, 0, 0755);
+  require_directory(CLIENT_ROOT "/config", 0, 0, 0755);
+  require_directory(CLIENT_ROOT "/config/opencode", 0, RUNTIME_GID, 01770);
+  require_directory(CLIENT_ROOT "/config/opencode/plugins", 0, 0, 0555);
+  require_file(CLIENT_ROOT "/config/opencode/opencode.json", 0, 0444);
+  require_file(CLIENT_ROOT "/config/opencode/opencode.jsonc", 0, 0444);
+  require_directory(CLIENT_ROOT "/data", RUNTIME_UID, RUNTIME_GID, 0700);
+  require_directory(CLIENT_ROOT "/state", RUNTIME_UID, RUNTIME_GID, 0700);
   reject_project_plugins(workspace);
 
   int password_fd = open(password_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);

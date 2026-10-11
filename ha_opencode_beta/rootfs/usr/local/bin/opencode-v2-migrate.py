@@ -1710,7 +1710,12 @@ def reconcile_private_state(root: Path, current: str | None, *, prune_generation
             remove_private_tree(entry)
             continue
         if not GENERATION_RE.fullmatch(entry.name):
-            raise MigrationError("unexpected_migration_work")
+            mode = entry.lstat().st_mode
+            kind = "symlink" if stat.S_ISLNK(mode) else "directory" if stat.S_ISDIR(mode) else "file" if stat.S_ISREG(mode) else "other"
+            # Bounded ASCII basename only: never terminal control sequences,
+            # paths, file contents, or an unbounded injected log message.
+            name = re.sub(r"[^A-Za-z0-9._-]", "_", entry.name[:80])
+            raise MigrationError("unexpected_migration_work", details=(f"entry={name}", f"type={kind}"))
         remove_private_tree(entry)
     for entry in generations.iterdir():
         if entry.name == current:
@@ -2125,10 +2130,20 @@ def prepare(args: argparse.Namespace) -> dict:
 
     journal = root / "migration.json"
     with migration_lock(work / ".migration.lock"):
+        startup_error = root / "startup-error.json"
+        if startup_error.exists() or startup_error.is_symlink():
+            ensure_plain_file(startup_error)
+            startup_error.unlink()
         current = load_current(root)
         if current is None and any(generations.iterdir()):
             raise MigrationError("generations_present_without_current")
-        reconcile_private_state(root, current)
+        try:
+            reconcile_private_state(root, current)
+        except MigrationError as error:
+            # Keep the active-generation journal intact; this is a separate
+            # current-startup diagnostic for the terminal's failure screen.
+            atomic_json(startup_error, {"error": error.code, "details": list(error.details)})
+            raise
         if current:
             result = generation_result(root, current)
             missing_home = generation_needs_home_repair(generations / current)

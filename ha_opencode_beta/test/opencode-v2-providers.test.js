@@ -265,6 +265,15 @@ describe("bounded native V2 provider configuration", () => {
       await writeFile(input, "{}");
       assert.equal(run().status, 0);
       assert.equal((await readFile(output)).length, 0);
+      for (const explicit of [true, false]) {
+        await writeFile(input, JSON.stringify(options({ formatter: explicit })));
+        const formatted = spawnSync(process.execPath, [generator, "--options-file", input,
+          "--environment-output", output, "--yaml-formatting", String(!explicit)], { encoding: "utf8" });
+        assert.equal(formatted.status, 0, formatted.stderr);
+        const value = JSON.parse(formatted.stdout).formatter;
+        if (explicit) assert.equal(value["ha-yaml"].disabled, false);
+        else assert.equal(value, false);
+      }
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

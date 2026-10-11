@@ -195,10 +195,17 @@ integrations, repairs, events and templates — the registry-level work that has
 no YAML file behind it.
 
 Prefer `hab_run(args=[...])` over quoted command strings. The gateway uses JSON.
-Start with `args=["schema"]` for a compact command index, then request the exact
-command's schema; load one `guide` topic when useful. Use specific filters and
+Start with `args=["schema"]` for compact discovery; use
+`args=["schema","--index","--search","dashboard patch","--limit","10"]` to
+find commands, following `next_offset` while `complete` is false. Request the exact
+command's native compact schema; payload/output contracts and schema IDs are retained.
+Load one `guide` topic when useful. Use specific filters and
 `--brief`/`--count`/`--limit` when supported. Schema side-effect labels and `--plan`
 are advisory, not proof of permission, a live diff or complete validation.
+For dashboard fields, prefer `dashboard patch`: preview the diff with `--plan`,
+then apply with its unchanged `base_revision` as `--if-match`. Inspect `status`,
+`saved`, `verified` (or `error.details.result`); conflicts require a fresh review.
+Stored-JSON verification does not prove rendering; HA has no atomic conditional save.
 Read before changing and read back afterwards. Inspect nested `success`, `error`,
 `partial_result` and warnings. A timed-out mutation needs state inspection before
 retrying. Large-output artifacts contain the CLI envelope: configuration is under

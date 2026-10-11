@@ -1,7 +1,7 @@
 ---
 name: "OpenCode Beta"
 description: "Beta channel for OpenCode - AI coding agent for Home Assistant. May contain experimental features."
-version: "3.2.1b2"
+version: "3.2.2b0"
 slug: "ha_opencode_beta"
 image: "ghcr.io/magnusoverli/ha_opencode_beta"
 url: "https://github.com/magnusoverli/opencode"
@@ -88,6 +88,8 @@ options:
   # size for local models. full preserves every existing tool.
   mcp_tool_profile: "full"
   lsp_enabled: true
+  # Whole-file YAML reformatting after native edits is opt-in.
+  yaml_formatting: false
   # Screenshot tool: visual verification of dashboards and UI changes.
   # Requires the access token below to authenticate with the HA frontend.
   screenshot_enabled: false
@@ -187,6 +189,7 @@ schema:
   mcp_enabled: bool
   mcp_tool_profile: list(compact|configuration|full)
   lsp_enabled: bool
+  yaml_formatting: bool
   screenshot_enabled: bool
   access_token: password
   native_ha_mcp_enabled: bool
