@@ -210,6 +210,14 @@ RUN python3 -m venv /opt/zigporter-venv \
     && /opt/zigporter-venv/bin/pip install --no-cache-dir "zigporter==${ZIGPORTER_VERSION}" \
     && /opt/zigporter-venv/bin/zigporter --version
 
+# Temporary source-verified compatibility fix for Zigporter 1.4.2.
+# Keep this at build time; managed launchers and runtime permissions are unchanged.
+COPY compat/zigporter /tmp/zigporter-compat
+RUN /opt/zigporter-venv/bin/python3 /tmp/zigporter-compat/apply_patch.py \
+    && ZIGPORTER_TEST_PACKAGE="$(/opt/zigporter-venv/bin/python3 -c 'import zigporter; from pathlib import Path; print(Path(zigporter.__file__).parent.parent)')" \
+       /opt/zigporter-venv/bin/python3 /tmp/zigporter-compat/test_compat.py \
+    && rm -rf /tmp/zigporter-compat
+
 # Install the PPQ private-mode proxy globally. Prettier is in the V2 lock;
 # OpenChamber is built independently from its pinned preview source above.
 # - ppq-private-mode: local OpenAI-compatible encryption proxy for PPQ TEE models

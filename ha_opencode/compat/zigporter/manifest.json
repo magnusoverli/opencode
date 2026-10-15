@@ -1,0 +1,13 @@
+{
+  "revision": "jarvis-z2m-compat-r2",
+  "baseline": {
+    "z2m_client.py": "112b9282cdb3afb7c2fd0b2888d940e29c18f7ecb2c6a30f5c085b45e4ff822a",
+    "utils.py": "cf960cb1e4a0de9323f7b1991cc3d98b05bb910e084c0932aa662a4ec856fbfd",
+    "commands/list_z2m.py": "7aaff2819aef6d01342f02efea66e4bc3658a3ccb76ddfc309be6a21a851fdad"
+  },
+  "candidate": {
+    "z2m_client.py": "650b7e4d8aa98b73f04838b95a67a2fb3f2ecc9e7d32413d10f8d1ef945f6c74",
+    "passive_z2m.py": "925d34217f3ee04d27149ec9d79af04a00a08cc239a326dea9fdd6fcab99e349",
+    "commands/list_z2m.py": "be57a06b5d742f273b1466e930e9068c7f260e0d69de6a5d2006a12d69611afa"
+  }
+}
