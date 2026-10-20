@@ -2,8 +2,11 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.2.0b6** is based on **stable 3.1.0**, with pinned OpenCode `2.0.22`
-and OpenChamber `2.1.0`. HA 2026.10 integration includes native LLM API discovery, prompt/context
+Beta **3.2.4b0** is based on released **stable 3.2.3**, with pinned OpenCode `2.0.26`
+and OpenChamber `2.2.0`, stable's desktop/mobile workspace recovery, and live PPQ
+private-model discovery. The unrelated post-3.2.3 Zigporter compatibility patch
+is not included. Beta keeps its own app identity and persistent storage; installing
+beta does not transfer stable conversations or sign-ins. HA 2026.10 integration includes native LLM API discovery, prompt/context
 forwarding and an experimental native Assist/AI data-task adapter. The roadmap
 is tracked in [#45](https://github.com/magnusoverli/opencode/issues/45).
 
@@ -891,20 +894,30 @@ remain in place, but do not restrict outbound network destinations.
 ## PPQ Private TEE Models (Beta)
 
 Enable **PPQ private TEE models** and set the PPQ key privately in the app options.
-The app starts the pinned proxy on internal loopback port `8787` and registers
-native `ppq-private` models. Select one explicitly; enabling the option does not
+The app starts its private-only proxy on internal loopback port `8787` and discovers
+native `ppq-private` models from PPQ's public live catalog. Select one explicitly; enabling the option does not
 switch existing sessions or override an explicit default model. The upstream PPQ
 key stays with the proxy, not the V2 backend. Missing keys leave this provider
 inactive with a warning; selecting a PPQ default without its prerequisites stops
 activation with an actionable error.
 
-| Model selection ID | Display name |
-| --- | --- |
-| `ppq-private/private/kimi-k2-5` | Kimi K2.5 (Private) |
-| `ppq-private/private/deepseek-r1-0528` | DeepSeek R1 (Private) |
-| `ppq-private/private/gpt-oss-120b` | GPT-OSS 120B (Private) |
-| `ppq-private/private/llama3-3-70b` | Llama 3.3 70B (Private) |
-| `ppq-private/private/qwen3-vl-30b` | Qwen3-VL 30B (Private) |
+Search `/models` for **PPQ** and select a currently listed private model. IDs keep
+the form `ppq-private/private/<model-id>`; the app does not maintain a fixed list
+or silently replace retired models in existing sessions or explicit defaults.
+An unavailable explicit default remains labeled **Unavailable** so OpenCode
+cannot silently fall back to a non-private provider; choose a current model.
+
+The proxy refreshes the catalog every ten minutes on demand; OpenCode checks it
+every minute. Temporary catalog outages use a validated on-disk cache for at most
+24 hours, with a warning. Without a usable catalog, models remain unavailable and
+discovery retries automatically. The local `/v1/models` endpoint and inference
+validation use the same catalog. Successful empty catalogs remove retired models.
+
+Only `private/*` chat models marked end-to-end encrypted by PPQ are eligible.
+Matching public Tinfoil metadata supplies tool/image capabilities where PPQ omits
+them; otherwise defaults are conservative (text only, no advertised tools).
+Catalog requests contain no credentials or prompts. Inference uses the pinned
+Tinfoil SDK's attested encrypted transport, never PPQ's ordinary inference API.
 
 Controlled V2 tests verify routing to the local proxy endpoint. Startup does not
 certify proxy readiness, upstream availability, encryption or private inference;

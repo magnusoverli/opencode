@@ -110,10 +110,10 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(dockerfile, /test ! -e \/usr\/local\/lib\/node_modules\/opencode-ai/);
   });
 
-  it("locks the standalone PPQ tree to channel pins without the unused OpenClaw peer", () => {
+  it("locks private-only PPQ encryption dependencies without the stale upstream model whitelist", () => {
     const pkg = JSON.parse(read(ROOTFS, "opt", "ppq-private-runtime", "package.json"));
     const lock = JSON.parse(read(ROOTFS, "opt", "ppq-private-runtime", "package-lock.json"));
-    for (const [dependency, argument] of [["ppq-private-mode", "PPQ_PROXY_VERSION"], ["tsx", "TSX_VERSION"]]) {
+    for (const [dependency, argument] of [["tinfoil", "TINFOIL_VERSION"], ["tsx", "TSX_VERSION"]]) {
       const pin = new RegExp(`^ARG ${argument}=(.+)$`, "m").exec(dockerfile)?.[1]?.trim();
       assert.match(pin, /^\d+\.\d+\.\d+$/);
       assert.equal(pkg.dependencies[dependency], pin);
@@ -122,9 +122,11 @@ describe(`${CHANNEL} runtime pin`, () => {
     }
     assert.deepEqual(lock.packages[""].dependencies, pkg.dependencies);
     assert.ok(!Object.keys(lock.packages).some((name) => /(?:^|\/)node_modules\/openclaw$/.test(name)));
+    assert.equal(pkg.dependencies["ppq-private-mode"], undefined);
     assert.match(dockerfile, /npm ci --omit=dev --legacy-peer-deps/);
     const service = read(ROOTFS, "etc", "s6-overlay", "s6-rc.d", "ppq-private-proxy", "run");
-    assert.match(service, /exec \/usr\/local\/bin\/node \/opt\/ppq-private-runtime\/node_modules\/tsx\/dist\/cli\.mjs/);
+    assert.match(service, /PPQ_PROXY_ENTRYPOINT="\/opt\/ppq-private-runtime\/proxy\.js"/);
+    assert.match(service, /exec \/usr\/local\/bin\/node "\$\{PPQ_PROXY_ENTRYPOINT\}"/);
     assert.doesNotMatch(service, /npm root|exec tsx /);
   });
 

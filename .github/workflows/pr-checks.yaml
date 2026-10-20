@@ -47,6 +47,11 @@ jobs:
           npm audit --omit=dev --audit-level=low --prefix ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
           npm audit --omit=dev --audit-level=low --prefix ha_opencode_beta/rootfs/opt/ha-mcp-server
 
+      - name: Install and audit beta private encryption SDK
+        run: |
+          npm ci --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund --prefix ha_opencode_beta/rootfs/opt/ppq-private-runtime
+          npm audit --omit=dev --audit-level=low --prefix ha_opencode_beta/rootfs/opt/ppq-private-runtime
+
       - name: Prepare isolated editor contract dependencies
         run: |
           editor_deps="${RUNNER_TEMP}/ha-editor-contracts"
@@ -89,6 +94,11 @@ jobs:
         run: |
           npm audit --omit=dev --audit-level=low --prefix ha_opencode/rootfs/opt/opencode-v2-homeassistant
           npm audit --omit=dev --audit-level=low --prefix ha_opencode/rootfs/opt/ha-mcp-server
+
+      - name: Install and audit stable private encryption SDK
+        run: |
+          npm ci --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund --prefix ha_opencode/rootfs/opt/ppq-private-runtime
+          npm audit --omit=dev --audit-level=low --prefix ha_opencode/rootfs/opt/ppq-private-runtime
 
       - name: Stable add-on contract tests
         env:

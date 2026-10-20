@@ -229,7 +229,10 @@ describe("bounded native V2 provider configuration", () => {
     assert.deepEqual(prepareUserConfig({ ppq_private_enabled: true }, { warn: (message) => warnings.push(message) }).config, {});
     assert.match(warnings.join("\n"), /no API key/);
     assert.throws(() => prepareUserConfig(options({ model: "ppq-private/private/kimi-k2-5" })), /needs private mode/);
-    assert.throws(() => prepareUserConfig(options({ model: "ppq-private/unknown" }, { ppq_private_enabled: true, ppq_api_key: fixtureKey })), /not in the managed model list/);
+    assert.throws(() => prepareUserConfig(options({ model: "ppq-private/unknown" }, { ppq_private_enabled: true, ppq_api_key: fixtureKey })), /private\/\*/);
+    const discovered = prepareUserConfig(options({ model: "ppq-private/private/future-model" }, { ppq_private_enabled: true, ppq_api_key: fixtureKey }));
+    assert.equal(discovered.config.model, "ppq-private/private/future-model");
+    assert.deepEqual(discovered.config.providers["ppq-private"].models, {}, "no stale static catalog or silent alias migration");
   });
 
   it("stages raw config and literal environment separately without losing mandatory managed policy", async () => {

@@ -2,13 +2,14 @@
   "name": "ha-opencode-ppq-runtime",
   "version": "1.0.0",
   "private": true,
-  "description": "Image-owned standalone PPQ proxy and TypeScript launcher",
+  "type": "module",
+  "description": "Image-owned private-only PPQ proxy with live model discovery",
   "dependencies": {
-    "ppq-private-mode": "0.1.0",
-    "tsx": "4.23.15"
+    "tinfoil": "1.2.1",
+    "tsx": "4.23.15",
+    "zod": "4.6.5"
   },
   "overrides": {
-    "tinfoil": "1.2.1",
     "@ai-sdk/openai-compatible": "3.0.62"
   }
 }

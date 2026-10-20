@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Discover current PPQ private models automatically, cache temporary catalog outages and preserve encrypted-only routing; make PPQ models searchable by name ([#188](https://github.com/magnusoverli/opencode/issues/188)).
+
 - Recover confirmed missing OpenChamber workspaces on desktop/mobile without moving conversations or recreating missing directories.
 - Promote beta 3.2.2b1 with independent native MCP, verified startup settings migration, persistent TUI preferences and opt-in formatting/plugin controls.
 

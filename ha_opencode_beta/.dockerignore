@@ -43,6 +43,7 @@ rootfs/opt/*/README.md
 !test/openchamber-usage.mjs
 !test/openchamber-model-fixture.cjs
 !test/openchamber-model-regressions.inc.ts
+!test/openchamber-workspace-gate.test.tsx
 **/vitest.config.*
 
 # Dependencies are installed from package-lock at build time; the checked-in

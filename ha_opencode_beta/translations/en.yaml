@@ -127,7 +127,7 @@ configuration:
 
   openchamber_relay_host:
     name: "OpenChamber relay hosting"
-    description: "Automatically reconnects the managed OpenChamber instance to the configured relay when paired clients need it (relay.openchamber.dev by default). Off by default. Requires OpenChamber interface mode. With LAN web UI enabled, paired clients still expire at app restart and must pair again."
+    description: "Automatically reconnects the managed OpenChamber instance to the configured relay when paired clients need it (relay.openchamber.dev by default). Off by default. Requires OpenChamber interface mode. With LAN web UI enabled, paired clients still expire at app restart and must pair again. Real phone/public-relay reconnection remains unverified."
 
   ppq_private_enabled:
     name: "PPQ private TEE models (beta)"

@@ -4,6 +4,7 @@
 import { Config } from "@opencode/schema/config";
 import { Schema } from "effect";
 import { extractLegacyExternalMcpConfig, prepareExternalMcpConfig } from "./external-mcp.js";
+import { isPrivateModel } from "../ppq-private-runtime/catalog.js";
 
 // These are locked dependencies of the pinned plugin package already shipped in
 // the image. The actual V2 decoder validates nested fields, not a V1 facsimile.
@@ -161,17 +162,8 @@ export function ppqProvider() {
     package: "@opencode/ai/providers/openai-compatible",
     // The upstream key belongs exclusively to the proxy, not the model server.
     settings: { apiKey: "unused", baseURL: "http://127.0.0.1:8787/v1", timeout: 600000, chunkTimeout: 60000 },
-    models: Object.fromEntries([
-      ["kimi-k2-5", "Kimi K2.5", 262144, false],
-      ["deepseek-r1-0528", "DeepSeek R1", 131072, false],
-      ["gpt-oss-120b", "GPT-OSS 120B", 131072, false],
-      ["llama3-3-70b", "Llama 3.3 70B", 131072, false],
-      ["qwen3-vl-30b", "Qwen3-VL 30B", 262144, true],
-    ].map(([id, name, context, image]) => [`private/${id}`, {
-      modelID: `private/${id}`, name: `${name} (Private)`,
-      capabilities: { tools: true, input: image ? ["text", "image"] : ["text"], output: ["text"] },
-      limit: { context, output: 8192 },
-    }])),
+    // The bundled provider plugin discovers models from the private-only proxy.
+    models: {},
   };
 }
 
@@ -256,12 +248,12 @@ export function prepareUserConfig(options = {}, { warn = () => {} } = {}) {
   const ppqKey = options.ppq_api_key || [...(options.env_vars ?? [])].reverse().find((entry) => entry.name === "PPQ_API_KEY")?.value;
   if (ppqEnabled && typeof ppqKey === "string" && ppqKey.trim()) {
     config.providers = { ...config.providers, "ppq-private": ppqProvider() };
-    warn("PPQ private models are configured through the local proxy; select a ppq-private model explicitly. Proxy readiness and upstream availability are not verified at startup.");
+    warn("PPQ private models are discovered through the local encrypted proxy; select a PPQ model explicitly. Proxy readiness and upstream inference are not verified at startup.");
   } else if (ppqEnabled) {
     warn("PPQ private mode has no API key; its managed provider is inactive. Set ppq_api_key or PPQ_API_KEY in env_vars and restart.");
   }
   if (config.model?.startsWith("ppq-private/") && !config.providers?.["ppq-private"]) invalid("the selected PPQ model needs private mode enabled and a PPQ API key");
-  if (config.model?.startsWith("ppq-private/") && !config.providers["ppq-private"].models[config.model.slice("ppq-private/".length)]) invalid("the selected PPQ model is not in the managed model list");
+  if (config.model?.startsWith("ppq-private/") && !isPrivateModel(config.model.slice("ppq-private/".length))) invalid("the selected PPQ model must use a private/* model ID; availability is discovered at runtime");
 
   const providerEnvironment = Buffer.from([...environment].map(([name, value]) => `${name}=${value}\0`).join(""));
   if (providerEnvironment.length > 65536) invalid("provider environment exceeds 64 KiB");

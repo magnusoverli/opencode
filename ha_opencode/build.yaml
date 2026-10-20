@@ -13,7 +13,7 @@ args:
   # Release identity and immutable source; backend CLI remains pinned separately.
   OPENCHAMBER_VERSION: "2.2.0"
   OPENCHAMBER_REVISION: "74b79d41eac44ff38790c66f238050936083e0bb"
-  PPQ_PROXY_VERSION: "0.1.0"
+  TINFOIL_VERSION: "1.2.1"
   TSX_VERSION: "4.23.15"
   TTYD_VERSION: "1.7.7"
   YQ_VERSION: "v4.54.1"

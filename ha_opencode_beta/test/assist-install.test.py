@@ -100,6 +100,15 @@ class InstallTests(unittest.TestCase):
             self.install()
         self.assertEqual(self.snapshot(), before)
 
+    def test_other_channel_install_is_preserved(self):
+        with patch.object(installer, "OWNER", "ha_opencode"):
+            self.install()
+        before = self.snapshot()
+        self.upgrade_bundle()
+        with self.assertRaisesRegex(installer.InstallError, "user-managed"):
+            self.install()
+        self.assertEqual(self.snapshot(), before)
+
     def test_cli_records_conflict_and_recovers_after_manual_copy_is_moved(self):
         self.target.parent.mkdir()
         shutil.copytree(self.source, self.target)
