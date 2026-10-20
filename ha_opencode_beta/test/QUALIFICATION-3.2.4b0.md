@@ -25,12 +25,17 @@
 - Both standalone PPQ dependency audits reported zero vulnerabilities.
 - Linux PR contracts and the native arm64 beta image passed for the initial
   candidate. The amd64 beta build failed an upstream OpenChamber Git test with a
-  real 5 ms timeout; gates will be rerun without weakening or skipping that test.
+  real 5 ms timeout. A later build hit an npm ECONNRESET; neither test nor build
+  gates were weakened or skipped.
+- Final code commit `1d1d011` passed [Linux PR contracts](https://github.com/magnusoverli/opencode/actions/runs/39436160958),
+  [native amd64/arm64 beta boundary builds](https://github.com/magnusoverli/opencode/actions/runs/39436161411),
+  and [stable native image checks](https://github.com/magnusoverli/opencode/actions/runs/39436161003).
+  Final release-note edits do not change the qualified runtime or build sources.
 
 ## Release gates and limits
 
-- GitHub Linux contract and native amd64/arm64 image checks must pass before
-  cutting the release tag; local Docker is unavailable.
+- GitHub Linux contract and native amd64/arm64 image gates passed before release;
+  local Docker remains unavailable.
 - Windows full-suite execution is not qualification: POSIX permission-dependent
   Assist tests fail there and the broad run timed out.
 - Account-backed encrypted PPQ inference, affected-host verification, installed
