@@ -69,6 +69,42 @@ test("guide indexes are compact while selected guide recipes are retained", () =
   assert.deepEqual(get.data.data.recipes, topic.recipes);
 });
 
+test("native compact schemas retain payloads, output variants, string children and identity", () => {
+  const args = ["schema", "dashboard", "patch"];
+  const request = prepareHabRequest({ args });
+  assert.deepEqual(request.argv, ["--skip-update-check", "--json", "schema", "--compact", "dashboard", "patch"]);
+  const data = { path: "hab dashboard patch", schema_version: "hab.command.v1.1", cli_version: "1.7.2",
+    schema_id: "sha256:fixture", envelope_ref: "hab.envelope.v1", transports: ["ws"], preview: "live_diff",
+    payload_schema: { type: "object", open: true }, output_contract: { variants: [{ name: "full", data: { type: "object" } }] },
+    subcommands: ["hab dashboard patch child"], input_sources: ["flags"], side_effect: "write" };
+  const result = unwrap(formatHabExecution(request, JSON.stringify({ success: true, operation: "schema", data })));
+  assert.deepEqual(result.data.data, data);
+  assert.equal(result.data.metadata.compact_schema, true);
+});
+
+test("searchable discovery preserves query arguments, page bounds and continuation", () => {
+  const args = ["schema", "dashboard", "--index", "--search", "patch fields", "--limit", "1", "--offset", "0"];
+  const request = prepareHabRequest({ args });
+  assert.deepEqual(request.argv, ["--skip-update-check", "--json", ...args]);
+  assert.equal(request.schemaDepth, 1);
+  const data = { schema_version: "hab.command.v1.1", cli_version: "1.7.2", envelope_ref: "hab.envelope.v1",
+    commands: [{ path: "hab dashboard patch", side_effect: "write" }], total: 2, offset: 0, complete: false, next_offset: 1 };
+  const result = unwrap(formatHabExecution(request, JSON.stringify({ success: true, operation: "schema", data })));
+  assert.deepEqual(result.data.data, data);
+  assert.equal(prepareHabRequest({ args: ["schema", "--compact", "dashboard"] }).schemaDepth, 1);
+  assert.ok(!prepareHabRequest({ args: ["schema", "--compact=false"] }).argv.includes("--compact"));
+});
+
+test("dashboard patch failures preserve save certainty and verification evidence", () => {
+  const request = prepareHabRequest({ args: ["dashboard", "patch", "home", "--if-match", "sha256:fixture", "--data", '{"title":"New"}'] });
+  for (const [code, saved] of [["CONFLICT", false], ["SAVE_REJECTED", false], ["VERIFICATION_UNAVAILABLE", null], ["VERIFICATION_MISMATCH", true]]) {
+    const data = { success: false, error: { code, details: { retryable: false, result: { saved, verified: false } } } };
+    const result = formatHabExecution(request, JSON.stringify(data), { code: 1 });
+    assert.equal(result.isError, true);
+    assert.deepEqual(unwrap(result).data.error, data.error);
+  }
+});
+
 test("CLI failures, partial results and interrupted mutations keep honest outcomes", () => {
   const request = prepareHabRequest({ args: ["area", "create", "Kitchen"] });
   const failure = { success: false, error: { code: "VALIDATION_ERROR", message: "Invalid input" } };

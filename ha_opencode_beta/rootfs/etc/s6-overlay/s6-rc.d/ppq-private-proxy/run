@@ -34,12 +34,12 @@ bashio::log.info "The PPQ proxy is internal-only and is not exposed through Home
 
 # Use the image-owned locked package directly. User npm prefixes and PATH
 # customizations must not select a different proxy or TypeScript launcher.
-PPQ_PROXY_ENTRYPOINT="/opt/ppq-private-runtime/node_modules/ppq-private-mode/bin/server.ts"
+PPQ_PROXY_ENTRYPOINT="/opt/ppq-private-runtime/proxy.js"
 
 if [ ! -f "${PPQ_PROXY_ENTRYPOINT}" ]; then
     bashio::log.error "PPQ proxy entrypoint not found at ${PPQ_PROXY_ENTRYPOINT}"
-    bashio::log.error "The ppq-private-mode package appears to be missing from the image; please report this at https://github.com/magnusoverli/opencode/issues"
+    bashio::log.error "The image-owned PPQ proxy is missing; please report this at https://github.com/magnusoverli/opencode/issues"
     exec sleep infinity
 fi
 
-exec /usr/local/bin/node /opt/ppq-private-runtime/node_modules/tsx/dist/cli.mjs "${PPQ_PROXY_ENTRYPOINT}"
+exec /usr/local/bin/node "${PPQ_PROXY_ENTRYPOINT}"

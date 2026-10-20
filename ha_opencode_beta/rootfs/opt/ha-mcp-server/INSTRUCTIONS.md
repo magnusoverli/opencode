@@ -271,6 +271,11 @@ hab_run(args=["automation", "get", "my-automation"])
 hab_run(args=["dashboard", "list", "--brief"])
 hab_run(args=["dashboard", "card", "get", "my-dashboard", "home", "0", "--section", "0"])
 
+# Preview a field-level edit; apply only after reviewing with approval
+hab_run(args=["dashboard", "patch", "my-dashboard", "--target", "/views/0/cards/0", "--data", "{\"name\":\"Kitchen\"}", "--plan"])
+# Replace the placeholder with the exact base_revision returned above
+hab_run(args=["dashboard", "patch", "my-dashboard", "--target", "/views/0/cards/0", "--data", "{\"name\":\"Kitchen\"}", "--if-match", "sha256:<base_revision>"])
+
 # Approved API actions that return data; MCP call_service is normally preferred
 hab_run(args=["action", "call", "weather.get_forecasts", "--entity", "weather.home", "--data", "{\"type\":\"daily\"}", "--return-response"])
 

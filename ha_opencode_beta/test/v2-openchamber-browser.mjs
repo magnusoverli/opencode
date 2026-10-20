@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, request } from 'node:http';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { OpenCode } from '/opt/opencode-v2-homeassistant/node_modules/@opencode/client/dist/promise/index.js';
@@ -22,6 +22,7 @@ let browser;
 let logs = '';
 let modelCalls = 0;
 let runtimeCreated = false;
+const workspaceProbes = [];
 const start = (bin, args, env) => {
   const child = spawn(bin, args, { env: { PATH: process.env.PATH, LANG: 'C.UTF-8', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(child);
@@ -132,6 +133,13 @@ try {
     void req.continue();
   });
   page.on('pageerror', error => errors.push(error.message));
+  page.on('response', async response => {
+    const candidate = new URL(response.url());
+    if (candidate.pathname.endsWith('/api/fs/directory-stat')) {
+      workspaceProbes.push({ path: candidate.searchParams.get('path'), status: response.status(),
+        result: await response.json().catch(() => null) });
+    }
+  });
   page.on('request', req => {
     const candidate = new URL(req.url());
     if (candidate.origin === new URL(url).origin && /^\/(api|assets)\//.test(candidate.pathname)
@@ -174,8 +182,53 @@ try {
   assert.equal((await auth.readOpenCodeCredentials()).fixture.key, 'fixture-persisted-key');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => document.body.textContent.includes('HA_PINNED_UI_OK'), { timeout: 30000 });
-  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  const lastSession = await page.evaluate(() => localStorage.getItem('oc.lastSession.v1'));
+  assert.ok(lastSession, 'Fixture must have a persisted historical session');
+  const historical = await client.session.get({ sessionID: id });
+  assert.equal(historical.location.directory, `${runtime}/workspace`);
+  const recoveryDirectory = `${root}/recovery`;
+  await mkdir(recoveryDirectory);
+  // Delete ONLY this fixture's workspace, not state/history. The running backend
+  // is restarted so a cached Location cannot disguise the real missing path.
+  await rm(`${runtime}/workspace`, { recursive: true });
+  await stop(backend);
+  backend = startBackend();
+  await wait(async () => (await client.server.info()).version === '2.0.26', 'missing-workspace backend restart');
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 });
+  assert.equal(new URL(page.url()).searchParams.get('session'), id, 'Fixture exercises the stale historical URL too');
+  await page.$eval('#recovery-directory', input => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '/definitely-missing-ha-fixture');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.evaluate(() => document.querySelector('[data-testid="workspace-recovery"] form').requestSubmit());
+  await page.waitForSelector('[data-testid="workspace-recovery"] [role="alert"]');
+  assert.equal(await page.evaluate(() => localStorage.getItem('oc.lastSession.v1')), lastSession, 'Failed recovery preserves last-session pointer');
+  await page.$eval('#recovery-directory', (input, directory) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, directory);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, recoveryDirectory);
+  await page.evaluate(() => document.querySelector('[data-testid="workspace-recovery"] form').requestSubmit());
+  await page.waitForSelector('[data-testid="chat-input"] [contenteditable="true"]', { visible: true, timeout: 30000 });
+  await page.waitForFunction(() => document.body.textContent.includes('Fixture model'), { timeout: 30000 });
+  await wait(async () => await page.evaluate(directory => localStorage.getItem('lastDirectory') === directory, recoveryDirectory), 'recovered workspace persisted');
+  assert.equal(new URL(page.url()).searchParams.has('session'), false, 'Recovery clears the stale URL navigation pointer');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('[data-testid="chat-input"] [contenteditable="true"]', { visible: true, timeout: 30000 });
+  assert.equal(await page.$('[data-testid="workspace-recovery"]'), null, 'Recovery survives reload');
+  const afterRecovery = await client.session.get({ sessionID: id });
+  assert.deepEqual(afterRecovery.location, historical.location, 'Historical session location never changes');
+  assert.equal(afterRecovery.id, id);
+  await assert.rejects(access(`${runtime}/workspace`), { code: 'ENOENT' });
+  // Reopening the old workspace must offer recovery again, including mobile.
+  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await page.goto(`${url}?session=${encodeURIComponent(id)}`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 });
+  await page.$eval('#recovery-directory', (input, directory) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, directory);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, recoveryDirectory);
+  await page.evaluate(() => document.querySelector('[data-testid="workspace-recovery"] form').requestSubmit());
   await page.waitForSelector('button[data-composer-morph-prompt="true"]', { visible: true, timeout: 30000 });
   await page.tap('button[data-composer-morph-prompt="true"]');
   await page.waitForSelector('[contenteditable="true"]', { visible: true, timeout: 30000 });
@@ -187,11 +240,12 @@ try {
   assert.equal((await auth.readOpenCodeCredentials()).fixture, undefined);
   await client.session.remove({ sessionID: id });
   assert.doesNotMatch(logs, /fixture-persisted-key/);
-  console.log('PASS: pinned OpenChamber/OpenCode desktop and mobile Ingress, UI prompt/stream, API credentials, independent UI stop, and restart history/sign-in retention');
+  console.log('PASS: pinned desktop/mobile Ingress, prompt/stream, credentials, restart retention, missing-workspace recovery/reload, and unchanged historical directories');
 } catch (error) {
   if (browser) {
     const pages = await browser.pages();
     console.error('Browser state:', await pages.at(-1).evaluate(() => document.body.innerText));
+    console.error('Workspace probes:', workspaceProbes);
   }
   console.error(logs.replaceAll(password, '[redacted]').replaceAll('fixture-persisted-key', '[redacted]'));
   throw error;

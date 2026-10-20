@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## 3.2.4b0
+
+- Base this beta on released stable 3.2.3, including desktop/mobile workspace recovery, while retaining separate beta identity and storage; keep OpenCode 2.0.26 and OpenChamber 2.2.0 pinned.
+- Discover current PPQ private models automatically, cache temporary catalog outages and preserve encrypted-only routing; make PPQ models searchable by name ([#188](https://github.com/magnusoverli/opencode/issues/188)).
+- Keep PPQ model discovery working when optional capability metadata is malformed.
+- Preserve retired explicit PPQ defaults as unavailable rather than silently selecting a public provider; existing sessions and saved options are not rewritten.
+- Pass Linux contracts and native amd64/arm64 image checks; leave stable's published version at 3.2.3.
+- Account-backed encrypted PPQ inference and installed Supervisor upgrade acceptance remain unverified; this is a beta for validation, not a stable promotion.
+
 ## 3.2.2b1
 
 - Enable native MCP independently on new installs and migrate legacy Assist selections once to HA-configured `/api/mcp`, preserving custom APIs and disabled states with verified startup persistence.

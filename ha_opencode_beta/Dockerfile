@@ -33,10 +33,14 @@ COPY rootfs/opt/openchamber/editor-lsp /tmp/editor-lsp
 RUN node /tmp/patch-editor-lsp.cjs /opt/openchamber-preview
 COPY rootfs/opt/openchamber/patch-usage-model.cjs /tmp/patch-usage-model.cjs
 RUN node /tmp/patch-usage-model.cjs /opt/openchamber-preview
+COPY rootfs/opt/openchamber/patch-workspace-recovery.cjs /tmp/patch-workspace-recovery.cjs
+COPY rootfs/opt/openchamber/workspace-recovery /tmp/workspace-recovery
+RUN node /tmp/patch-workspace-recovery.cjs /opt/openchamber-preview
 # Skip desktop/mobile lifecycle scripts; explicitly build only the SDK/web assets.
 RUN bun install --frozen-lockfile --ignore-scripts \
     && node /tmp/patch-git-environment.cjs /opt/openchamber-preview/packages/web \
     && bun run --cwd packages/sdk build \
+    && bun run --cwd packages/ui type-check \
     && bun run --cwd packages/web build
 RUN --mount=type=bind,source=test/openchamber-model-fixture.cjs,target=/tmp/openchamber-model-fixture.cjs,readonly \
     --mount=type=bind,source=test/openchamber-model-regressions.inc.ts,target=/tmp/openchamber-model-regressions.inc.ts,readonly \
@@ -44,6 +48,8 @@ RUN --mount=type=bind,source=test/openchamber-model-fixture.cjs,target=/tmp/open
     node /tmp/openchamber-model-fixture.cjs /opt/openchamber-preview \
     && (cd packages/ui && bun test src/stores/useConfigStore.test.ts && bun test src/lib/runtime-url.test.ts) \
     && node --test /tmp/openchamber-usage.mjs
+RUN --mount=type=bind,source=test/openchamber-workspace-gate.test.tsx,target=/opt/openchamber-preview/packages/ui/src/components/auth/WorkspaceRecoveryGate.test.tsx,readonly \
+    cd packages/ui && bun test src/components/auth/WorkspaceRecoveryGate.test.tsx
 RUN timeout --signal=TERM --kill-after=10s 180s bun run --cwd packages/web test server/lib/git
 COPY rootfs/opt/openchamber/patch-ingress.js /tmp/patch-ingress.cjs
 RUN node /tmp/patch-ingress.cjs /opt/openchamber-preview/packages/web
@@ -101,7 +107,7 @@ ARG TTYD_VERSION=1.7.7
 # One pinned V2 runtime and its matching plugin API. No V1 runtime is installed.
 ARG OPENCODE_V2_VERSION=2.0.26
 ARG OPENCHAMBER_VERSION=2.2.0
-ARG PPQ_PROXY_VERSION=0.1.0
+ARG TINFOIL_VERSION=1.2.1
 ARG TSX_VERSION=4.23.15
 ARG YQ_VERSION=v4.54.1
 ARG ZIGPORTER_VERSION=1.4.2
@@ -204,12 +210,12 @@ RUN python3 -m venv /opt/zigporter-venv \
     && /opt/zigporter-venv/bin/pip install --no-cache-dir "zigporter==${ZIGPORTER_VERSION}" \
     && /opt/zigporter-venv/bin/zigporter --version
 
-# Install the PPQ private-mode proxy globally. Prettier is in the V2 lock;
+# Install the PPQ private-mode SDK. Prettier is in the V2 lock;
 # OpenChamber is built independently from its pinned preview source above.
-# - ppq-private-mode: local OpenAI-compatible encryption proxy for PPQ TEE models
-# - tsx: pinned runtime for the PPQ package's TypeScript entrypoint
+# - tinfoil: attestation and encrypted transport for the image-owned PPQ adapter
+# - tsx: pinned TypeScript launcher retained for user tooling
 # Build tools are needed only while npm installs native dependencies. Peer
-# dependencies are omitted because ppq-private-mode is run as a standalone
+# dependencies are omitted because the SDK is used by a standalone
 # proxy, not loaded as an OpenClaw plugin.
 #
 # The V2 package and binary pins are verified separately below.
@@ -251,13 +257,13 @@ COPY rootfs/opt/ppq-private-runtime/package*.json /opt/ppq-private-runtime/
 # image build. Overrides retain the AI SDK tree already qualified in b20.
 RUN cd /opt/ppq-private-runtime \
     && npm ci --omit=dev --legacy-peer-deps --no-audit --no-fund \
-    && test "$(node -p 'require("./node_modules/ppq-private-mode/package.json").version')" = "${PPQ_PROXY_VERSION}" \
+    && test "$(node -p 'require("./node_modules/tinfoil/package.json").version')" = "${TINFOIL_VERSION}" \
     && test "$(node -p 'require("./node_modules/tsx/package.json").version')" = "${TSX_VERSION}" \
     && test ! -e node_modules/openclaw \
     && ln -sf /opt/ppq-private-runtime/node_modules/tsx/dist/cli.mjs /usr/local/bin/tsx \
-    && ln -sf /opt/ppq-private-runtime/node_modules/ppq-private-mode/bin/server.ts /usr/local/bin/ppq-private-proxy \
+    && ln -sf /opt/ppq-private-runtime/proxy.js /usr/local/bin/ppq-private-proxy \
     && tsx --version \
-    && tsx --eval 'Promise.all([import("./node_modules/ppq-private-mode/lib/proxy.ts"), import("tinfoil")]).then(([proxy, crypto]) => { if (typeof proxy.startProxy !== "function" || typeof crypto.SecureClient !== "function") process.exit(1); })' \
+    && node --input-type=module --eval 'import("tinfoil").then(crypto => { if (typeof crypto.SecureClient !== "function") process.exit(1); })' \
     && npm cache clean --force
 
 # Install the locked V2 runtime plus MCP and LSP dependencies in parallel.
@@ -313,6 +319,7 @@ RUN --mount=type=bind,source=test/v2-ui-lan-fixture.mjs,target=/tmp/v2-ui-lan-fi
 # Make scripts executable and create runtime directories
 RUN python3 -c 'import json; from pathlib import Path; p = Path("/opt/opencode-assist/custom_components/opencode_assist"); m = json.loads((p / "manifest.json").read_text()); assert m["domain"] == "opencode_assist" and m["version"]; assert (p / "config_flow.py").is_file()' \
     && chmod +x /usr/local/bin/* \
+    && chmod +x /opt/ppq-private-runtime/proxy.js \
     && chmod +x /opt/openchamber/patch-ingress.js \
     && chmod +x /etc/s6-overlay/s6-rc.d/init-opencode/run \
     && chmod +x /etc/s6-overlay/s6-rc.d/ha-opencode/run \
