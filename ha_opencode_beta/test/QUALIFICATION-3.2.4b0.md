@@ -17,12 +17,15 @@
 - Reinstalled both channel runtime trees and verified the official CLI/plugin
   pins. The provider fixture now asserts the running server version, avoiding
   qualification against stale local node_modules.
-- 75 focused PPQ/provider/runtime contracts passed per channel on Windows,
+- 76 focused PPQ/provider/runtime contracts passed per channel on Windows,
   including the real 2.0.26 resolver, streaming through the shipped HTTP adapter,
   newly discovered IDs and retired-private-default protection.
 - Public, anonymous catalog inspection found six eligible private chat models;
   matching Tinfoil metadata supplied capabilities. No inference was requested.
 - Both standalone PPQ dependency audits reported zero vulnerabilities.
+- Linux PR contracts and the native arm64 beta image passed for the initial
+  candidate. The amd64 beta build failed an upstream OpenChamber Git test with a
+  real 5 ms timeout; gates will be rerun without weakening or skipping that test.
 
 ## Release gates and limits
 

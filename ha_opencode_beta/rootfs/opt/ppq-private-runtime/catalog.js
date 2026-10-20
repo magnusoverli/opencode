@@ -113,7 +113,11 @@ export function createCatalog({ fetcher = fetch, now = Date.now, cacheFile, warn
       // Optional capability enrichment must not turn a Tinfoil-only model into
       // a PPQ model or gate PPQ availability on a second public metadata service.
       let metadata = { data: [] };
-      try { metadata = await publicJson(TINFOIL_MODELS_URL); entries(metadata); }
+      try {
+        const candidate = await publicJson(TINFOIL_MODELS_URL);
+        entries(candidate);
+        metadata = candidate;
+      }
       catch { warn("PPQ capability metadata unavailable; using conservative text/tool defaults."); }
       const models = validateModels(normalizeCatalog(document, metadata));
       current = { fetchedAt: now(), models };

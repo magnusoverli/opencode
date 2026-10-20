@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Keep PPQ model discovery working when optional capability metadata is malformed.
 ## 3.2.4b0
 
 - Base this beta on released stable 3.2.3, including desktop/mobile workspace recovery, while retaining separate beta identity and storage; keep OpenCode 2.0.26 and OpenChamber 2.2.0 pinned.

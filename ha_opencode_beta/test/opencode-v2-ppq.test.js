@@ -104,6 +104,15 @@ test("capability-service outages cannot add models or prevent live PPQ discovery
   await assert.rejects(failing.get(), /retry shortly/);
 });
 
+test("malformed HTTP-success capability metadata cannot block a healthy PPQ catalog", async () => {
+  for (const metadata of [null, {}, { data: null }, { data: {} }]) {
+    const catalog = createCatalog({ fetcher: async (url) => response(url === PPQ_MODELS_URL ? document(raw()) : metadata) });
+    const models = await catalog.get();
+    assert.equal(models[0].id, "private/future-coder");
+    assert.deepEqual(models[0].capabilities, { tools: false, input: ["text"], output: ["text"] });
+  }
+});
+
 test("V2 discovery replaces models on reload, clears unavailable inventory and recovers without a restart", async () => {
   let current = normalizeCatalog(document({ ...raw(), supported_parameters: ["tools"] }));
   let callback;

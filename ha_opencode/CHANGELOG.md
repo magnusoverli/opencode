@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Keep PPQ model discovery working when optional capability metadata is malformed.
 - Discover current PPQ private models automatically, cache temporary catalog outages and preserve encrypted-only routing; make PPQ models searchable by name ([#188](https://github.com/magnusoverli/opencode/issues/188)).
 
 - Recover confirmed missing OpenChamber workspaces on desktop/mobile without moving conversations or recreating missing directories.
