@@ -2,8 +2,9 @@
 
 ## [Unreleased]
 
-- Fix OpenAI browser sign-in for dynamic callback ports and first-time client registration, and explain callback-free legacy device-code login directly in OpenChamber.
+## 3.2.4b4
 
+- Fix OpenAI browser sign-in for dynamic callback ports and first-time client registration, and explain callback-free legacy device-code login directly in OpenChamber.
 - Refresh README setup, integration and safety guidance, and replace manual contributor lists with an automatically updated GitHub-data image.
 
 ## 3.2.4b3

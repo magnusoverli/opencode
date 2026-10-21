@@ -2,7 +2,7 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.2.4b3** is based on released **stable 3.2.3**, with pinned OpenCode `2.1.2`
+Beta **3.2.4b4** is based on released **stable 3.2.3**, with pinned OpenCode `2.1.2`
 and OpenChamber `2.5.0`, stable's desktop/mobile workspace recovery, and live PPQ
 private-model discovery. The unrelated post-3.2.3 Zigporter compatibility patch
 is not included. Beta keeps its own app identity and persistent storage; installing
@@ -13,8 +13,10 @@ is tracked in [#45](https://github.com/magnusoverli/opencode/issues/45).
 OpenChamber uses immutable commit `ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd`, built
 with Bun `1.4.3` and the reviewed security lock. This beta refreshes the private-backend,
 Git and translated update-notice patches and uses upstream's streaming-proxy fix.
-This version adds parser-based safe-write validation, guarded global Markdown
-agent imports and an opt-in for remote TTS/STT servers. Installed Supervisor
+This version fixes OpenAI browser sign-in for dynamic callback ports and first-time
+client registration, and adds callback-free legacy device-code guidance in
+OpenChamber. It retains parser-based safe-write validation, guarded global Markdown
+agent imports and the opt-in for remote TTS/STT servers. Installed Supervisor
 upgrade/rollback, real Wyoming/Piper/Whisper speech, public relay pairing and
 account-backed encrypted inference remain unverified. Stable remains unchanged.
 
