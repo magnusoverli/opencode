@@ -52,7 +52,22 @@ promotion. Published 3.2.4b1 qualification remains historical; stable is unchang
   findings and **1 visible vendor-mitigated braces advisory**
   (`GHSA-vfj7-8cjw-p6xm`), with patched-file hashes verified.
 
-## Initial candidate limitations and release gates
+## Native Linux CI qualification
+
+- [PR checks 39570928139](https://github.com/magnusoverli/opencode/actions/runs/39570928139)
+  pass for source commit `30fb8e7`: complete stable/beta contracts, HA 2026.10
+  companion integration, MCP/LSP servers, shell syntax, audits and native root
+  security/persistence boundaries.
+- [Native image checks 39570928172](https://github.com/magnusoverli/opencode/actions/runs/39570928172)
+  pass on both amd64 and arm64. This includes the full Linux Git gate, native
+  PTY/startup, actual private-backend/LAN/relay auth, dependency mitigations,
+  desktop/mobile Ingress prompts/streams, restarts, credential/history retention
+  and missing-workspace recovery with unchanged historical directories.
+- These checks qualify source/build behavior. Published image availability is
+  verified separately during release; installed Supervisor acceptance, public
+  relay pairing and account-backed encrypted inference remain unverified.
+
+## Initial candidate limitations (before Linux CI)
 
 - No local Docker daemon: native amd64/arm64 image checks, native PTY/startup,
   Linux privilege/filesystem boundaries and in-image browser/relay acceptance

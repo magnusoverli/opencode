@@ -6,6 +6,7 @@
 
 - Pin OpenCode CLI/plugin 2.1.2 and OpenChamber 2.5.0; refresh its security lock, private-backend/Git compatibility and all 15 update-notice translations, using upstream's corrected streaming proxy framing.
 - Preserve conversations, credentials and permissions when upgrading the shipped OpenCode 2.0.26 state; retain older guarded migration paths and private-only PPQ pricing/routing coverage.
+- Pass Linux contracts and native amd64/arm64 image checks, including desktop/mobile Ingress prompts, restart retention and missing-workspace recovery.
 - Keep stable at 3.2.3; installed Supervisor upgrade/rollback, public relay pairing and account-backed encrypted inference remain unverified.
 
 ## 3.2.4b1
