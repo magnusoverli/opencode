@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## 3.2.4b2
+
+- Pin OpenCode CLI/plugin 2.1.2 and OpenChamber 2.5.0; refresh its security lock, private-backend/Git compatibility and all 15 update-notice translations, using upstream's corrected streaming proxy framing.
+- Preserve conversations, credentials and permissions when upgrading the shipped OpenCode 2.0.26 state; retain older guarded migration paths and private-only PPQ pricing/routing coverage.
+- Keep stable at 3.2.3; installed Supervisor upgrade/rollback, public relay pairing and account-backed encrypted inference remain unverified.
+
 ## 3.2.4b1
 
 - Fix PPQ model-list/API-key dialog failures caused by incomplete pricing metadata; preserve cache rates and validate models against OpenCode's native schema ([#188](https://github.com/magnusoverli/opencode/issues/188)).

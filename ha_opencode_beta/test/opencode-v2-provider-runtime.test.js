@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
-import { OpenCode } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/@opencode/client/dist/promise/index.js";
+import { OpenCode as RuntimeOpenCode } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/@opencode/client/dist/promise/index.js";
 import { createProxy } from "../rootfs/opt/ppq-private-runtime/proxy.js";
 import { normalizeCatalog } from "../rootfs/opt/ppq-private-runtime/catalog.js";
 import { Model } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/@opencode/schema/dist/model.js";
@@ -17,6 +17,11 @@ import { Schema } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/eff
 const runtime = fileURLToPath(new URL("../rootfs/opt/opencode-v2-homeassistant/", import.meta.url));
 const providerKey = "fixture-provider-api-key-not-a-real-secret";
 const ppqKey = "fixture-upstream-ppq-key-must-stay-out-of-backend";
+// Optionally qualify OpenChamber's independently pinned SDK against this backend.
+const upstream = process.env.OPENCHAMBER_TEST_SOURCE;
+const OpenCode = upstream
+  ? (await import(pathToFileURL(join(upstream, "packages/web/node_modules/@opencode/client/dist/promise/index.js")))).OpenCode
+  : RuntimeOpenCode;
 
 test("pinned V2 routes generated custom-provider and PPQ selections to controlled local endpoints", { timeout: 45000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "ha-v2-provider-"));

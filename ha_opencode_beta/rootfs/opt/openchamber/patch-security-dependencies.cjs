@@ -4,7 +4,7 @@ const root = process.argv[2];
 if (!root) throw new Error("Provide the pinned OpenChamber source directory");
 const file = path.join(root, "package.json");
 const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
-if (pkg.name !== "openchamber-monorepo" || pkg.version !== "2.2.0") {
+if (pkg.name !== "openchamber-monorepo" || pkg.version !== "2.5.0") {
   throw new Error("Review dependency overrides for this OpenChamber release");
 }
 const overrides = JSON.parse(fs.readFileSync(path.join(__dirname, "security-overrides.json"), "utf8"));
@@ -23,7 +23,7 @@ for (const name of ["service.js", "service.test.js"]) {
   if (name === "service.js") {
     const anchor = "  return createSimpleGit({\n    baseDir,";
     if (updated.split(anchor).length !== 2) throw new Error("Review Git environment policy");
-    updated = updated.replace(anchor, "  return createSimpleGit({\n    // Permit unchanged trusted server settings, never a project override.\n    allowEnvironment: [...Object.keys(env).filter(key => env[key] === process.env[key]), 'GIT_TERMINAL_PROMPT', 'GIT_INDEX_FILE', 'GIT_LITERAL_PATHSPECS'],\n    baseDir,");
+    updated = updated.replace(anchor, "  return createSimpleGit({\n    // Permit unchanged trusted server settings and app-owned controls, never a project override.\n    allowEnvironment: [...Object.keys(env).filter(key => env[key] === process.env[key]), 'GIT_TERMINAL_PROMPT', 'GIT_INDEX_FILE', 'GIT_LITERAL_PATHSPECS', 'GIT_OPTIONAL_LOCKS'],\n    baseDir,");
   } else {
     // Git 2.47 (Debian trixie) does not auto-create remote HEAD on fetch.
     // Establish the test's local symbolic-ref precondition explicitly.

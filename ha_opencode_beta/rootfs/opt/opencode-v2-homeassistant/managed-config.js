@@ -34,7 +34,7 @@ const WATCHER_IGNORES = Object.freeze([
   "*.log",
 ]);
 
-// Pinned 2.0.26 Prettier/Biome built-in extensions, minus YAML. A project-local
+// Managed Prettier/Biome extensions, minus YAML. A project-local
 // formatter must not silently undo the add-on's minimal-diff default.
 const NON_YAML_EXTENSIONS = [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts",
   ".html", ".htm", ".css", ".scss", ".sass", ".less", ".vue", ".svelte", ".json", ".jsonc",

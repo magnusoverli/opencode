@@ -1,8 +1,8 @@
 # Pinned OpenChamber security dependencies
 
-The beta keeps OpenChamber 2.2.0 source at the revision in `build.yaml`.
+The beta keeps OpenChamber 2.5.0 source at the revision in `build.yaml`.
 `patch-security-dependencies.cjs` merges `security-overrides.json` into that
-checkout; `security.bun.lock` is its generated, committed Bun 1.4.2 lock.
+checkout; `security.bun.lock` is its generated, committed Bun 1.4.3 lock.
 Both build-time and production installs use this lock with `--frozen-lockfile`.
 
 To refresh: start from that exact upstream revision, run the patcher, then
@@ -10,6 +10,15 @@ To refresh: start from that exact upstream revision, run the patcher, then
 Review the lock diff and regenerate the image; never resolve a fresh lock during
 the image build. Git, relay, proxy, native and installed-browser checks qualify
 these dependencies independently of upstream's release designation.
+
+The 2.5.0 upgrade retains the explicit security overrides and Git 4 compatibility
+patches. Its upstream proxy now preserves streaming chunked framing and strips
+transfer-encoding before replaying parsed bodies, replacing our old framing
+patch. We still fix replay of empty parsed chunked JSON objects. The managed
+backend patch follows upstream's injected-environment setter without exporting
+the backend credential. Arabic and Hebrew join the Supervisor-owned update
+notices (15 locales). Native image and installed-browser checks must qualify
+this candidate before release; prior qualification records cover older pins.
 
 ## Visible vendor mitigation
 
@@ -35,8 +44,9 @@ inside built browser bundles require separate scanners.
 ## Git 4 environment compatibility
 
 The Git service uses the named `simpleGit` export and explicitly allows app-owned
-prompt/index controls and unchanged server environment keys. Project overrides
-cannot add executable or repository-location variables. `patch-git-environment.cjs`
+prompt/index controls, read-only `GIT_OPTIONAL_LOCKS`, and unchanged server
+environment keys. Project overrides cannot add executable or repository-location
+variables. `patch-git-environment.cjs`
 lets the ESM runtime retain inherited keys only when explicitly allowlisted;
 unlisted keys are dropped and own-key/argument security checks stay enabled.
 Upstream Git tests and production ESM regressions cover this compatibility patch.

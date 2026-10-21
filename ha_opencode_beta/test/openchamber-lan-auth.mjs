@@ -5,9 +5,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { test } from "node:test";
-import { createRemoteClientAuthRuntime } from "/opt/openchamber-preview/packages/web/server/lib/client-auth/remote-clients.js";
+import { pathToFileURL } from "node:url";
 
-const authModule = "file:///opt/openchamber-preview/packages/web/server/lib/ui-auth/ui-auth.js";
+const source = process.env.OPENCHAMBER_TEST_SOURCE || "/opt/openchamber-preview";
+const { createRemoteClientAuthRuntime } = await import(pathToFileURL(path.join(source, "packages/web/server/lib/client-auth/remote-clients.js")));
+const authModule = pathToFileURL(path.join(source, "packages/web/server/lib/ui-auth/ui-auth.js")).href;
 const req = (body = {}, headers = {}) => ({ body, headers: { host: "code.example.test", "x-forwarded-proto": "https", ...headers }, secure: true, ip: "192.0.2.10", path: "/auth/session", method: "POST" });
 function response() {
   return { statusCode: 200, headers: {}, body: null,

@@ -78,7 +78,7 @@ for (const lan of [false, true]) {
       const [, request] = await connected;
       const serverId = new URL(request.url, "http://localhost").searchParams.get("serverId");
       assert.ok(serverId);
-      assert.equal(serverId, expectedServerId, "2.2.0 must migrate the existing relay identity without changing paired devices' server ID");
+      assert.equal(serverId, expectedServerId, "the upgrade must retain paired devices' existing relay server ID");
       assert.equal((await readSettings()).relaySigningKey, undefined);
       assert.equal((await readSettings()).relayEncryptionKey, undefined);
       const storedIdentity = JSON.parse(await fs.readFile(path.join(data, "relay-identity.json"), "utf8"));

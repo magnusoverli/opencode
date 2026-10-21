@@ -35,9 +35,10 @@ async function readModules(directory) {
     }
   }
 }
-await readModules("/opt/openchamber-preview/node_modules");
-await readPackage("/opt/openchamber-preview/packages/web");
-await readPackage("/opt/openchamber-preview/packages/sdk");
+const source = process.argv[2] || "/opt/openchamber-preview";
+await readModules(path.join(source, "node_modules"));
+await readPackage(path.join(source, "packages/web"));
+await readPackage(path.join(source, "packages/sdk"));
 if (packages.size < 20) throw new Error("Installed package inventory incomplete");
 const response = await fetch("https://registry.npmjs.org/-/npm/v1/security/advisories/bulk", {
   method: "POST", headers: { "Content-Type": "application/json" },
