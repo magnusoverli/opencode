@@ -379,6 +379,29 @@ Updated bundled guidance takes effect after an add-on restart and a new OpenCode
 session. User-edited skill copies are preserved by updates; review those copies
 if an older customized procedure is still being loaded.
 
+### Safe-write YAML preflight
+
+`write_config_safe` parses YAML before checking automation, script and template
+structures. Nested lists, multiline values, anchors/merge keys, package files and
+inline `homeassistant.packages` no longer depend on regex block splitting. Standard
+root `automations.yaml` and `scripts.yaml` also get their standalone checks;
+arbitrary include-file layouts are not guessed from a basename.
+
+Home Assistant references (`!secret`, `!env_var`, `!input` and `!include*`) remain
+opaque during structural preflight: it never reads their files or values.
+Malformed YAML, duplicate keys, invalid automation structures and unsafe alias
+graphs block writing. Missing script sequences or template sensor states retain
+their existing warning severity. Bounds are 1 MiB of source, 64 levels, 50,000
+parsed/expanded nodes, alias expansion limited to 100, and fewer than 100 issues;
+exceeding a bound blocks the write rather than silently truncating validation.
+
+A passed dry run is **preflight only**, not proof that Home Assistant will load
+the configuration. Template rendering, deletion protection, backup creation and
+the post-write HA configuration check remain in place; a failed/unavailable HA
+check restores the backup or removes a newly created file. Reload still requires
+separate approval. Parser and mocked-HA tests do not replace installed HA
+acceptance testing.
+
 ## Read-Only Session
 
 Select `home-assistant-read-only` through `/agents` in the V2 terminal. From an

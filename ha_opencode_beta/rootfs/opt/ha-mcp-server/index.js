@@ -5332,7 +5332,7 @@ async function handleToolCall(request) {
 
         if (!contentChecks) {
           // Step 3: Run structural YAML checks
-          const structuralIssues = validateYamlStructure(content);
+          const structuralIssues = validateYamlStructure(content, resolvedPath);
 
           // Step 4: Basic YAML lint checks (same as check_config_syntax)
           const lintWarnings = [];
