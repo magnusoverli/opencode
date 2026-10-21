@@ -129,6 +129,10 @@ configuration:
     name: "OpenChamber relay hosting"
     description: "Automatically reconnects the managed OpenChamber instance to the configured relay when paired clients need it (relay.openchamber.dev by default). Off by default. Requires OpenChamber interface mode. With LAN web UI enabled, paired clients still expire at app restart and must pair again. Real phone/public-relay reconnection remains unverified."
 
+  openchamber_allow_remote_speech:
+    name: "Allow remote OpenChamber speech servers"
+    description: "Off by default. Allows OpenChamber text-to-speech and transcription to contact custom HTTP(S) servers, including other Home Assistant apps by internal DNS name. This permits any HTTP(S) speech destination, not just local apps; use only trusted servers, which receive speech text/audio and configured speech credentials. Requires OpenChamber interface mode and an app restart. Does not expose a LAN port or change authentication."
+
   ppq_private_enabled:
     name: "PPQ private TEE models (beta)"
     description: "Starts the internal proxy and registers native ppq-private models when a key is configured. Select a private model explicitly; this does not switch existing sessions or verify upstream private inference."

@@ -919,6 +919,34 @@ running a second relay host; the upstream `relay-host.lock` protects its identit
 from competing local hosts. Environment scrubbing and the non-dumpable preload
 remain in place, but do not restrict outbound network destinations.
 
+## OpenChamber Custom Speech Servers
+
+With `interface_mode: openchamber`, enable `openchamber_allow_remote_speech` and
+**restart the app** to use a trusted custom OpenAI-compatible server for
+text-to-speech (TTS), speech-to-text (STT), or both. The option defaults to `false`;
+leaving it disabled preserves upstream's local-host restriction.
+
+Then enter the server URL, model, voice and any required speech API key in
+OpenChamber's voice settings. For a speech gateway in another Home Assistant app,
+use its internal DNS name and container port, for example
+`http://<gateway-app-dns-name>:8555/v1/`. Requests originate from OpenChamber's
+container, not your browser. This does not require enabling the LAN web UI,
+publishing a new port, a startup-hook proxy, or forwarding general `env_vars`.
+
+**Trust and privacy:** this permits arbitrary HTTP(S) speech destinations, not
+only Home Assistant apps or your LAN. Those servers receive the text/recordings
+you submit and any speech credentials configured for them. HTTP does not encrypt
+that traffic. The option does not restrict speech to a private/TEE model provider.
+URL-embedded credentials and non-HTTP(S) schemes remain rejected, and upstream
+enterprise restrictions still apply. Managed service bindings, authentication,
+environment isolation and backend credentials are unchanged. General
+OpenChamber environment-variable passthrough is intentionally unsupported.
+
+Microphone capture still requires browser/device permissions and a secure UI
+context (normally HTTPS); this option does not bypass those requirements. The
+upstream speech path has been exercised with a synthetic server; actual
+Wyoming/Piper/Whisper playback and recording remain to be qualified.
+
 ## PPQ Private TEE Models (Beta)
 
 Enable **PPQ private TEE models** and set the PPQ key privately in the app options.

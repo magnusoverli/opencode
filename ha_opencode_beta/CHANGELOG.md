@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Add a default-off option for trusted remote OpenChamber TTS/STT servers without general environment passthrough ([#185](https://github.com/magnusoverli/opencode/issues/185)).
 - Activate OpenChamber global Markdown agents on the managed backend, verify saves/deletes, and preserve add-on permission safeguards ([#190](https://github.com/magnusoverli/opencode/issues/190)).
 
 ## 3.2.4b2

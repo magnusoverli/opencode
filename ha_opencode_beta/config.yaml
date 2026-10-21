@@ -140,6 +140,8 @@ options:
   # reconnects to its relay when paired clients need it. LAN UI authentication
   # still expires at app restart. Off by default.
   openchamber_relay_host: false
+  # Permit outbound TTS/STT requests to trusted custom HTTP(S) speech servers.
+  openchamber_allow_remote_speech: false
 
   # --- 6. Model providers ------------------------------------------------
   # Starts the internal PPQ proxy and registers native ppq-private models when
@@ -220,6 +222,7 @@ schema:
     - str
   openchamber_lan_native_apps: bool?
   openchamber_relay_host: bool?
+  openchamber_allow_remote_speech: bool?
 
   # --- 6. Model providers ------------------------------------------------
   ppq_private_enabled: bool
