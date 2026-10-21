@@ -1,8 +1,10 @@
 import { Plugin, Model } from "@opencode/plugin";
+import { Schema } from "effect";
 import { isPrivateModel, readJsonResponse, validateModels } from "../ppq-private-runtime/catalog.js";
 
 export const PPQ_PLUGIN_ID = "homeassistant.ppq-private";
 const PROVIDER = "ppq-private";
+const decodeModels = Schema.decodeUnknownSync(Schema.Array(Model.Info), { onExcessProperty: "error" });
 
 export function createPpqSetup({ fetcher = fetch, interval = 60_000, schedule = setInterval, unschedule = clearInterval, warn = console.warn } = {}) {
   return async (ctx) => {
@@ -17,7 +19,7 @@ export function createPpqSetup({ fetcher = fetch, interval = 60_000, schedule = 
       capabilities: { tools: false, input: ["text"], output: ["text"] },
       limit: { context: 32768, output: 8192 },
     }] : [];
-    let models = unavailable();
+    let models = decodeModels(unavailable());
     let disposed = false;
     let pending;
     const registration = await ctx.provider.transform((editor) => { editor.models.set(PROVIDER, models); });
@@ -34,14 +36,17 @@ export function createPpqSetup({ fetcher = fetch, interval = 60_000, schedule = 
           cost: m.cost ? [m.cost] : [],
         }));
         if (requested && !next.some((m) => m.id === requested)) next.push(...unavailable());
-        if (!disposed && JSON.stringify(next) !== JSON.stringify(models)) {
-          models = next;
+        // Plugin transforms consume domain Model.Info, not the looser config
+        // model shape. Never publish a record that can poison /api/model.
+        const validated = decodeModels(next);
+        if (!disposed && JSON.stringify(validated) !== JSON.stringify(models)) {
+          models = validated;
           await ctx.provider.reload();
         }
       } catch {
         // The proxy owns bounded stale-cache policy. A 503 (including expired
         // cache) must not leave indefinitely stale models in OpenCode's picker.
-        if (!disposed && models.length) { models = unavailable(); await ctx.provider.reload().catch(() => {}); }
+        if (!disposed && models.length) { models = decodeModels(unavailable()); await ctx.provider.reload().catch(() => {}); }
         warn("PPQ private models unavailable; discovery will retry automatically. Existing sessions are unchanged.");
       }
     })().finally(() => { pending = undefined; });

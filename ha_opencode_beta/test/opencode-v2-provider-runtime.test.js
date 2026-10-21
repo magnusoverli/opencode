@@ -11,6 +11,8 @@ import { test } from "node:test";
 import { OpenCode } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/@opencode/client/dist/promise/index.js";
 import { createProxy } from "../rootfs/opt/ppq-private-runtime/proxy.js";
 import { normalizeCatalog } from "../rootfs/opt/ppq-private-runtime/catalog.js";
+import { Model } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/@opencode/schema/dist/model.js";
+import { Schema } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/effect/dist/index.js";
 
 const runtime = fileURLToPath(new URL("../rootfs/opt/opencode-v2-homeassistant/", import.meta.url));
 const providerKey = "fixture-provider-api-key-not-a-real-secret";
@@ -34,8 +36,14 @@ test("pinned V2 routes generated custom-provider and PPQ selections to controlle
   const custom = mock("custom");
   // Exercise the shipped private adapter, not a permissive mock which accepts
   // obsolete model IDs. Only the cryptographic SDK is substituted: no paid call.
-  const privateModels = normalizeCatalog({ data: [{ id: "private/future-coder", type: "chat", privacyLevel: "e2e",
-    context_length: 64000, supported_parameters: ["tools"], name: "Future Coder" }] });
+  const privateModels = normalizeCatalog({ data: [
+    { id: "private/future-coder", type: "chat", privacyLevel: "e2e", context_length: 64000,
+      supported_parameters: ["tools"], name: "Future Coder",
+      pricing: { input_per_1M_tokens: 1.2, output_per_1M_tokens: 3.4, cache_read_per_1M_tokens: 0.3, cache_write_per_1M_tokens: 1.8 } },
+    { id: "private/no-cache-rates", type: "chat", privacyLevel: "e2e", context_length: 64000,
+      pricing: { input_per_1M_tokens: 2, output_per_1M_tokens: 4, cache_read_per_1M_tokens: null } },
+    { id: "private/unpriced", type: "chat", privacyLevel: "e2e", context_length: 64000 },
+  ] });
   const ppq = createProxy({ apiKey: ppqKey, catalog: { get: async () => privateModels }, secureClient: {
     async ready() {},
     async fetch(path, options) {
@@ -128,29 +136,53 @@ test("pinned V2 routes generated custom-provider and PPQ selections to controlle
     await run(); // The generated raw model default selects the custom provider.
     assert.ok(requests.some((entry) => entry.route === "custom" && entry.path === "/v1/chat/completions" && entry.body.model === "upstream/coder" && entry.authorization === `Bearer ${providerKey}`));
     assert.equal(requests.some((entry) => entry.route === "ppq"), false);
+    const location = { directory: join(root, "project") };
+    const checkModelList = async () => {
+      // This is the API consumed by /models and the post-/connect refresh. A
+      // backend inference-only test misses response-encoding/schema failures.
+      const catalog = await client.model.list({ location });
+      Schema.decodeUnknownSync(Schema.Array(Model.Info))(catalog.data);
+      const listed = catalog.data.filter((model) => model.providerID === "ppq-private");
+      assert.equal(listed.length, 3);
+      assert.deepEqual(listed.find((model) => model.id === "private/future-coder").cost,
+        [{ input: 1.2, output: 3.4, cache: { read: 0.3, write: 1.8 } }]);
+      assert.deepEqual(listed.find((model) => model.id === "private/no-cache-rates").cost,
+        [{ input: 2, output: 4, cache: { read: 2, write: 2 } }]);
+      assert.deepEqual(listed.find((model) => model.id === "private/unpriced").cost, []);
+    };
+    await checkModelList();
+    await client.integration.connect.key({ integrationID: "ppq-private", location, key: "fixture-interactive-key-not-a-real-secret" });
+    await checkModelList();
     await run({ providerID: "legacy", id: "coding" });
     assert.ok(requests.some((entry) => entry.route === "custom" && entry.path === "/v1/chat/completions" && entry.body.model === "upstream/legacy-coder"));
     await run({ providerID: "ppq-private", id: "private/future-coder" });
     assert.ok(requests.some((entry) => entry.route === "ppq" && entry.path === "https://api.ppq.ai/private/v1/chat/completions"
       && entry.body.model === "future-coder" && entry.privateModel === "private/future-coder" && entry.authorization === `Bearer ${ppqKey}`));
-    // Prove against the real resolver that a retired explicit private default
-    // is retained, rather than silently selecting a public-provider fallback.
-    const exited = once(server, "exit");
-    server.kill("SIGTERM");
-    await exited;
-    config.model = "ppq-private/private/retired-default";
-    config.plugins.find((plugin) => plugin.package.endsWith("/ppq-plugin")).options.defaultModel = "private/retired-default";
-    await writeFile(configPath, JSON.stringify(config));
-    launch();
-    await waitReady();
-    await client.session.create({ title: "Private default verification" });
-    let selected;
-    for (let attempt = 0; attempt < 100; attempt++) {
-      selected = await client.model.default({ location: { directory: join(root, "project") } });
-      if (selected.data?.providerID === "ppq-private" && selected.data.id === "private/retired-default") break;
-      await sleep(50); // Location registries initialize asynchronously after restart.
-    }
-    assert.ok(selected.data, "private default did not become available in the location registry");
+    const restartWithDefault = async (id) => {
+      const exited = once(server, "exit");
+      server.kill("SIGTERM");
+      await exited;
+      config.model = `ppq-private/${id}`;
+      config.plugins.find((plugin) => plugin.package.endsWith("/ppq-plugin")).options.defaultModel = id;
+      await writeFile(configPath, JSON.stringify(config));
+      launch();
+      await waitReady();
+      await client.session.create({ title: "Private default verification" });
+      let selected;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        selected = await client.model.default({ location });
+        if (selected.data?.providerID === "ppq-private" && selected.data.id === id) return selected;
+        await sleep(50); // Location registries initialize asynchronously after restart.
+      }
+      assert.fail("private default did not become available in the location registry");
+    };
+    const pricedDefault = await restartWithDefault("private/future-coder");
+    assert.deepEqual(pricedDefault.data.cost[0].cache, { read: 0.3, write: 1.8 });
+    Schema.decodeUnknownSync(Model.Info)(pricedDefault.data);
+    await checkModelList();
+    await run();
+    // Retired private defaults must never select a public-provider fallback.
+    const selected = await restartWithDefault("private/retired-default");
     assert.equal(selected.data.providerID, "ppq-private");
     assert.equal(selected.data.id, "private/retired-default");
     assert.match(selected.data.name, /Unavailable/);
@@ -159,6 +191,7 @@ test("pinned V2 routes generated custom-provider and PPQ selections to controlle
     assert.equal(requests.length, before, "retired private defaults cannot reach any inference transport");
     assert.ok(!logs.includes(providerKey), "provider API key must not appear in runtime logs");
     assert.ok(!logs.includes(ppqKey), "PPQ upstream key must not appear in runtime logs");
+    assert.ok(!logs.includes("fixture-interactive-key-not-a-real-secret"));
   } finally {
     if (server && server.exitCode === null && server.signalCode === null) {
       const exited = once(server, "exit");

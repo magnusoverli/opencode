@@ -2,7 +2,7 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.2.4b0** is based on released **stable 3.2.3**, with pinned OpenCode `2.0.26`
+Beta **3.2.4b1** is based on released **stable 3.2.3**, with pinned OpenCode `2.0.26`
 and OpenChamber `2.2.0`, stable's desktop/mobile workspace recovery, and live PPQ
 private-model discovery. The unrelated post-3.2.3 Zigporter compatibility patch
 is not included. Beta keeps its own app identity and persistent storage; installing
@@ -900,6 +900,17 @@ switch existing sessions or override an explicit default model. The upstream PPQ
 key stays with the proxy, not the V2 backend. Missing keys leave this provider
 inactive with a warning; selecting a PPQ default without its prerequisites stops
 activation with an actionable error.
+
+With the key configured in the app options, use `/models`, not `/connect`: the
+upstream key belongs to the private proxy. Beta 3.2.4b1 fixes the misleading
+`Missing key ... cost ... cache` error in the model-list/API-key dialog. Existing
+catalog caches are upgraded in memory; no manual deletion or key re-entry is needed.
+
+Published input, output and cache token prices are retained. Missing cache rates
+use ordinary input pricing as an estimate, not a free discount; models without
+overall pricing remain unknown rather than advertised as free. Actual PPQ billing
+is authoritative. Every registered model is validated against the pinned native
+OpenCode schema before being exposed to the UI.
 
 Search `/models` for **PPQ** and select a currently listed private model. IDs keep
 the form `ppq-private/private/<model-id>`; the app does not maintain a fixed list
