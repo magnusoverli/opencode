@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
+## 3.2.4b3
+
 - Validate safe-write YAML structures with bounded parser-based checks instead of regex, supporting nested packages, scripts, merges and Home Assistant references ([#184](https://github.com/magnusoverli/opencode/issues/184)).
 - Add a default-off option for trusted remote OpenChamber TTS/STT servers without general environment passthrough ([#185](https://github.com/magnusoverli/opencode/issues/185)).
 - Activate OpenChamber global Markdown agents on the managed backend, verify saves/deletes, and preserve add-on permission safeguards ([#190](https://github.com/magnusoverli/opencode/issues/190)).
+- Retain OpenCode 2.1.2, OpenChamber 2.5.0 and the earlier PPQ fix; pass Linux contracts and native amd64/arm64 image checks while leaving stable at 3.2.3.
+- Installed Supervisor upgrade/rollback, real Wyoming/Piper/Whisper speech and account-backed encrypted PPQ inference remain unverified; feedback from beta testers is welcome.
 
 ## 3.2.4b2
 
