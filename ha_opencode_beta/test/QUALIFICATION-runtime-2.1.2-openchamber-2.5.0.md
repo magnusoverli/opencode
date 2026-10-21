@@ -66,6 +66,10 @@ promotion. Published 3.2.4b1 qualification remains historical; stable is unchang
   quoting and mocked GitHub-account cases, and times out after 420 seconds on
   Windows. Only the focused Git checks above are qualified locally; the complete
   native Linux Git gate must pass before release.
+- The first native browser run confirmed upstream refreshes the last-session
+  cache's ordering timestamp during reload. The recovery fixture now snapshots
+  after restore and independently checks the original session/directory, while
+  still requiring failed recovery to leave the entire stored pointer unchanged.
 - Production metadata auditing excludes OS packages and embedded browser code.
   The full upstream development workspace audit reports additional findings;
   it is not a zero-finding audit and is not covered by the production result.

@@ -197,13 +197,23 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 });
   assert.equal(new URL(page.url()).searchParams.get('session'), id, 'Fixture exercises the stale historical URL too');
+  // Upstream refreshes the cache's monotonic updatedAt when restoring a session
+  // on reload. Snapshot AFTER that restore, not before it; the session/directory
+  // must still be the same, and a failed recovery must not write anything else.
+  const recoveryLastSession = await page.evaluate(() => localStorage.getItem('oc.lastSession.v1'));
+  const restored = JSON.parse(recoveryLastSession).runtimes.local;
+  const previous = JSON.parse(lastSession).runtimes.local;
+  assert.equal(restored.sessionId, id);
+  assert.equal(restored.sessionId, previous.sessionId);
+  assert.equal(restored.directory, historical.location.directory);
+  assert.equal(restored.directory, previous.directory);
   await page.$eval('#recovery-directory', input => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '/definitely-missing-ha-fixture');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.evaluate(() => document.querySelector('[data-testid="workspace-recovery"] form').requestSubmit());
   await page.waitForSelector('[data-testid="workspace-recovery"] [role="alert"]');
-  assert.equal(await page.evaluate(() => localStorage.getItem('oc.lastSession.v1')), lastSession, 'Failed recovery preserves last-session pointer');
+  assert.equal(await page.evaluate(() => localStorage.getItem('oc.lastSession.v1')), recoveryLastSession, 'Failed recovery preserves last-session pointer');
   await page.$eval('#recovery-directory', (input, directory) => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, directory);
     input.dispatchEvent(new Event('input', { bubbles: true }));
