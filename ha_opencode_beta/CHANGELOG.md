@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## 3.2.4b1
+
+- Fix PPQ model-list/API-key dialog failures caused by incomplete pricing metadata; preserve cache rates and validate models against OpenCode's native schema ([#188](https://github.com/magnusoverli/opencode/issues/188)).
+- Upgrade existing PPQ catalog caches automatically; missing cache rates use normal input pricing as an estimate, while unknown overall pricing stays unknown. No API-key re-entry or manual cache deletion is required.
+- Add real OpenCode 2.0.26 model-list, post-connect refresh and priced-default regression coverage; retain private-only encrypted routing and stable's published 3.2.3 version. Account-backed inference remains unverified.
+
 ## 3.2.4b0
 
 - Base this beta on released stable 3.2.3, including desktop/mobile workspace recovery, while retaining separate beta identity and storage; keep OpenCode 2.0.26 and OpenChamber 2.2.0 pinned.

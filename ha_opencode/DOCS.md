@@ -857,6 +857,11 @@ key stays with the proxy, not the V2 backend. Missing keys leave this provider
 inactive with a warning; selecting a PPQ default without its prerequisites stops
 activation with an actionable error.
 
+With the key configured in the app options, use `/models`, not `/connect`: the
+upstream key belongs to the private proxy. Published token/cache prices are
+retained; missing cache rates use ordinary input pricing as an estimate, and
+missing overall pricing stays unknown. Actual PPQ billing is authoritative.
+
 Search `/models` for **PPQ** and select a currently listed private model. IDs keep
 the form `ppq-private/private/<model-id>`; the app does not maintain a fixed list
 or silently replace retired models in existing sessions or explicit defaults.

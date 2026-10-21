@@ -12,6 +12,18 @@ export const isPrivateModel = (id) => typeof id === "string" && /^private\/[a-zA
 const integer = (value) => Number.isSafeInteger(value) && value > 0 && value <= 10_000_000;
 const price = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
+// Complete the domain pricing contract, including old on-disk catalogs from
+// 3.2.4b0. Unknown cache rates use ordinary input pricing, not a free discount.
+export function normalizeCost(cost) {
+  if (!cost || !price(cost.input) || !price(cost.output)
+    || (cost.cache !== undefined && (!cost.cache || typeof cost.cache !== "object" || Array.isArray(cost.cache)
+      || ["read", "write"].some((key) => cost.cache[key] !== undefined && !price(cost.cache[key]))))) {
+    throw new Error("Invalid private model pricing");
+  }
+  return { input: cost.input, output: cost.output,
+    cache: { read: cost.cache?.read ?? cost.input, write: cost.cache?.write ?? cost.input } };
+}
+
 export async function readJsonResponse(response) {
   if (!response.ok || Number(response.headers.get("content-length")) > MAX_CATALOG_BYTES) throw new Error("Catalog unavailable");
   const chunks = [];
@@ -50,7 +62,12 @@ export function normalizeCatalog(document, metadata = { data: [] }) {
       name: `PPQ ${name} (Private)`, context_length: context,
       capabilities: { tools, input: image ? ["text", "image"] : ["text"], output: ["text"] },
       ...(price(m.pricing?.input_per_1M_tokens) && price(m.pricing?.output_per_1M_tokens) ? {
-        cost: { input: m.pricing.input_per_1M_tokens, output: m.pricing.output_per_1M_tokens },
+        cost: normalizeCost({ input: m.pricing.input_per_1M_tokens, output: m.pricing.output_per_1M_tokens,
+          cache: {
+            ...(price(m.pricing.cache_read_per_1M_tokens) ? { read: m.pricing.cache_read_per_1M_tokens } : {}),
+            ...(price(m.pricing.cache_write_per_1M_tokens) ? { write: m.pricing.cache_write_per_1M_tokens } : {}),
+          },
+        }),
       } : {}),
     };
   });
@@ -64,15 +81,15 @@ export function validateModels(models) {
       || typeof m.name !== "string" || !m.name.startsWith("PPQ ") || m.name.length > 240 || /[\x00-\x1f]/.test(m.name)
       || !integer(m.context_length) || typeof m.capabilities?.tools !== "boolean"
       || ![JSON.stringify(["text"]), JSON.stringify(["text", "image"])].includes(JSON.stringify(m.capabilities.input))
-      || JSON.stringify(m.capabilities.output) !== JSON.stringify(["text"])
-      || (m.cost !== undefined && (!price(m.cost.input) || !price(m.cost.output)))) throw new Error("Invalid private model metadata");
+      || JSON.stringify(m.capabilities.output) !== JSON.stringify(["text"])) throw new Error("Invalid private model metadata");
     seen.add(m.id);
+    if (m.cost !== undefined) normalizeCost(m.cost);
   }
   // Strip unknown properties even from a tampered cache or local response.
   return models.map((m) => ({ id: m.id, object: "model", type: "chat", owned_by: "ppq-private", privacyLevel: "e2e",
     name: m.name, context_length: m.context_length,
     capabilities: { tools: m.capabilities.tools, input: [...m.capabilities.input], output: ["text"] },
-    ...(m.cost ? { cost: { input: m.cost.input, output: m.cost.output } } : {}),
+    ...(m.cost ? { cost: normalizeCost(m.cost) } : {}),
   }));
 }
 

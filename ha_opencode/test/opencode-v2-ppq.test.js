@@ -4,10 +4,15 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request } from "node:http";
-import { createCatalog, normalizeCatalog, validateModels, readJsonResponse, CATALOG_TTL, MAX_STALE, MAX_CATALOG_BYTES,
+import { createCatalog, normalizeCatalog, normalizeCost, validateModels, readJsonResponse, CATALOG_TTL, MAX_STALE, MAX_CATALOG_BYTES,
   PPQ_MODELS_URL, TINFOIL_MODELS_URL } from "../rootfs/opt/ppq-private-runtime/catalog.js";
 import { createProxy } from "../rootfs/opt/ppq-private-runtime/proxy.js";
 import { createPpqSetup } from "../rootfs/opt/opencode-v2-homeassistant/ppq.js";
+import { Model } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/@opencode/schema/dist/model.js";
+import { Schema } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/effect/dist/index.js";
+
+const decodeModels = Schema.decodeUnknownSync(Schema.Array(Model.Info), { onExcessProperty: "error" });
+const decodeCost = Schema.decodeUnknownSync(Model.Cost, { onExcessProperty: "error" });
 
 const raw = (id = "future-coder") => ({ id: `private/${id}`, name: "Future Coder (Private via TEE)", type: "chat",
   privacyLevel: "e2e", owned_by: "Tinfoil", context_length: 65536,
@@ -28,7 +33,7 @@ test("live private catalog discovers new IDs, excludes non-private models and im
   assert.equal(models[0].id, "private/future-coder");
   assert.equal(models[0].name, "PPQ Future Coder (Private)");
   assert.deepEqual(models[0].capabilities, { tools: true, input: ["text", "image"], output: ["text"] });
-  assert.deepEqual(models[0].cost, { input: 1.2, output: 3.4 });
+  assert.deepEqual(models[0].cost, { input: 1.2, output: 3.4, cache: { read: 1.2, write: 1.2 } });
   assert.deepEqual(validateModels(models), models);
   assert.deepEqual(validateModels([{ ...models[0], settings: { baseURL: "https://evil.invalid" }, package: "evil" }]), models);
   assert.throws(() => normalizeCatalog(document(raw(), raw())), /Duplicate/);
@@ -38,6 +43,47 @@ test("live private catalog discovers new IDs, excludes non-private models and im
   assert.deepEqual(conservative.capabilities, { tools: false, input: ["text"], output: ["text"] });
   assert.equal(conservative.context_length, 32768);
   assert.equal(conservative.cost, undefined);
+});
+
+test("pricing is domain-valid, preserves published cache rates and never invents a free cache discount", () => {
+  for (const [read, write, expected] of [
+    [0.25, 1.5, { read: 0.25, write: 1.5 }],
+    [0, 0, { read: 0, write: 0 }],
+    [null, undefined, { read: 1.2, write: 1.2 }],
+    [-1, Infinity, { read: 1.2, write: 1.2 }],
+    [NaN, "0.5", { read: 1.2, write: 1.2 }],
+    [0.25, null, { read: 0.25, write: 1.2 }],
+  ]) {
+    const entry = raw();
+    Object.assign(entry.pricing, { cache_read_per_1M_tokens: read, cache_write_per_1M_tokens: write });
+    const cost = validateModels(normalizeCatalog(document(entry)))[0].cost;
+    assert.deepEqual(cost.cache, expected);
+    assert.deepEqual(decodeCost(cost), cost);
+  }
+  const legacy = { input: 1.2, output: 3.4 };
+  assert.throws(() => decodeCost(legacy), /cache/, "the original incomplete pricing must fail the pinned native schema");
+  assert.deepEqual(decodeCost(normalizeCost(legacy)).cache, { read: 1.2, write: 1.2 });
+  for (const cost of [null, { input: -1, output: 1 }, { input: Infinity, output: 1 },
+    { ...legacy, cache: null }, { ...legacy, cache: [] }, { ...legacy, cache: { read: NaN } },
+    { ...legacy, cache: { write: "1" } }, { ...legacy, cache: { write: -1 } }]) {
+    assert.throws(() => normalizeCost(cost), /Invalid private model pricing/);
+  }
+  assert.deepEqual(normalizeCost({ ...legacy, cache: { read: 0.25, secret: "not forwarded" }, headers: { unsafe: true } }),
+    { ...legacy, cache: { read: 0.25, write: 1.2 } });
+  assert.equal(normalizeCatalog(document({ ...raw(), pricing: undefined }))[0].cost, undefined);
+});
+
+test("fresh 3.2.4b0 disk caches are upgraded without credentials, network access or manual deletion", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ha-ppq-legacy-pricing-"));
+  try {
+    const cacheFile = join(root, "models.json");
+    const models = normalizeCatalog(document(raw()));
+    delete models[0].cost.cache;
+    await writeFile(cacheFile, JSON.stringify({ fetchedAt: 1000, models }));
+    const catalog = createCatalog({ cacheFile, now: () => 1001, fetcher: async () => assert.fail("a fresh legacy cache needs no network") });
+    const restored = await catalog.get();
+    assert.deepEqual(decodeCost(restored[0].cost).cache, { read: 1.2, write: 1.2 });
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("catalog responses bound advertised and streamed sizes", async () => {
@@ -121,7 +167,7 @@ test("V2 discovery replaces models on reload, clears unavailable inventory and r
   let disposed = false;
   let selected;
   let reloads = 0;
-  const apply = () => callback({ models: { set(provider, models) { assert.equal(provider, "ppq-private"); selected = models; } } });
+  const apply = () => callback({ models: { set(provider, models) { assert.equal(provider, "ppq-private"); selected = decodeModels(models); } } });
   const cleanup = await createPpqSetup({
     fetcher: async (url, options) => {
       assert.equal(url, "http://127.0.0.1:8787/v1/models");
@@ -136,7 +182,7 @@ test("V2 discovery replaces models on reload, clears unavailable inventory and r
   assert.equal(selected[0].id, "private/future-coder");
   assert.equal(selected[0].name, "PPQ Future Coder (Private)");
   assert.equal(selected[0].capabilities.tools, true);
-  assert.deepEqual(selected[0].cost, [{ input: 1.2, output: 3.4 }]);
+  assert.deepEqual(selected[0].cost, [{ input: 1.2, output: 3.4, cache: { read: 1.2, write: 1.2 } }]);
   current = normalizeCatalog(document(raw("next-coder")));
   await timer();
   assert.deepEqual(selected.map((m) => m.id), ["private/next-coder"]);
@@ -156,6 +202,7 @@ test("retired or offline explicit PPQ defaults stay private instead of falling b
   let tick;
   let offline = false;
   const apply = () => source({ models: { set(_provider, models) {
+    decodeModels(models);
     const requested = models.find((m) => m.id === "private/retired-default");
     assert.ok(requested);
     assert.equal(requested.providerID, "ppq-private");
