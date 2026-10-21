@@ -119,6 +119,14 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.match(dockerfile, /node --throw-deprecation --test .*openchamber-request-body\.mjs .*openchamber-managed-backend\.mjs/);
   });
 
+  it("includes every read-only build fixture in the filtered Docker context", () => {
+    const included = new Set(read(ADDON_DIR, ".dockerignore").split(/\r?\n/).filter((line) => line.startsWith("!test/")).map((line) => line.slice(1)));
+    for (const [, fixture] of dockerfile.matchAll(/source=(test\/[^,\s]+)/g)) {
+      assert.ok(fs.existsSync(path.join(ADDON_DIR, fixture)), `missing fixture ${fixture}`);
+      assert.ok(included.has(fixture), `Docker context excludes ${fixture}`);
+    }
+  });
+
   it("ships no V1 CLI or runtime selector", () => {
     assert.doesNotMatch(dockerfile, /opencode-ai@|ARG OPENCODE_VERSION=/);
     assert.doesNotMatch(buildYaml, /OPENCODE_VERSION:/);
