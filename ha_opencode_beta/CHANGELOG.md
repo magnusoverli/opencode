@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Activate OpenChamber global Markdown agents on the managed backend, verify saves/deletes, and preserve add-on permission safeguards ([#190](https://github.com/magnusoverli/opencode/issues/190)).
+
 ## 3.2.4b2
 
 - Pin OpenCode CLI/plugin 2.1.2 and OpenChamber 2.5.0; refresh its security lock, private-backend/Git compatibility and all 15 update-notice translations, using upstream's corrected streaming proxy framing.

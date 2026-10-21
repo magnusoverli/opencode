@@ -179,9 +179,31 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 | An older activated generation lacks `home` | Beta 3.2.1b0 reconstructs this converter directory in a validated private copy. Missing required state/database instead produces `missing_generation_state` or `missing_generation_database`; retain the data and report the error rather than creating an empty database. |
 | Migrated sessions appear missing | Beta 3.2.1b0 places exact `/homeassistant` sessions in the managed UI project, including existing V2 upgrades. Other locations remain separate. Ctrl+A switches to all projects in the picker; Ctrl+O can search across locations. The pinned picker still lists at most 50 root sessions and does not paginate or list child sessions. |
 
-Custom agents in project `.opencode/agents` directories are not loaded by this
-managed runtime. A persistent importer with constrained permissions remains a
-follow-up; use the built-in Home Assistant Read Only agent for supported audits.
+### Custom agents
+
+OpenChamber **Settings > Agents** saves global user agents persistently under
+`/data/.config/opencode/agents/`. Saves and deletes succeed only after the managed
+backend confirms activation. Existing Markdown definitions in `agents/`, `agent/`,
+`modes/` and `mode/` are imported at startup; nested names such as `team/reviewer`
+are supported. Manual file edits require an add-on restart; UI edits activate live.
+Deleting a built-in agent override restores its native defaults.
+
+Use native V2 frontmatter (`description`, `model`, `mode`, `hidden`, `disabled`,
+`color`, `steps`, `request`, `permissions`) and put the system prompt in the
+Markdown body. Limits: 64 agents, 64 KiB per file, 1 MiB total, four name segments.
+Files must be regular, single-link files owned by root, with no group/other write
+access; symlinks, YAML aliases/tags and file/environment substitutions are refused.
+Invalid files are not imported, and a live refresh retains the last validated
+definition rather than applying malformed content. If activation fails, the UI
+attempts to restore the previous saved file without replacing a newer edit and
+reports whether backend rollback was verified.
+
+Managed Home Assistant and maintenance agents cannot be overridden. Sensitive-file
+denials and required confirmations cannot be relaxed; stricter user denials remain
+effective. Global JSON configuration/plugins and project `.opencode/agents` are
+not imported, and project-scoped UI saves fail explicitly. This does not enable
+OpenChamber's separate callback/tool integration. Use **Home Assistant Read Only**
+for the add-on's supported audit policy.
 
 ## Home Context (Beta)
 

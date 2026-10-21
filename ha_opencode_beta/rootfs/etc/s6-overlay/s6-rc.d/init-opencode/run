@@ -673,6 +673,7 @@ if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
                 --lsp-enabled "${LSP_ENABLED}" \
                 --yaml-formatting "$([ "$(bashio::config 'yaml_formatting' 2>/dev/null || true)" = "true" ] && echo true || echo false)" \
                 --user-hooks "${USER_HOOKS_ENABLED}" > "${V2_CONFIG_TEMP}" \
+                && node /opt/opencode-v2-homeassistant/agents-importer.js "${V2_CONFIG_TEMP}" \
                 || { touch "${V2_RUNTIME_ROOT}/configuration-error"; false; }; } \
             && node /opt/opencode-v2-homeassistant/lan-config.js --write /data/options.json "${V2_RUNTIME_ROOT}/lan.json" \
             && chmod 600 "${V2_CONFIG_TEMP}" "${V2_PROVIDER_ENV_TEMP}" "${V2_EXTERNAL_MCP_TEMP}" \

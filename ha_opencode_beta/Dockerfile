@@ -31,6 +31,9 @@ RUN node /tmp/patch-app-updates.cjs /opt/openchamber-preview
 COPY rootfs/opt/openchamber/patch-editor-lsp.cjs /tmp/patch-editor-lsp.cjs
 COPY rootfs/opt/openchamber/editor-lsp /tmp/editor-lsp
 RUN node /tmp/patch-editor-lsp.cjs /opt/openchamber-preview
+COPY rootfs/opt/openchamber/patch-agent-settings.cjs /tmp/patch-agent-settings.cjs
+COPY rootfs/opt/openchamber/agent-settings /tmp/agent-settings
+RUN node /tmp/patch-agent-settings.cjs /opt/openchamber-preview
 COPY rootfs/opt/openchamber/patch-usage-model.cjs /tmp/patch-usage-model.cjs
 RUN node /tmp/patch-usage-model.cjs /opt/openchamber-preview
 COPY rootfs/opt/openchamber/patch-workspace-recovery.cjs /tmp/patch-workspace-recovery.cjs

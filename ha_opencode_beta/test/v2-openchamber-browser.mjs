@@ -9,6 +9,7 @@ import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { OpenCode } from '/opt/opencode-v2-homeassistant/node_modules/@opencode/client/dist/promise/index.js';
+import { initializeAgentImporter } from '/opt/opencode-v2-homeassistant/agents-importer.js';
 
 const require = createRequire('/opt/ha-mcp-server/package.json');
 const puppeteer = require('puppeteer-core');
@@ -85,7 +86,8 @@ try {
     providers: { fixture: { name: 'Fixture', package: '@opencode/ai/providers/openai-compatible',
       settings: { baseURL: `http://127.0.0.1:${provider.address().port}/v1` },
       models: { coding: { modelID: 'fixture-model', name: 'Fixture model', limit: { context: 32000, output: 1000 } } } } },
-  }));
+  }), { mode: 0o600 });
+  await initializeAgentImporter(`${runtime}/managed.json`);
   const startBackend = () => start('/usr/local/libexec/opencode-v2', ['serve', '--hostname', '127.0.0.1', '--port', '4100'], {
     HOME: `${runtime}/home`, XDG_CONFIG_HOME: `${runtime}/config`, XDG_DATA_HOME: `${generation}/data`,
     XDG_STATE_HOME: `${generation}/state`, XDG_CACHE_HOME: `${runtime}/cache`,
@@ -147,6 +149,29 @@ try {
   });
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-testid="chat-input"]', { timeout: 45000 });
+  // Use the actual authenticated Settings API from the rendered Ingress page.
+  // A disk-only upstream save must not satisfy these backend assertions.
+  const agentRequest = (method, name, body) => page.evaluate(async (method, name, body) => {
+    const response = await fetch(new URL(`api/config/agents/${name}`, window.location.href), {
+      method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    return { status: response.status, body: await response.json() };
+  }, method, name, body);
+  const agentLocation = { directory: `${runtime}/workspace` };
+  const createdAgent = await agentRequest('POST', 'ha-browser-fixture', {
+    scope: 'user', description: 'Browser agent persists', mode: 'subagent', system: 'Fixture prompt',
+    permissions: [{ action: 'edit', resource: '*', effect: 'allow' }],
+  });
+  assert.equal(createdAgent.status, 200, JSON.stringify(createdAgent));
+  assert.equal(createdAgent.body.applied, true);
+  const activeAgent = (await client.agent.get({ agentID: 'ha-browser-fixture', location: agentLocation })).data;
+  assert.equal(activeAgent.description, 'Browser agent persists');
+  assert.equal(activeAgent.permissions.filter(rule => [ '*', 'edit' ].includes(rule.action) && rule.resource === '*').at(-1).effect, 'deny');
+  assert.equal((await agentRequest('PATCH', 'ha-browser-fixture', { color: '#112233' })).body.applied, true);
+  assert.equal((await agentRequest('POST', 'ha-browser-project-fixture', { scope: 'project' })).status, 400);
+  assert.equal((await agentRequest('PATCH', 'home-assistant-read-only', { system: 'Unsafe override' })).status, 403);
+  assert.equal((await agentRequest('PATCH', 'ha-browser-fixture', { system: '{env:SUPERVISOR_TOKEN}' })).status, 400);
+  console.log('CHECK: authenticated agent Settings saves activate without relaxing managed denials');
   await page.evaluate(() => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Choose project')?.click());
   await page.waitForSelector('[role="dialog"][aria-label="Project"] [role="option"]');
   await page.evaluate(() => {
@@ -182,6 +207,9 @@ try {
   assert.equal((await auth.readOpenCodeCredentials()).fixture.key, 'fixture-persisted-key');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => document.body.textContent.includes('HA_PINNED_UI_OK'), { timeout: 30000 });
+  await wait(async () => (await client.agent.get({ agentID: 'ha-browser-fixture', location: agentLocation })).data.color === '#112233', 'agent restart persistence');
+  assert.equal((await agentRequest('DELETE', 'ha-browser-fixture')).body.applied, true);
+  console.log('CHECK: agent Settings delete and restart persistence');
   const lastSession = await page.evaluate(() => localStorage.getItem('oc.lastSession.v1'));
   assert.ok(lastSession, 'Fixture must have a persisted historical session');
   const historical = await client.session.get({ sessionID: id });
