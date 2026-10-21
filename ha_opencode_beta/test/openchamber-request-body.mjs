@@ -7,9 +7,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { registerOpenCodeProxy } from "/opt/openchamber-preview/packages/web/server/lib/opencode/proxy.js";
+import { pathToFileURL } from "node:url";
 
-const require = createRequire("/opt/openchamber-preview/packages/web/package.json");
+const source = process.env.OPENCHAMBER_TEST_SOURCE || "/opt/openchamber-preview";
+const { registerOpenCodeProxy } = await import(pathToFileURL(path.join(source, "packages/web/server/lib/opencode/proxy.js")));
+const require = createRequire(path.join(source, "packages/web/package.json"));
 const express = require("express");
 
 async function listen(server) {

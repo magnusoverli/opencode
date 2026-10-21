@@ -2,13 +2,19 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.2.4b1** is based on released **stable 3.2.3**, with pinned OpenCode `2.0.26`
-and OpenChamber `2.2.0`, stable's desktop/mobile workspace recovery, and live PPQ
+Beta **3.2.4b2** is based on released **stable 3.2.3**, with pinned OpenCode `2.1.2`
+and OpenChamber `2.5.0`, stable's desktop/mobile workspace recovery, and live PPQ
 private-model discovery. The unrelated post-3.2.3 Zigporter compatibility patch
 is not included. Beta keeps its own app identity and persistent storage; installing
 beta does not transfer stable conversations or sign-ins. HA 2026.10 integration includes native LLM API discovery, prompt/context
 forwarding and an experimental native Assist/AI data-task adapter. The roadmap
 is tracked in [#45](https://github.com/magnusoverli/opencode/issues/45).
+
+OpenChamber uses immutable commit `ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd`, built
+with Bun `1.4.3` and the reviewed security lock. This beta refreshes the private-backend,
+Git and translated update-notice patches and uses upstream's streaming-proxy fix.
+Installed Supervisor upgrade/rollback, public relay pairing and account-backed
+encrypted inference remain unverified. Stable remains unchanged.
 
 ### Experimental native Assist and AI data tasks
 
@@ -638,7 +644,7 @@ native tools. The bridge preserves supplied request metadata but does not invent
 a room/device identity. Native errors should be reported rather than retried
 through broader administrative tools.
 
-Local qualification uses the pinned OpenCode `2.0.26` process, the app's MCP
+Local candidate qualification uses the pinned OpenCode `2.1.2` process, the app's MCP
 registration/forwarding code, and controlled HA/provider fixtures. It covers
 prompt consumption, resource discovery, fresh native context calls, required
 argument validation and read-only policy. Resource reads/cancellation also have

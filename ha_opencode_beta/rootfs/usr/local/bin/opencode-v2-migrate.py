@@ -30,8 +30,8 @@ FORMAT = "ha-opencode-v2-migration/v1"
 GENERATION_RE = re.compile(r"^[a-f0-9]{32}$")
 # Shipped beta generations whose native V2 schema is covered by the upgrade
 # fixture. Unknown builds and downgrades must not open a user's database.
-V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242", "2.0.13", "2.0.22"}
-V2_UPGRADE_TARGET = "2.0.26"
+V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242", "2.0.13", "2.0.22", "2.0.26"}
+V2_UPGRADE_TARGET = "2.1.2"
 MAX_DATABASE_BYTES = 32 * 1024 * 1024 * 1024
 LEGACY_WORKSPACE = "/homeassistant"
 MANAGED_WORKSPACE = "/run/opencode-v2/workspace"
