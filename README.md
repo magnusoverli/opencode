@@ -4,13 +4,11 @@
 
 ### *AI-Powered Configuration Assistant for Home Assistant*
 
-[![Version][version-shield]][github]
+[![Stable Release][version-shield]][releases]
+[![Beta Release][beta-release-shield]][releases]
 [![Project Stage][project-stage-shield]][github]
 [![License][license-shield]][license]
 [![Maintenance][maintenance-shield]][github]
-
-[![Stable Build][stable-build-shield]][stable-build-workflow]
-[![Beta Build][beta-build-shield]][beta-build-workflow]
 
 **Transform your Home Assistant configuration with the power of AI**
 
@@ -24,13 +22,20 @@
 
 ## 🚀 Getting Started
 
-🥳 **OpenCode 3.2.1 is here!** Includes OpenCode 2.0.26, OpenChamber 2.2.0,
-more efficient hab commands and opt-in experimental Assist conversations/AI tasks.
-See [what changed and how to enable Assist](ha_opencode/DOCS.md#upgrading-to-32).
-Upgrading from 2.x? Read the
-[short upgrade guide](ha_opencode/DOCS.md#upgrading-from-2x) before installing.
+Install **OpenCode** for the stable channel, or **OpenCode Beta** to test upcoming
+changes. See the [stable changelog][changelog] and [beta changelog][beta-changelog]
+for current versions and bundled component updates.
 
-> ⚙️ **Hardware requirement:** on x86-64, OpenCode needs a CPU with **SSE4.2** (Intel Nehalem/2008 or newer, AMD Bulldozer/2011 or Jaguar/2013 or newer). Older processors cannot run it at all — it exits with `Illegal instruction (core dumped)`. ARM64 is unaffected. See [CPU requirements][cpu-req] for details.
+This is a Home Assistant **Supervisor add-on** (called an **app** in newer Home
+Assistant versions), not a standalone Home Assistant Core/Container integration.
+It supports **amd64** and **aarch64/ARM64**.
+
+Upgrading an existing installation? Back up first and read the
+[3.2 upgrade notes](ha_opencode/DOCS.md#upgrading-to-32), including the native MCP
+selection migration. Coming from 2.x? Follow the
+[2.x upgrade guide](ha_opencode/DOCS.md#upgrading-from-2x).
+
+> ⚙️ **Hardware requirement:** x86-64 CPUs need **SSE4.2**, and the regular build also requires **AVX2**. SSE4.2 alone may not be sufficient: the documented upstream baseline-package issue can still prevent non-AVX2 CPUs from running OpenCode. ARM64 is unaffected by these x86 requirements. See [CPU requirements][cpu-req] before installing on older hardware or a VM.
 
 ### 1. Add This Repository
 
@@ -39,14 +44,15 @@ Upgrading from 2.x? Read the
 <details>
 <summary>Or add manually</summary>
 
-Go to **Settings** → **Add-ons** → **Add-on Store** → **⋮** → **Repositories**
+Go to **Settings** → **Apps** → **Install app** → **⋮** → **Repositories**.
+On older Home Assistant versions, use **Add-ons** → **Add-on Store** instead.
 
 Add: `https://github.com/magnusoverli/opencode`
 </details>
 
 ### 2. Install the Add-on
 
-Find **"OpenCode"** in the add-on store and click **Install**.
+Find **"OpenCode"** in the app/add-on store and click **Install**.
 
 > 💡 Prefer the beta channel to try new features early? Install **"OpenCode Beta"** from the same repository instead — it installs side by side with the stable add-on. See [Release channels](#release-channels).
 
@@ -54,17 +60,23 @@ Find **"OpenCode"** in the add-on store and click **Install**.
 
 Start the add-on, then click **Open Web UI** (or use the sidebar entry). By default you'll land in a web **terminal**.
 
-> 💡 **Prefer a graphical interface?** Set **Interface Mode** to `openchamber` in the add-on **Configuration** tab and restart to swap the terminal for the [OpenChamber](https://github.com/openchamber/openchamber) web UI on the same sidebar entry. The default `terminal` mode is unchanged.
+> 💡 **Prefer a graphical interface?** Set **Interface** (`interface_mode`) to `openchamber` in the add-on **Configuration** tab and restart to use the [OpenChamber](https://github.com/openchamber/openchamber) web UI on the same sidebar entry. Both interfaces use the same managed OpenCode V2 backend and conversation history within that channel.
 
 ### 4. Connect an AI Provider
 
-Run `opencode`, then `/connect` and follow the prompts to authenticate — Anthropic (Claude) is recommended, or pick OpenAI, Google, **OpenCode Zen** (curated coding models, no setup required), or any of the 70+ other supported providers.
+In the terminal, run `opencode`, then `/connect` and follow the provider's sign-in
+prompts. Run `/models` to choose a model. In OpenChamber, use its provider/model
+settings instead. Anthropic, OpenAI, Google and other cloud or local providers
+are supported; credentials, subscriptions and usage charges depend on the provider.
+
+OpenCode and OpenChamber are pinned in the add-on image. Update them through
+**Home Assistant Supervisor**, not an upstream in-app updater.
 
 ### 5. Try It
 
 Once connected, ask OpenCode things like:
 
-```bash
+```text
 # Create a new automation
 "Create an automation that turns on lights when motion is detected"
 
@@ -98,40 +110,40 @@ Once connected, ask OpenCode things like:
 Use natural language to modify your Home Assistant configuration. No more searching documentation - just ask!
 
 #### 🎨 **Two Interface Modes**
-Choose your experience from the sidebar: a beautiful web **terminal** with 10 themes, or the graphical **OpenChamber** web UI — both served through Home Assistant Ingress. Either can also be opted into a mappable LAN port for reverse proxies and remote clients.
+Choose a web **terminal** with 10 themes or the graphical **OpenChamber** web UI through Home Assistant Ingress. Both share one backend and history. Optional LAN frontends require separate authentication and a trusted HTTPS reverse proxy; mapping a port alone is not enough. See [LAN setup](ha_opencode/DOCS.md#lan-server-mode).
 
 #### 🔌 **Provider Agnostic**
-Works with **Anthropic, OpenAI, Google, and 70+ other AI providers**.
+Works with **Anthropic, OpenAI, Google**, other cloud providers and OpenAI-compatible local servers. Available models and authentication methods depend on the bundled runtime and provider.
 
 #### 🔐 **Private TEE Models (Beta)**
-Optional PPQ private-mode proxy routes requests to models running in remote trusted execution environments — encrypted end to end, with nothing exposed on the network.
+Opt-in PPQ support uses an attested encrypted transport for eligible private models. Configure a PPQ key and explicitly select a private model; enabling it does not switch existing sessions. Account-backed encrypted inference remains unverified. See [PPQ setup](ha_opencode/DOCS.md#ppq-private-tee-models-beta).
 
 #### 🎚️ **Scoped MCP Tool Profiles**
-Choose a `compact`, `configuration`, or `full` tool profile to control how much of the Home Assistant tool surface the model sees — smaller profiles mean a cheaper prompt and a narrower blast radius.
+Choose `compact`, `configuration`, or `full` (`full` is the default) to reduce the bundled MCP tool surface and prompt size. Hidden tools are rejected, but profiles do not restrict shell or filesystem access. See [tool profiles](ha_opencode/DOCS.md#mcp-tool-profiles).
 
 </td>
 <td width="50%">
 
 #### 🔧 **Deep MCP Integration**
-47 tools, 14 resources, and 6 guided prompts spanning state and service calls, history, config validation, calendars, decision notes, update and firmware management, ESPHome, Supervisor diagnostics, and CLI gateways.
+Bundled tools, resources and guided prompts cover state and service calls, history, config validation, calendars, decision notes, updates, ESPHome, Supervisor diagnostics and CLI gateways. Availability depends on your tool profile and enabled features; inspect it with `ha-mcp tools` or `get_agent_capabilities`.
 
 #### 🧠 **Home Context**
 Sessions start knowing your installation instead of rediscovering it. A generated briefing describes your setup, `AGENTS.local.md` holds your own standing instructions that survive updates, and decision notes — recorded only with your approval — carry the reasoning behind your configuration between sessions. Inspect it all with `ha-context`.
 
 #### 💡 **Intelligent LSP Support**
-Smart YAML editing with entity autocomplete, live hover information, deprecation warnings, and go-to-definition support.
+Home Assistant YAML diagnostics, completions, hover and definitions are available through agent tools, with live diagnostics/completion in OpenChamber's Ingress editor. Whole-file YAML formatting is opt-in. See [language assistance](ha_opencode/DOCS.md#v2-yaml-language-assistance-and-formatting).
 
 #### 🛡️ **Safe Config Writing**
-Validated config pipeline with automatic backup/restore and guardrails against accidental data loss. Direct file edits and in-place shell writes now ask for approval before touching disk, too.
+The `write_config_safe` MCP tool provides validation, backups, rollback attempts and content-loss checks. Native file edits and specified in-place shell commands ask for approval by default, but do not automatically use that pipeline.
 
 #### 🏗️ **hab CLI Integration**
-Includes the [Home Assistant Builder CLI](https://github.com/balloob/home-assistant-build-cli) by [@balloob](https://github.com/balloob) — a CLI purpose-built for AI agents to manage Home Assistant via REST and WebSocket APIs. Enables dashboard CRUD, area/floor management, helper creation, backup/restore, and bulk admin operations that would otherwise require direct API calls or UI interaction.
+Includes the [Home Assistant Builder CLI](https://github.com/balloob/home-assistant-build-cli) by [@balloob](https://github.com/balloob) for dashboards, registries, helpers, backups and administration. Agents use the authenticated `hab_run` MCP gateway in the `full` profile; their shell does not inherit Supervisor credentials.
 
 #### 🧩 **Startup Hooks**
-An opt-in, persistent place for your own scripts to run at add-on startup — everything else in the container is rebuilt from the image on every restart, so this is the supported way to make your own customizations stick.
+An opt-in, persistent place for your own scripts to run at add-on startup. Scripts run as root; keep customizations in the supported [startup hooks directory](ha_opencode/DOCS.md#startup-hooks-beta), not the disposable container filesystem.
 
-#### 🧭 **HA Native LLM Ready**
-Home Assistant's native `llm` platform ships in **2026.8**. OpenCode's native MCP bridge targets it, while bundled tools remain available independently. Stable 3.2.2 and beta enable native tools on new installs and preserve effective enabled/disabled state on upgrades.
+#### 🧭 **Native HA Tools & Experimental Assist**
+Connect to Home Assistant's native MCP tools independently of bundled tools. An optional experimental companion also lets HA use OpenCode for Assist conversations and AI data tasks. These are separate integrations; see [setup and requirements](#-home-assistant-native-integration).
 
 </td>
 </tr>
@@ -144,9 +156,9 @@ Home Assistant's native `llm` platform ships in **2026.8**. OpenCode's native MC
 [**OpenCode**](https://opencode.ai) is an open-source AI coding agent that transforms how you interact with your codebase. It understands your files, executes commands, and helps you build and maintain software using natural language.
 
 Think of it as your personal expert developer who:
-- 📖 Reads and understands your entire configuration
+- 📖 Reads relevant configuration files and inspects live state through tools
 - ✏️ Suggests and implements improvements
-- 🐛 Finds and fixes bugs automatically
+- 🐛 Helps diagnose bugs and apply approved fixes
 - 🚀 Implements new features on request
 - 💬 Explains complex configurations in plain English
 
@@ -154,7 +166,8 @@ Think of it as your personal expert developer who:
 
 ## 🎭 Supported AI Providers
 
-OpenCode works with **Anthropic, OpenAI, Google, and 70+ other AI providers**. Choose the one that fits your needs:
+OpenCode supports cloud providers and local models. Choose a provider and model
+that support tool calling and fit your hardware, privacy needs and budget:
 
 <details>
 <summary><b>🔥 Popular Providers (Click to expand)</b></summary>
@@ -162,28 +175,33 @@ OpenCode works with **Anthropic, OpenAI, Google, and 70+ other AI providers**. C
 | Provider | Notes |
 |----------|------------------|
 | 🧠 **Anthropic** | Claude models — recommended for configuration work |
-| 💎 **OpenAI** | GPT and o-series reasoning models |
+| 💎 **OpenAI** | OpenAI models with supported API-key or subscription sign-in |
 | 🌈 **Google** | Gemini models |
 | ☁️ **AWS Bedrock** | Claude, Llama, Mistral, and others via AWS |
 | 🔷 **Azure OpenAI** | Azure-hosted OpenAI models |
+| 🐙 **GitHub Copilot** | GitHub sign-in; requires an eligible Copilot account |
 | ⚡ **Groq** | Ultra-fast inference for open models |
 | 🎯 **Mistral** | Mistral and Codestral models |
-| 🦙 **Ollama** | Local models — see the [local model notes](./ha_opencode/DOCS.md#local-models-ollama-and-similar) before choosing hardware |
-| 🌐 **OpenRouter** | 100+ models through a single API |
-| 🤝 **Together AI** | Llama, Mixtral, and other open models |
+| 🦙 **Ollama** | Local models — see the [context-window and tool-profile guidance](./ha_opencode/DOCS.md#mcp-tool-profiles) before choosing hardware |
+| 🌐 **OpenRouter** | Models from multiple providers through a single API |
+| 🤝 **Together AI** | Hosted open-weight models |
 | 🔥 **Fireworks AI** | Fast inference for open models |
 | 🚀 **xAI** | Grok models |
-| 💫 **Deepseek** | Deepseek Coder and Deepseek Chat |
+| 💫 **DeepSeek** | DeepSeek models |
 
 </details>
 
-> **Running models locally?** The add-on sends a large tools-and-instructions prompt on every request. Read the [local model notes](./ha_opencode/DOCS.md#local-models-ollama-and-similar) first — a small model on modest hardware can take minutes per reply. A smaller MCP tool profile (see [Features](#-features)) is one of the easiest ways to cut that cost.
+> **Running models locally?** The add-on sends a large tools-and-instructions prompt on every request. Read the [context-window and tool-profile guidance](./ha_opencode/DOCS.md#mcp-tool-profiles) first — a small model on modest hardware can take minutes per reply. A smaller MCP tool profile (see [Features](#-features)) is one of the easiest ways to cut that cost.
 
-### 🎁 **Free Tier - OpenCode Zen**
+### 💳 Model access and costs
 
-Start immediately with **OpenCode Zen** - no API keys or subscriptions required! Get access to curated models optimized for coding tasks, perfect for trying OpenCode or for users who prefer not to manage their own API keys.
+The add-on does not include a paid model subscription. Upstream may offer free
+models, but availability, limits and terms can change; do not assume every model
+offered through OpenCode is free or keyless. Check the provider's current pricing
+and [OpenCode's provider documentation](https://opencode.ai/v2/docs/providers).
 
-Simply run `/connect` and select **OpenCode Zen** to get started for free.
+Your prompts and tool results are sent to the selected model provider. Local
+models need a separately running inference server; the add-on itself is not one.
 
 ---
 
@@ -193,17 +211,22 @@ Simply run `/connect` and select **OpenCode Zen** to get started for free.
 
 It also mounts Home Assistant add-on development folders (`/addons` and `/addon_configs`) so OpenCode can help with custom add-ons. Treat `/addon_configs` as sensitive because it may contain configuration data for other add-ons.
 
-OpenCode includes a multi-layered validation pipeline designed to prevent AI-written configuration from causing your Home Assistant to fail to start:
+The bundled **`write_config_safe` MCP tool** provides a multi-layered validation
+pipeline. These checks apply to writes through that tool, **not every file write**:
 
-- 🔍 **Automatic config validation** — every config write is validated through HA Core's own check before committing
-- ↩️ **Automatic backup/restore** — if validation fails, the original file is instantly restored
-- 🧪 **Jinja2 template pre-validation** — templates are tested through HA's engine before writing to disk
-- 📋 **Deprecation scanning** — 20+ patterns catch outdated syntax, auto-updated from GitHub and cross-checked against your own instance's live HA Repairs warnings
+- 🔍 **HA config validation** — after writing, the tool runs HA Core's config check; a failed or unavailable check is not reported as a successful save
+- ↩️ **Backup and rollback** — existing files get a `.bak` copy; on failed validation the tool attempts to restore the original, or remove an invalid new file. Recovery can fail, so inspect the result and keep independent backups
+- 🧪 **Jinja2 template pre-validation** — checks changed templates through HA's engine where possible; unchanged or runtime-dependent templates can be skipped
+- 📋 **Deprecation scanning** — checks for outdated syntax and cross-checks your instance's HA Repairs warnings
 - ✂️ **Guardrails against accidental data loss** — large deletions (missing list entries, removed top-level keys, or a file shrinking by more than half) are blocked unless explicitly confirmed
 - 🏥 **HA Repairs integration** — surfaces your installation's active deprecation warnings
 - ⚠️ **Structural checks** — catches missing triggers, actions, and other required fields
-- ✅ **Approval before direct edits** — editing a file outright, in-place shell edits (`yq -i`, `sed -i`, `tee`), and deleting or renaming files now ask for confirmation first. Only the validated safe-write path skips the prompt, because it already checks itself.
-- 🔒 **Sensitive files stay out of the model's context by default** — `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, and key/cert files are read-protected unless you turn that off.
+
+**Other guardrails and their limits:**
+
+- ✅ **Direct-edit approval** — native file edits and configured shell patterns (`yq -i`, `sed -i`, `tee`, `rm`, `mv`) ask by default. These rules do not detect every possible shell write, and approval does not run safe-write validation. The safe-write tool has no separate native edit prompt; agent instructions still require your consent
+- 🔒 **Sensitive-file read protection** — the normal agent's read tool denies `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, and `*.key`/`*.pem` by default. This is not a shell sandbox: allowed shell commands run as container root and can bypass read-tool restrictions. See [protection scope](ha_opencode/DOCS.md#sensitive-file-protection)
+- 🔄 **Saved is not active** — saving YAML does not reload Home Assistant. Apply an approved domain reload or restart as appropriate, then verify loading. The `configuration` profile omits service calls, so reload remains a manual step. See [editing automations](ha_opencode/DOCS.md#editing-automations-saved-versus-active)
 
 **Additional best practices:**
 
@@ -213,17 +236,44 @@ OpenCode includes a multi-layered validation pipeline designed to prevent AI-wri
 
 ---
 
-## 🧭 Home Assistant Native LLM Roadmap
+## 🧭 Home Assistant Native Integration
 
-Home Assistant is building native `llm` platform support directly into Core: the `llm` integration, per-domain tool platforms, and keyed `/api/mcp/<API ID>` endpoints all ship for the first time in **Home Assistant 2026.8**. OpenCode is tracking this closely and aims to be a premium consumer of the agent capabilities Home Assistant makes available.
+Home Assistant's native `llm` platform and keyed MCP endpoints are available from
+**HA 2026.8**. The add-on supports several distinct connections:
 
-HA's MCP Server is **built into Core**, not a separate download or add-on. On **HA 2026.10+**, enable it under **Settings → System → AI → Model Context Protocol** (on older versions, add the **Model Context Protocol Server** integration). Review the app's native toggle and restart. Beta's **Home Assistant native tools** is independent of bundled and external MCP activation; HAB remains available through bundled Full tools. Connection/initialization status is not proof that tools have loaded: verify a suitable read-only native tool.
+- **Bundled Home Assistant tools** (`mcp_enabled`) provide the add-on's configuration,
+  validation, diagnostics and administration surface independently of HA's MCP Server.
+- **Home Assistant native tools** (`native_ha_mcp_enabled`) connect OpenCode to HA's
+  own MCP Server. On **HA 2026.10+**, enable it under **Settings → System → AI →
+  Model Context Protocol**; on older versions, add the **Model Context Protocol
+  Server** integration. Review the add-on's native settings and restart it.
+- **Expose read-only MCP to Home Assistant** (`ha_mcp_server_enabled`) is an opt-in
+  reverse connection, sharing the add-on's read-only tools with HA. See
+  [read-only sharing](ha_opencode/DOCS.md#expose-read-only-mcp-to-home-assistant).
+- **OpenCode Assist** (`ha_assist_enabled`) is an **experimental**, default-off
+  companion for **HA 2026.10 with Supervisor**. Enable it and restart the add-on,
+  then restart **Home Assistant Core** to load the companion and configure the
+  discovered integration. Choose a model and APIs explicitly. Voice also needs
+  separate speech engines; full supervised voice-pipeline and crash-recovery
+  qualification remain open. See [Assist setup](ha_opencode/DOCS.md#experimental-native-assist-and-ai-data-tasks).
 
-**Which HA URL does the bridge use?** Stable 3.2.2 and beta use **Your MCP API** (`/api/mcp`) for new installs and migrate legacy Assist selections once, preserving custom APIs and disabled states. **Native tool selection** offers `home_assistant`, `assist`, and `custom`; explicit choices made after migration are retained. `/api/mcp` follows HA's selected APIs and can include later additions when **Expose all LLM APIs** is on. No URL or token needs to be pasted. See [migration and rollback guidance](ha_opencode/DOCS.md#upgrade-policy-assist-to-ha-configured-mcp) before upgrading. **Home Assistant Read-Only** is the separate reverse-sharing connection.
+**Native bridge defaults:** native tools are on for new installs and use **Your
+MCP API** (`/api/mcp`); upgrades preserve effective enabled/disabled state and
+migrate legacy Assist selections once. `home_assistant`, `assist` and `custom`
+selections are available. `/api/mcp` follows HA's selected APIs and can expand
+when **Expose all LLM APIs** is on. The add-on does not enable or reconfigure HA's
+MCP Server. No URL or token needs copying. Review
+[migration and rollback guidance](ha_opencode/DOCS.md#upgrade-policy-assist-to-ha-configured-mcp).
 
-OpenCode's own MCP tools remain the complete, supported working surface regardless of bridge status — this roadmap is about *adding* native capabilities where they fit well, not replacing safe config writing, validation, admin/dev workflows, screenshots, firmware updates, or troubleshooting.
+Bundled, native and external MCP connections activate independently. A connected
+status alone does not prove native tools have loaded: verify a suitable read-only
+tool. Native tools complement, rather than replace, the bundled safe-write and
+administration workflows.
 
-See the [full documentation][docs] for the current support status and long-term integration plan.
+Stable and beta have separate histories and settings, but edit the same HA
+configuration. Only one channel should manage the shared Assist companion; follow
+the [ownership-switch instructions](ha_opencode/DOCS.md#experimental-native-assist-and-ai-data-tasks)
+when moving between them.
 
 ---
 
@@ -232,7 +282,8 @@ See the [full documentation][docs] for the current support status and long-term 
 Comprehensive documentation is available covering all features:
 
 - 📖 [**Full Add-on Documentation**][docs] - Complete guide to all features
-- 📝 [**Changelog**][changelog] - Version history and updates
+- 🧪 [**Beta Documentation**][beta-docs] - Beta-specific setup and limitations
+- 📝 [**Stable Changelog**][changelog] / [**Beta Changelog**][beta-changelog] - Version history and updates
 
 ---
 
@@ -247,15 +298,15 @@ Need help? We've got you covered:
 ### 💬 Discord
 [Join OpenCode Discord](https://opencode.ai/discord)
 
-Community support & discussions
+Upstream OpenCode community; use this repository's issues for add-on problems
 
 </td>
 <td align="center" width="33%">
 
 ### 📖 Documentation
-[OpenCode Docs](https://opencode.ai/docs)
+[OpenCode V2 Docs](https://opencode.ai/v2/docs/)
 
-Comprehensive guides & tutorials
+Upstream guides; add-on-specific setup is in [our documentation][docs]
 
 </td>
 <td align="center" width="33%">
@@ -294,11 +345,15 @@ Channels are folders, not branches. Both live on `main`:
 
 Each folder is a complete add-on with its own `Dockerfile` and `rootfs/`, so a
 stable release cannot contain something that only exists in beta. Put
-experimental work in `ha_opencode_beta/`; touch `ha_opencode/` only for changes
-that should reach stable users right away.
+experimental work in `ha_opencode_beta/`; change `ha_opencode/` when preparing
+a stable fix or promoting validated beta work. Merging does not publish an image;
+the release workflows build and publish the tagged channel.
 
 Both add-ons can be installed side by side — they keep separate decision notes
-and separate storage.
+and app storage, but share Home Assistant configuration files and `AGENTS.local.md`.
+Installing the other channel does not transfer conversations or provider sign-ins.
+Use different host ports if exposing both channels' LAN frontends, and only one
+channel to manage the shared Assist companion.
 
 ### Home Assistant development
 
@@ -316,50 +371,25 @@ GitHub Actions; a local emulated arm64 build is not a release gate.
 
 ---
 
-## 👏 Authors & Contributors
+## 👏 Contributors
 
-<table>
-<tr>
-<td align="center">
-<a href="https://github.com/magnusoverli">
-<img src="https://github.com/magnusoverli.png" width="100px;" alt="Magnus Overli"/><br />
-<sub><b>Magnus Overli</b></sub>
-</a><br />
-<sub>Creator & Maintainer</sub>
-</td>
-<td align="center">
-<a href="https://github.com/Teeflo">
-<img src="https://github.com/Teeflo.png" width="100px;" alt="Teeflo"/><br />
-<sub><b>Teeflo</b></sub>
-</a><br />
-<sub>ARM64 fixes, README, icons & logo</sub>
-</td>
-<td align="center">
-<a href="https://github.com/balloob">
-<img src="https://github.com/balloob.png" width="100px;" alt="Paulus Schoutsen"/><br />
-<sub><b>Paulus Schoutsen</b></sub>
-</a><br />
-<sub><a href="https://github.com/balloob/home-assistant-build-cli">hab CLI</a> — admin backbone</sub>
-</td>
-<td>
+Thank you to everyone who contributes code, reports issues, tests releases or
+improves the documentation!
 
-### All Contributors
+[![Contributors to this repository](https://contrib.rocks/image?repo=magnusoverli/opencode)][contributors]
 
-See the [contributors page](https://github.com/magnusoverli/opencode/graphs/contributors) for the full list of amazing people who have helped make this project better!
+[View contributors on GitHub][contributors]. The avatar image is automatically
+generated from GitHub contributor data by [contrib.rocks](https://contrib.rocks),
+not maintained as a separate list in this repository. The [stable][changelog]
+and [beta][beta-changelog] changelogs also credit reports and suggestions.
 
-</td>
-</tr>
-</table>
+### Upstream acknowledgements
 
-### More community code contributors
-
-- [@benwestrate](https://github.com/benwestrate) — optional beta LAN server mode ([#31](https://github.com/magnusoverli/opencode/pull/31)).
-- [@Rahulsharma0810](https://github.com/Rahulsharma0810) — OpenChamber LAN access and native-app support ([#47](https://github.com/magnusoverli/opencode/pull/47), [#136](https://github.com/magnusoverli/opencode/pull/136)).
-- [@lchfabbri](https://github.com/lchfabbri) — SSH client support for Git remotes ([#101](https://github.com/magnusoverli/opencode/pull/101)).
-- [@mabratland](https://github.com/mabratland) — secure external MCP configuration ([#131](https://github.com/magnusoverli/opencode/pull/131)).
-- [@anupamme](https://github.com/anupamme) — compatible `brace-expansion` security update ([#145](https://github.com/magnusoverli/opencode/pull/145)).
-
-The [stable](ha_opencode/CHANGELOG.md) and [beta](ha_opencode_beta/CHANGELOG.md) changelogs also credit individual issue reports and suggestions.
+This add-on builds on [OpenCode](https://github.com/anomalyco/opencode),
+[OpenChamber](https://github.com/openchamber/openchamber) and
+[@balloob's hab CLI](https://github.com/balloob/home-assistant-build-cli), among
+other open-source projects. See [third-party notices](THIRD-PARTY-LICENSES.md)
+for retained license and attribution information.
 
 ---
 
@@ -383,20 +413,21 @@ This distribution also includes third-party software, including OpenCode. Its co
 
 <!-- Links -->
 [docs]: ./ha_opencode/DOCS.md
+[beta-docs]: ./ha_opencode_beta/DOCS.md
 [cpu-req]: ./ha_opencode/DOCS.md#cpu-requirements
 [changelog]: ./ha_opencode/CHANGELOG.md
+[beta-changelog]: ./ha_opencode_beta/CHANGELOG.md
 [issues]: https://github.com/magnusoverli/opencode/issues
+[contributors]: https://github.com/magnusoverli/opencode/graphs/contributors
+[releases]: https://github.com/magnusoverli/opencode/releases
 [license]: UNLICENSE
 [github]: https://github.com/magnusoverli/opencode
 [repo-add]: https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fmagnusoverli%2Fopencode
 [repo-btn]: https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg
 
 <!-- Badges -->
-[version-shield]: https://img.shields.io/github/v/release/magnusoverli/opencode.svg?style=for-the-badge
+[version-shield]: https://img.shields.io/github/v/release/magnusoverli/opencode.svg?style=for-the-badge&label=stable%20release
+[beta-release-shield]: https://img.shields.io/github/v/release/magnusoverli/opencode?include_prereleases&filter=beta-v*&style=for-the-badge&label=beta%20release
 [project-stage-shield]: https://img.shields.io/badge/project%20stage-experimental-orange.svg?style=for-the-badge
 [license-shield]: https://img.shields.io/github/license/magnusoverli/opencode.svg?style=for-the-badge
 [maintenance-shield]: https://img.shields.io/maintenance/yes/2026.svg?style=for-the-badge
-[stable-build-shield]: https://img.shields.io/github/v/release/magnusoverli/opencode?style=for-the-badge&label=stable%20release
-[beta-build-shield]: https://img.shields.io/github/v/release/magnusoverli/opencode?include_prereleases&style=for-the-badge&label=beta%20release
-[stable-build-workflow]: https://github.com/magnusoverli/opencode/releases
-[beta-build-workflow]: https://github.com/magnusoverli/opencode/releases

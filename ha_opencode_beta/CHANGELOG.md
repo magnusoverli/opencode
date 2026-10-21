@@ -4,6 +4,8 @@
 
 - Fix OpenAI browser sign-in for dynamic callback ports and first-time client registration, and explain callback-free legacy device-code login directly in OpenChamber.
 
+- Refresh README setup, integration and safety guidance, and replace manual contributor lists with an automatically updated GitHub-data image.
+
 ## 3.2.4b3
 
 - Validate safe-write YAML structures with bounded parser-based checks instead of regex, supporting nested packages, scripts, merges and Home Assistant references ([#184](https://github.com/magnusoverli/opencode/issues/184)).
