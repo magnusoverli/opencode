@@ -477,11 +477,19 @@ function armV2OauthBridge(decoded, req, ingressPath) {
   } catch {
     return null;
   }
-  if (authorizeUrl.protocol !== "https:" || authorizeUrl.hostname !== "auth.openai.com"
-      || redirect.protocol !== "http:" || !isLoopbackHostname(redirect.hostname)
-      || !["1455", "1457"].includes(redirect.port) || redirect.pathname !== "/auth/callback") return null;
+  // The current ChatGPT method binds an ephemeral port; legacy Codex uses
+  // 1455/1457. Trust only the exact listener advertised by this backend attempt,
+  // never a port/host supplied in the later pasted callback. No DNS suffixes,
+  // privileged ports, userinfo, or alternate callback resources are accepted.
+  const port = Number(redirect.port);
+  if (authorizeUrl.origin !== "https://auth.openai.com" || authorizeUrl.username || authorizeUrl.password
+      || authorizeUrl.pathname !== "/oauth/authorize" || authorizeUrl.searchParams.getAll("redirect_uri").length !== 1
+      || redirect.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(redirect.hostname)
+      || !Number.isInteger(port) || port < 1024 || port > 65535 || redirect.username || redirect.password
+      || redirect.pathname !== "/auth/callback" || redirect.search || redirect.hash) return null;
   const state = authorizeUrl.searchParams.get("state");
-  if (!state || !body.attemptID) return null;
+  if (!state || state.length > 1024 || authorizeUrl.searchParams.getAll("state").length !== 1
+      || typeof body.attemptID !== "string" || !body.attemptID || body.attemptID.length > 256) return null;
 
   let handoff;
   try {
@@ -489,7 +497,7 @@ function armV2OauthBridge(decoded, req, ingressPath) {
     // using an internal Host. Prefer that browser-visible authority.
     const origin = req.headers.origin || `${forwardedProto(req)}://${req.headers["x-forwarded-host"] || req.headers.host}`;
     handoff = new URL(`${origin}${ingressPath}${V2_OAUTH_BRIDGE_PATH}`);
-    if (!["http:", "https:"].includes(handoff.protocol) || !handoff.hostname) return null;
+    if (!["http:", "https:"].includes(handoff.protocol) || !handoff.hostname || handoff.username || handoff.password) return null;
   } catch {
     return null;
   }
@@ -500,34 +508,70 @@ function armV2OauthBridge(decoded, req, ingressPath) {
   const id = randomBytes(24).toString("hex");
   pendingV2OauthRedirects.set(id, {
     url: body.url, redirectUri: redirect.toString(), state,
+    attemptID: body.attemptID, origin: handoff.origin, ingressPath, delivering: false,
+    statusPath: `/api/integration/openai/connect/oauth/${encodeURIComponent(body.attemptID)}${new URL(req.url, "http://localhost").search}`,
     expires: Date.now() + 10 * 60 * 1000, // OpenCode V2's attempt lifetime
   });
   handoff.searchParams.set("id", id);
   body.url = handoff.toString();
-  body.instructions = "Open the sign-in link. After OpenAI redirects to localhost, copy the full URL from the address bar into the handoff page. Keep this window open while it connects.";
+  body.instructions = "Keep OpenChamber open. Open the sign-in handoff, authorize with OpenAI, then paste the full failed localhost callback URL into that handoff. OpenChamber detects completion automatically. For callback-free legacy Codex login, cancel and choose Codex device code (legacy) instead.";
   return Buffer.from(JSON.stringify(payload));
 }
 
 function v2BridgePage(entry, id, message = "") {
   const link = entry ? `<p><a href="${escapeHtmlAttribute(entry.url)}" target="_blank" rel="noopener noreferrer">Continue to OpenAI sign-in</a></p>` : "";
-  const form = entry ? `<form method="post" action="?id=${id}"><label for="callback">Paste the full localhost callback URL (including code and state):</label><p><textarea id="callback" name="callback" rows="3" cols="72" required></textarea></p><button type="submit">Complete sign-in</button></form>` : "";
-  return `<!doctype html><html lang="en"><meta charset="utf-8"><title>OpenAI sign-in handoff</title><main><h1>OpenAI sign-in</h1><p>Keep this page open. After signing in, the localhost page may say it cannot connect. Copy its entire URL from the address bar and return here.</p>${link}${form}<p>${escapeHtmlAttribute(message)}</p></main></html>`;
+  const form = entry ? `<form method="post" action="?id=${id}" autocomplete="off"><label for="callback">Paste the full localhost callback URL (including code, state and any client_id):</label><p><textarea id="callback" name="callback" rows="4" cols="40" autocomplete="off" spellcheck="false" autocapitalize="off" required></textarea></p><button type="submit">Complete sign-in</button></form>` : "";
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OpenAI sign-in handoff</title><main><h1>OpenAI sign-in</h1><p>Keep OpenChamber and this page open.</p><ol><li>Continue to OpenAI and approve access.</li><li>The localhost page may say it cannot connect: it points to your device, not Home Assistant. Copy its entire URL from the address bar.</li><li>Return here, paste that URL and select Complete sign-in. OpenChamber will detect completion automatically; no restart is needed.</li></ol>${link}${form}<p>Prefer no callback pasting? Cancel this attempt in OpenChamber, then choose Codex device code (legacy) under Settings &gt; Providers &gt; OpenAI. That is a separate legacy Codex login, not the newer ChatGPT sign-in.</p><p>Callback URLs contain temporary sign-in secrets. Do not share them or forward the callback port.</p><p role="status">${escapeHtmlAttribute(message)}</p></main></html>`;
+}
+
+function v2OauthAttemptPending(entry, req) {
+  // An abandoned attempt can close its listener and a later login can reuse the
+  // port. Re-check the exact attempt, with its original location and the current
+  // caller's authentication, before delivering anything to that listener.
+  return new Promise(resolve => {
+    const headers = { ...req.headers, host: `${UPSTREAM_HOST}:${UPSTREAM_PORT}`, "accept-encoding": "identity",
+      "x-forwarded-host": req.headers["x-forwarded-host"] || req.headers.host || "",
+      "x-forwarded-proto": forwardedProto(req) };
+    for (const name of ["content-length", "content-type", "transfer-encoding"]) delete headers[name];
+    const request = http.request({ host: UPSTREAM_HOST, port: UPSTREAM_PORT, method: "GET", path: entry.statusPath, headers }, response => {
+      let size = 0;
+      const chunks = [];
+      response.on("data", chunk => {
+        size += chunk.length;
+        if (size > 16384) { response.destroy(); resolve(false); return; }
+        chunks.push(chunk);
+      });
+      response.on("error", () => resolve(false));
+      response.on("end", () => {
+        try {
+          resolve(response.statusCode === 200 && oauthAuthorizationPayload(JSON.parse(Buffer.concat(chunks).toString("utf8")))?.status === "pending");
+        } catch { resolve(false); }
+      });
+    });
+    request.setTimeout(OAUTH_BRIDGE_TIMEOUT_MS, () => request.destroy());
+    request.on("error", () => resolve(false));
+    request.end();
+  });
 }
 
 function handleV2OauthBridge(req, res, upstreamPath) {
   const respond = (status, entry, id, message) => {
+    if (!canWriteResponse(res) || res.headersSent) return;
     res.writeHead(status, noStoreHeaders({
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": "default-src 'none'; form-action 'self'; base-uri 'none'",
-      "referrer-policy": "no-referrer",
+      // no-referrer makes browser form POSTs carry Origin: null. Same-origin
+      // preserves the CSRF check without sending this capability URL to OpenAI;
+      // the external sign-in link also explicitly uses rel=noreferrer.
+      "referrer-policy": "same-origin",
       "x-content-type-options": "nosniff",
     }));
     res.end(v2BridgePage(entry, id, message));
   };
   const id = new URL(upstreamPath, "http://localhost").searchParams.get("id") || "";
   const entry = pendingV2OauthRedirects.get(id);
-  if (!entry || entry.expires <= Date.now()) {
-    pendingV2OauthRedirects.delete(id);
+  if (!entry || entry.expires <= Date.now() || entry.ingressPath !== ingressPathFromRequest(req)) {
+    if (entry?.expires <= Date.now()) pendingV2OauthRedirects.delete(id);
     respond(404, null, "", "This sign-in has expired. Start again in OpenChamber.");
     return;
   }
@@ -537,6 +581,14 @@ function handleV2OauthBridge(req, res, upstreamPath) {
   }
   if (req.method !== "POST") {
     respond(405, null, "", "Method not allowed.");
+    return;
+  }
+  if (req.headers.origin !== entry.origin) {
+    respond(403, null, "", "Submit this callback from the original sign-in handoff page.");
+    return;
+  }
+  if (String(req.headers["content-type"] || "").split(";", 1)[0] !== "application/x-www-form-urlencoded") {
+    respond(415, null, "", "Use the sign-in handoff form.");
     return;
   }
   const chunks = [];
@@ -553,28 +605,55 @@ function handleV2OauthBridge(req, res, upstreamPath) {
     if (length > 8192 || !canWriteResponse(res)) return;
     let callback;
     try {
-      callback = new URL(new URLSearchParams(Buffer.concat(chunks).toString("utf8")).get("callback"));
+      const form = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+      if (form.getAll("callback").length !== 1) throw new Error("Ambiguous callback");
+      callback = new URL(form.get("callback"));
     } catch {
       respond(400, entry, id, "Paste the complete localhost callback URL.");
       return;
     }
     const expected = new URL(entry.redirectUri);
     if (callback.origin !== expected.origin || callback.pathname !== expected.pathname
-        || callback.searchParams.get("state") !== entry.state || !callback.searchParams.get("code")) {
+        || callback.username || callback.password || callback.hash
+        || callback.searchParams.getAll("state").length !== 1 || callback.searchParams.get("state") !== entry.state
+        || callback.searchParams.getAll("code").length !== 1 || !callback.searchParams.get("code")
+        || callback.searchParams.getAll("client_id").length > 1
+        || (callback.searchParams.has("client_id") && !callback.searchParams.get("client_id"))) {
       respond(400, entry, id, "The callback URL does not match this sign-in. Try again.");
+      return;
+    }
+    if (entry.expires <= Date.now() || pendingV2OauthRedirects.get(id) !== entry) {
+      respond(404, null, "", "This sign-in has expired. Start again in OpenChamber.");
+      return;
+    }
+    if (entry.delivering) {
+      respond(409, null, "", "This callback is already being delivered. Check OpenChamber for completion.");
+      return;
+    }
+    entry.delivering = true;
+    const pending = await v2OauthAttemptPending(entry, req);
+    if (!pending || entry.expires <= Date.now() || pendingV2OauthRedirects.get(id) !== entry) {
+      pendingV2OauthRedirects.delete(id);
+      respond(409, null, "", "This sign-in is no longer pending or could not be verified. Check OpenChamber, or cancel and start again.");
       return;
     }
     const target = new URL(entry.redirectUri);
     target.searchParams.set("state", entry.state);
     target.searchParams.set("code", callback.searchParams.get("code"));
+    // New ChatGPT sign-in dynamically registers a client on first authorization.
+    // Reauthorization may omit this field. OpenCode owns client validation and
+    // token exchange; never forward arbitrary query parameters or credentials.
+    if (callback.searchParams.has("client_id")) target.searchParams.set("client_id", callback.searchParams.get("client_id"));
     const delivered = await requestLoopback(target);
     if (!delivered) {
-      respond(502, entry, id, "The add-on could not reach the local callback listener. Start sign-in again.");
+      entry.delivering = false;
+      respond(502, entry, id, "The add-on's local callback listener did not accept this sign-in. Cancel and start again in OpenChamber.");
       return;
     }
     pendingV2OauthRedirects.delete(id);
     respond(200, null, "", "Callback received. Return to OpenChamber; it will finish connecting automatically.");
   });
+  req.on("error", () => respond(400, null, "", "The callback form was interrupted. Try again from OpenChamber."));
 }
 
 // Resolves to "skipped" (nothing armed for this provider), "expired",

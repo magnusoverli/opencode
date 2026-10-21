@@ -761,13 +761,31 @@ This takes precedence over the new-chat model defaults; those defaults are used
 when no remembered model is available. The configured agent still applies, and
 existing sessions keep their own selections.
 
-In OpenChamber, select **ChatGPT Pro/Plus (browser)** to sign in with OpenAI.
-The sign-in link opens a handoff page: continue to OpenAI, then, if the browser
-cannot open the `localhost` callback, copy its full URL from the address bar
-into the handoff page and select **Complete sign-in**. Return to OpenChamber;
-it will finish connecting automatically. You can also use `/connect` in the
-terminal and choose **ChatGPT Pro/Plus (headless)** for a device-code flow.
-Other providers may have different callback requirements.
+Connect OpenAI directly in **OpenChamber → Settings → Providers → OpenAI**;
+there is no need to switch interfaces or restart the app:
+
+- **Codex device code (legacy)** avoids localhost callbacks. Open the verification
+  link, enter the displayed code, and approve access. Keep the OpenChamber sign-in
+  screen open; it polls automatically and refreshes the provider after approval.
+  This is the legacy Codex authentication route, not the newer ChatGPT sign-in;
+  model availability and supported features may differ.
+- **Sign in with ChatGPT** is the newer method. Its sign-in link opens the app's
+  handoff page: continue to OpenAI and approve access. If the browser cannot open
+  the localhost callback, copy its **full URL**, including all query parameters,
+  from the address bar into the original handoff page and select **Complete
+  sign-in**. OpenChamber detects completion automatically. The handoff supports
+  this method's dynamic callback port and first-time client registration.
+- **Codex browser (legacy)** also uses the handoff, but retains the older Codex
+  browser authentication route. It is not silently substituted for ChatGPT login.
+
+OpenAI login/consent remains necessary. The browser's localhost refers to your
+own device, not the HA container; automatic redirects for the newer method need
+upstream remote-hosted callback support. Do not edit the callback hostname or
+forward its port. Callback URLs contain temporary authorization secrets: paste
+them only into the matching handoff, never into chat, logs or issue reports.
+Cancel abandoned attempts in OpenChamber and start again if a handoff expires.
+OpenCode owns credential storage and token refresh for every method. Other
+providers may have different callback requirements.
 
 The first V2 activation migrates sessions but does not copy legacy V1 provider
 credentials because the formats are incompatible. Authenticate each provider
