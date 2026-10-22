@@ -3,7 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Promote beta 3.2.4b6 with OpenCode 2.1.2 and OpenChamber 2.5.0, preserving stable conversations, sign-ins, permissions and separate channel storage.
+## 3.3.0
+
+**Before updating:** make a Home Assistant backup of the stable app, its options and configuration. Restore that backup to roll back; do not run an older runtime against upgraded data. Stable and beta keep separate storage.
+
+- Update to OpenCode 2.1.2 and OpenChamber 2.5.0, preserving stable conversations, sign-ins and permissions.
 - Validate safe-write Home Assistant YAML with parser-based checks for nested automations, scripts, packages, anchors and supported tags ([#184](https://github.com/magnusoverli/opencode/issues/184)).
 - Add a default-off option for trusted remote OpenChamber text-to-speech and transcription servers ([#185](https://github.com/magnusoverli/opencode/issues/185)).
 - Restore PPQ private-model discovery, selection and pricing metadata without requiring provider sign-in or manual cache deletion ([#188](https://github.com/magnusoverli/opencode/issues/188)).
