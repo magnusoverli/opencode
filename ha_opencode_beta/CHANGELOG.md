@@ -2,7 +2,15 @@
 
 ## [Unreleased]
 
-- Expand decision-note storage to 2 MiB without note-count caps, preserve history with backups, add bounded paginated/exact recall and refresh the small digest after approved changes ([#193](https://github.com/magnusoverli/opencode/issues/193)).
+## 3.2.4b5
+
+- Expand decision-note storage to 2 MiB without active/total-note caps; retain the editable v1 YAML format and superseded history without an archive/database migration ([#193](https://github.com/magnusoverli/opencode/issues/193)).
+- Preserve custom metadata and existing replacement links, keep a last-good backup, coordinate app writers and reject observed manual-edit conflicts without overwriting the record.
+- Add exact-ID and file/entity/integration-filtered recall with revision-bound pagination and an 8 KiB response ceiling; allow read-only recall in compact/read-only sessions while keeping note changes excluded.
+- Refresh the 2 KiB digest after approved changes, leave unchanged content untouched and distinguish successful saves from failed context refreshes. Pins give priority, not guaranteed inclusion.
+- Add focused-recall guidance and recovery/rollback documentation; retain existing OpenAI sign-in fixes, OpenCode 2.1.2, OpenChamber 2.5.0 and separate channel storage. Stable remains 3.2.3.
+- Pass 732 local Linux MCP tests and 34 pinned-runtime/configuration/skill checks; three optional MCP tests were skipped. Installed Supervisor upgrade/rollback and live HA acceptance remain unverified; no cost-based release gate or automatic relevance-injection service is added.
+
 ## 3.2.4b4
 
 - Fix OpenAI browser sign-in for dynamic callback ports and first-time client registration, and explain callback-free legacy device-code login directly in OpenChamber.
