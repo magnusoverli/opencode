@@ -485,7 +485,7 @@ with tempfile.TemporaryDirectory(prefix="opencode-v2-validation-") as temporary:
                 "status": "completed",
                 "reason": "auto",
                 "summary": "summary",
-                "recent": "[User]: question\n\n[Assistant]: answer",
+                "metadata": {"recent": "[User]: question\n\n[Assistant]: answer"},
                 "time": {"created": 3},
             },
             updated=5,

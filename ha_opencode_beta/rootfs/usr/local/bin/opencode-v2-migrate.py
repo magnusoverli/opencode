@@ -812,6 +812,7 @@ def project_session(
                     -1,
                 ) if tail_start else -1
                 tail = messages[tail_index:message_index] if 0 <= tail_index < message_index else []
+                recent = serialize_recent(tail, parts_by_message)
                 projected.append(
                     {
                         "id": message["id"],
@@ -823,7 +824,7 @@ def project_session(
                             "status": "completed",
                             "reason": "auto" if compaction["auto"] else "manual",
                             "summary": summary_text,
-                            "recent": serialize_recent(tail, parts_by_message),
+                            **({"metadata": {"recent": recent}} if recent else {}),
                             "time": {"created": message["time_created"]},
                         },
                     }

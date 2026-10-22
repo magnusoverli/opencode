@@ -32,6 +32,7 @@ rootfs/opt/*/README.md
 !test/opencode-v2-mcp-startup.test.js
 !test/fixtures/
 !test/fixtures/mcp-saved-options.json
+!test/fixtures/opencode-v2-compaction.py
 !test/helpers/
 !test/helpers/assist-fixture.mjs
 !test/v2-ui-lan-fixture.mjs

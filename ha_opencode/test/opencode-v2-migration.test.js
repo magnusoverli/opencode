@@ -137,6 +137,14 @@ describe("OpenCode V2 copy-on-write migration", () => {
     assert.doesNotMatch(result.stdout + result.stderr, /secret|duplicate text/);
   });
 
+  it("migrates automatic and manual compactions with or without retained context using the pinned converter", () => {
+    const result = spawnSync(python, [
+      join(ADDON_ROOT, "test", "fixtures", "opencode-v2-compaction.py"), V2_BIN, TARGET_VERSION,
+    ], { encoding: "utf8", timeout: 60_000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), "ok");
+  });
+
   it("activates a real pinned conversion with exact message, session, and watermark projections", async () => {
     const seedSource = join(sandbox, "message-seed-source");
     const seedRoot = join(sandbox, "message-seed-root");

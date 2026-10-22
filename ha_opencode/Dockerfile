@@ -381,6 +381,12 @@ RUN set -e; \
 # injection on both supported architectures. It is not part of ordinary local image builds;
 # the Supervisor devcontainer separately covers the shipped s6 service graph.
 FROM runtime AS boundary-test
+RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-compaction.py,target=/tmp/compaction/test/fixtures/opencode-v2-compaction.py,readonly \
+    ln -s / /tmp/compaction/rootfs \
+    && timeout --signal=TERM --kill-after=10s 120s \
+        python3 /tmp/compaction/test/fixtures/opencode-v2-compaction.py \
+        /usr/local/libexec/opencode-v2 "${OPENCODE_V2_VERSION}"
+
 RUN --network=none --mount=type=bind,source=test/hab-cli-fixture.mjs,target=/tmp/hab-cli-fixture.mjs,readonly \
     timeout --signal=TERM --kill-after=10s 120s node /tmp/hab-cli-fixture.mjs
 

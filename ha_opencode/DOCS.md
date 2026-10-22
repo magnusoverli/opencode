@@ -5,6 +5,13 @@ terminal or OpenChamber web workspace with one shared, app-managed backend.
 
 ## Upgrading to 3.3
 
+Stable **3.3.1** fixes V1 history migration when a conversation contains a
+completed automatic or manual compaction. If 3.3.0 stopped at
+`message_projection_mismatch`, keep the existing app data, take a backup and
+update the same stable app to retry. No database deletion or manual removal of
+compaction messages is required. Summaries and retained context are preserved;
+history already deleted manually can only be recovered from a backup.
+
 Stable **3.3.0** promotes beta **3.2.4b6**, with pinned OpenCode **2.1.2**,
 OpenChamber **2.5.0** and hab **1.7.2**. It includes parser-based safe-write YAML
 validation, optional remote speech servers, PPQ model discovery/pricing fixes,

@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 3.3.1
+
+- Fix startup migration for compacted V1 conversations while preserving summaries, retained context and original history ([#195](https://github.com/magnusoverli/opencode/issues/195)).
+- If 3.3.0 stopped at `message_projection_mismatch`, back up the existing app data and update the same stable app to retry; no database deletion or manual history edits are required. OpenCode 2.1.2 and OpenChamber 2.5.0 remain unchanged.
+
 ## 3.3.0
 
 **Before updating:** make a Home Assistant backup of the stable app, its options and configuration. Restore that backup to roll back; do not run an older runtime against upgraded data. Stable and beta keep separate storage.
