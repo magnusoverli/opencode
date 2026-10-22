@@ -9,6 +9,7 @@ const COMPACT_TOOL_NAMES = [
   "search_entities",
   "get_entity_details",
   "get_home_context",
+  "recall_decisions",
   "get_services",
   "get_history",
   "get_logbook",
@@ -51,7 +52,6 @@ const CONFIGURATION_TOOL_NAMES = [
   "esphome_yaml_search",
   "esphome_file",
   "remember_decision",
-  "recall_decisions",
   "supersede_decision",
 ];
 

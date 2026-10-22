@@ -51,7 +51,7 @@ test("pinned V2 sends managed context once on initial and tool-continuation HTTP
     const briefing = join(root, "briefing.md");
     await writeFile(briefing, marker);
     await writeFile(join(root, "plugin/index.js"), `
-      import { appendFileSync } from "node:fs";
+      import { appendFileSync, writeFileSync } from "node:fs";
       import { Plugin } from "@opencode/plugin";
       import { createContextSetup, readContextSource } from ${JSON.stringify(pathToFileURL(join(runtime, "context.js")).href)};
       import { createLspSetup } from ${JSON.stringify(pathToFileURL(join(runtime, "lsp.js")).href)};
@@ -59,7 +59,12 @@ test("pinned V2 sends managed context once on initial and tool-continuation HTTP
         const dispose = await createContextSetup({ readSource: () => readContextSource(${JSON.stringify(briefing)}) })(ctx);
         const tool = await ctx.tool.transform((editor) => editor.add({
           name: "fixture_read", description: "Read the synthetic fixture", input: { type: "object", properties: {} },
-          options: { codemode: false }, execute: async () => ({ content: "fixture-tool-result" }),
+          options: { codemode: false }, execute: async () => {
+            // Like an approved decision write, publish updated bounded context
+            // during a tool call. The continuation must see it without reload.
+            writeFileSync(${JSON.stringify(briefing)}, ${JSON.stringify(`${marker}-after-tool`)});
+            return { content: "fixture-tool-result" };
+          },
         }));
         const disposeLsp = await createLspSetup({ request: async () => {
           appendFileSync(${JSON.stringify(join(root, "lsp-calls"))}, "x");
@@ -104,6 +109,8 @@ test("pinned V2 sends managed context once on initial and tool-continuation HTTP
     await client.session.prompt({ sessionID: session.id, text: "Read the synthetic fixture and finish." });
     await client.session.wait({ sessionID: session.id }, { signal: AbortSignal.timeout(15000) });
     assert.equal(requests.length, 2, `${logs}\n${JSON.stringify(await client.session.context({ sessionID: session.id }))}`);
+    assert.ok(!JSON.stringify(requests[0]).includes(`${marker}-after-tool`));
+    assert.ok(JSON.stringify(requests[1]).includes(`${marker}-after-tool`), "Tool-time context refresh must reach the existing session's continuation without location reload");
     assert.ok(requests[0].tools.some((tool) => tool.function?.name === "ha_yaml_status"), JSON.stringify(requests[0].tools.map((tool) => tool.function?.name)) + logs);
     await writeFile(briefing, `${marker}-updated`);
     await client.location.reload();

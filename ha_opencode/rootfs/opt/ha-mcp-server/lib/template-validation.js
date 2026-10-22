@@ -9,6 +9,8 @@ export function extractTemplateScalars(content) {
   const templates = new Set();
   visit(document, {
     Scalar(_, node) {
+      // HA tag arguments name deferred references, not Jinja to execute here.
+      if (node.tag?.startsWith("!")) return;
       if (typeof node.value === "string" && /\{[{%]/.test(node.value)) {
         templates.add(node.value);
       }

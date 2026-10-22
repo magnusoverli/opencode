@@ -1,5 +1,6 @@
 import { constants, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { readLanConfig, readRuntimeFile } from "../opencode-v2-homeassistant/lan-config.js";
+import { AGENT_SETTINGS_KEY, createAgentSettingsBridge } from "../opencode-v2-homeassistant/agent-settings.js";
 
 // s6 starts Node with the app's native non-dumpable constructor before any secret
 // is read. Only the preview's process-owned auth state receives this credential.
@@ -28,6 +29,8 @@ function credential() {
 try {
   if (process.getuid() !== 0 || process.env.OPENCODE_HOST !== "http://127.0.0.1:4100" || process.env.OPENCODE_SKIP_START !== "true") throw new Error();
   globalThis[key] = credential();
+  const base = JSON.parse(readRuntimeFile("agents-base.json", 4 * 1024 * 1024));
+  globalThis[AGENT_SETTINGS_KEY] = createAgentSettingsBridge({ password: globalThis[key], base });
   // init publishes this root-owned marker only after activating a validated V2
   // generation. OpenChamber reads credentials through that backend's API.
   const generation = readRuntimeFile("ready", 128).trim();

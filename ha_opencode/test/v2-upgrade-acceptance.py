@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed/verify synthetic state for a stopped devcontainer beta app upgrade."""
+"""Seed/verify synthetic state for a stopped devcontainer stable app upgrade."""
 
 import hashlib
 import json
@@ -56,7 +56,7 @@ if mode == "seed":
         "credential_hash": hashlib.sha256(credential.encode()).hexdigest(),
     }))
     evidence.chmod(0o600)
-    print("Seeded synthetic conversation, credential, and session restriction in the earlier beta generation")
+    print("Seeded synthetic conversation, credential, and session restriction in the previous V2 generation")
 elif mode == "verify":
     expected = json.loads(evidence.read_text())
     assert generation != expected["generation"]
@@ -64,7 +64,7 @@ elif mode == "verify":
     assert not previous.exists()
     marker = json.loads((directory / "generation.json").read_text())
     assert "previous_generation" not in marker
-    assert marker["target_version"] == "2.0.26"
+    assert marker["target_version"] == "2.1.2"
     connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         credential = connection.execute("SELECT value FROM credential WHERE id='upgrade-fixture'").fetchone()[0]

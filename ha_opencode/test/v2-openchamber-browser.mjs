@@ -9,6 +9,7 @@ import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:f
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { OpenCode } from '/opt/opencode-v2-homeassistant/node_modules/@opencode/client/dist/promise/index.js';
+import { initializeAgentImporter } from '/opt/opencode-v2-homeassistant/agents-importer.js';
 
 const require = createRequire('/opt/ha-mcp-server/package.json');
 const puppeteer = require('puppeteer-core');
@@ -135,7 +136,8 @@ try {
     providers: { fixture: { name: 'Fixture', package: '@opencode/ai/providers/openai-compatible',
       settings: { baseURL: `http://127.0.0.1:${provider.address().port}/v1` },
       models: { coding: { modelID: 'fixture-model', name: 'Fixture model', limit: { context: 32000, output: 1000 } } } } },
-  }));
+  }), { mode: 0o600 });
+  await initializeAgentImporter(`${runtime}/managed.json`);
   const startBackend = () => start('/usr/local/libexec/opencode-v2', ['serve', '--hostname', '127.0.0.1', '--port', '4100'], {
     HOME: `${runtime}/home`, XDG_CONFIG_HOME: `${runtime}/config`, XDG_DATA_HOME: `${generation}/data`,
     XDG_STATE_HOME: `${generation}/state`, XDG_CACHE_HOME: `${runtime}/cache`,
@@ -144,7 +146,7 @@ try {
   });
   let backend = startBackend();
   const client = OpenCode.make({ baseUrl: 'http://127.0.0.1:4100', headers });
-  await wait(async () => (await client.server.info()).version === '2.0.26', 'backend startup');
+  await wait(async () => (await client.server.info()).version === '2.1.2', 'backend startup');
   const credentials = await client.credential.create({ integrationID: 'fixture', value: { type: 'key', key: 'fixture-persisted-key' } });
   await mkdir(`${root}/ui`);
   // Exercise the existing-installation settings migration as well as a new chat.
@@ -171,8 +173,23 @@ try {
   await checkTerminalRenderer();
   const page = await browser.newPage();
   const errors = [], escaped = [];
+  let heldRecoverySave;
+  let recoverySaveDirectory;
+  let failRecoverySaves = false;
   await page.setRequestInterception(true);
   page.on('request', req => {
+    if (recoverySaveDirectory && req.method() === 'PUT' &&
+        new URL(req.url()).pathname === base + '/api/config/settings' &&
+        JSON.parse(req.postData() || '{}').lastDirectory === recoverySaveDirectory) {
+      if (failRecoverySaves) {
+        // The persistence adapter can retry via its HTTP fallback. Fail every
+        // attempt during the simulated outage, not just the first transport.
+        void req.respond({ status: 503, contentType: 'application/json', body: '{"error":"fixture save outage"}' });
+        return;
+      }
+      heldRecoverySave = req;
+      return;
+    }
     if (req.method() === 'POST' && new URL(req.url()).pathname === base + '/api/session') {
       const model = JSON.parse(req.postData() || '{}').model;
       if (model?.providerID !== 'fixture' || model?.id !== 'coding') {
@@ -198,6 +215,29 @@ try {
   });
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-testid="chat-input"]', { timeout: 45000 });
+  // Use the actual authenticated Settings API from the rendered Ingress page.
+  // A disk-only upstream save must not satisfy these backend assertions.
+  const agentRequest = (method, name, body) => page.evaluate(async (method, name, body) => {
+    const response = await fetch(new URL(`api/config/agents/${name}`, window.location.href), {
+      method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    return { status: response.status, body: await response.json() };
+  }, method, name, body);
+  const agentLocation = { directory: `${runtime}/workspace` };
+  const createdAgent = await agentRequest('POST', 'ha-browser-fixture', {
+    scope: 'user', description: 'Browser agent persists', mode: 'subagent', system: 'Fixture prompt',
+    permissions: [{ action: 'edit', resource: '*', effect: 'allow' }],
+  });
+  assert.equal(createdAgent.status, 200, JSON.stringify(createdAgent));
+  assert.equal(createdAgent.body.applied, true);
+  const activeAgent = (await client.agent.get({ agentID: 'ha-browser-fixture', location: agentLocation })).data;
+  assert.equal(activeAgent.description, 'Browser agent persists');
+  assert.equal(activeAgent.permissions.filter(rule => [ '*', 'edit' ].includes(rule.action) && rule.resource === '*').at(-1).effect, 'deny');
+  assert.equal((await agentRequest('PATCH', 'ha-browser-fixture', { color: '#112233' })).body.applied, true);
+  assert.equal((await agentRequest('POST', 'ha-browser-project-fixture', { scope: 'project' })).status, 400);
+  assert.equal((await agentRequest('PATCH', 'home-assistant-read-only', { system: 'Unsafe override' })).status, 403);
+  assert.equal((await agentRequest('PATCH', 'ha-browser-fixture', { system: '{env:SUPERVISOR_TOKEN}' })).status, 400);
+  console.log('CHECK: authenticated agent Settings saves activate without relaxing managed denials');
   await page.evaluate(() => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Choose project')?.click());
   await page.waitForSelector('[role="dialog"][aria-label="Project"] [role="option"]');
   await page.evaluate(() => {
@@ -226,13 +266,16 @@ try {
   assert.equal((await client.session.get({ sessionID: id })).id, id, 'Stopping UI must leave backend/history running');
   await stop(backend);
   backend = startBackend();
-  await wait(async () => (await client.server.info()).version === '2.0.26', 'backend restart');
+  await wait(async () => (await client.server.info()).version === '2.1.2', 'backend restart');
   ui = startUi();
   await wait(async () => (await fetch('http://127.0.0.1:3010/health')).ok, 'UI restart');
   assert.equal((await client.session.get({ sessionID: id })).id, id);
   assert.equal((await auth.readOpenCodeCredentials()).fixture.key, 'fixture-persisted-key');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => document.body.textContent.includes('HA_PINNED_UI_OK'), { timeout: 30000 });
+  await wait(async () => (await client.agent.get({ agentID: 'ha-browser-fixture', location: agentLocation })).data.color === '#112233', 'agent restart persistence');
+  assert.equal((await agentRequest('DELETE', 'ha-browser-fixture')).body.applied, true);
+  console.log('CHECK: agent Settings delete and restart persistence');
   const lastSession = await page.evaluate(() => localStorage.getItem('oc.lastSession.v1'));
   assert.ok(lastSession, 'Fixture must have a persisted historical session');
   const historical = await client.session.get({ sessionID: id });
@@ -244,22 +287,49 @@ try {
   await rm(`${runtime}/workspace`, { recursive: true });
   await stop(backend);
   backend = startBackend();
-  await wait(async () => (await client.server.info()).version === '2.0.26', 'missing-workspace backend restart');
+  await wait(async () => (await client.server.info()).version === '2.1.2', 'missing-workspace backend restart');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 });
   assert.equal(new URL(page.url()).searchParams.get('session'), id, 'Fixture exercises the stale historical URL too');
+  // Upstream refreshes the cache's monotonic updatedAt when restoring a session
+  // on reload. Snapshot AFTER that restore, not before it; the session/directory
+  // must still be the same, and a failed recovery must not write anything else.
+  const recoveryLastSession = await page.evaluate(() => localStorage.getItem('oc.lastSession.v1'));
+  const restored = JSON.parse(recoveryLastSession).runtimes.local;
+  const previous = JSON.parse(lastSession).runtimes.local;
+  assert.equal(restored.sessionId, id);
+  assert.equal(restored.sessionId, previous.sessionId);
+  assert.equal(restored.directory, historical.location.directory);
+  assert.equal(restored.directory, previous.directory);
   await page.$eval('#recovery-directory', input => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '/definitely-missing-ha-fixture');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.evaluate(() => document.querySelector('[data-testid="workspace-recovery"] form').requestSubmit());
   await page.waitForSelector('[data-testid="workspace-recovery"] [role="alert"]');
-  assert.equal(await page.evaluate(() => localStorage.getItem('oc.lastSession.v1')), lastSession, 'Failed recovery preserves last-session pointer');
+  assert.equal(await page.evaluate(() => localStorage.getItem('oc.lastSession.v1')), recoveryLastSession, 'Failed recovery preserves last-session pointer');
   await page.$eval('#recovery-directory', (input, directory) => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, directory);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }, recoveryDirectory);
+  recoverySaveDirectory = recoveryDirectory;
   await page.evaluate(() => document.querySelector('[data-testid="workspace-recovery"] form').requestSubmit());
+  await wait(() => !!heldRecoverySave, 'recovery settings save');
+  assert.ok(await page.$('[data-testid="workspace-recovery"]'), 'Recovery must not finish before its settings save completes');
+  failRecoverySaves = true;
+  await heldRecoverySave.respond({ status: 503, contentType: 'application/json', body: '{"error":"fixture save outage"}' });
+  await page.waitForFunction(() => document.querySelector('[data-testid="workspace-recovery"] [role="alert"]')?.textContent.includes('could not be saved'));
+  assert.equal(await page.evaluate(() => localStorage.getItem('oc.lastSession.v1')), recoveryLastSession, 'Failed recovery save preserves last-session pointer');
+  assert.equal(new URL(page.url()).searchParams.get('session'), id, 'Failed recovery save preserves the historical URL');
+  failRecoverySaves = false;
+  heldRecoverySave = undefined;
+  await page.evaluate(() => document.querySelector('[data-testid="workspace-recovery"] form').requestSubmit());
+  await wait(() => !!heldRecoverySave, 'retried recovery settings save');
+  assert.ok(await page.$('[data-testid="workspace-recovery"]'), 'Recovery remains blocked during a retried settings save');
+  const savedRecovery = page.waitForResponse(res => res.request() === heldRecoverySave);
+  recoverySaveDirectory = undefined;
+  await heldRecoverySave.continue();
+  assert.equal((await savedRecovery).status(), 200);
   await page.waitForSelector('[data-testid="chat-input"] [contenteditable="true"]', { visible: true, timeout: 30000 });
   await page.waitForFunction(() => document.body.textContent.includes('Fixture model'), { timeout: 30000 });
   await wait(async () => await page.evaluate(directory => localStorage.getItem('lastDirectory') === directory, recoveryDirectory), 'recovered workspace persisted');

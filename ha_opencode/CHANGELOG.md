@@ -3,14 +3,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Fix the blank OpenChamber Terminal pane by loading its WebAssembly renderer correctly through Home Assistant ingress and direct access ([#194](https://github.com/magnusoverli/opencode/issues/194)).
+- Promote beta 3.2.4b6 with OpenCode 2.1.2 and OpenChamber 2.5.0, preserving stable conversations, sign-ins, permissions and separate channel storage.
+- Validate safe-write Home Assistant YAML with parser-based checks for nested automations, scripts, packages, anchors and supported tags ([#184](https://github.com/magnusoverli/opencode/issues/184)).
+- Add a default-off option for trusted remote OpenChamber text-to-speech and transcription servers ([#185](https://github.com/magnusoverli/opencode/issues/185)).
+- Restore PPQ private-model discovery, selection and pricing metadata without requiring provider sign-in or manual cache deletion ([#188](https://github.com/magnusoverli/opencode/issues/188)).
+- Activate global Markdown agents saved in OpenChamber on the managed backend, with verified saves/deletes and existing permission safeguards ([#190](https://github.com/magnusoverli/opencode/issues/190)).
+- Expand decision-note storage to 2 MiB without note-count caps; preserve metadata and history with backups, add exact/paginated historical recall, and refresh the small digest after approved changes ([#193](https://github.com/magnusoverli/opencode/issues/193)).
+- Fix OpenAI browser sign-in for dynamic callback ports and first-time registration, and explain callback-free legacy device-code login.
+- Fix the blank OpenChamber Terminal pane through Home Assistant ingress and direct access ([#194](https://github.com/magnusoverli/opencode/issues/194)).
+- Keep recovered workspaces selected after reload; report selection-save failures without clearing conversation navigation or moving historical conversations.
+- Retain the Zigporter 1.4.2 compatibility fix for Zigbee2MQTT inventory and cached device-state discovery.
 - Refresh README setup, integration and safety guidance, and replace manual contributor lists with an automatically updated GitHub-data image.
-- Fix PPQ model-list/API-key dialog failures caused by incomplete pricing metadata; preserve cache rates and validate models against OpenCode's native schema ([#188](https://github.com/magnusoverli/opencode/issues/188)).
-- Keep PPQ model discovery working when optional capability metadata is malformed.
-- Discover current PPQ private models automatically, cache temporary catalog outages and preserve encrypted-only routing; make PPQ models searchable by name ([#188](https://github.com/magnusoverli/opencode/issues/188)).
-
-- Recover confirmed missing OpenChamber workspaces on desktop/mobile without moving conversations or recreating missing directories.
-- Promote beta 3.2.2b1 with independent native MCP, verified startup settings migration, persistent TUI preferences and opt-in formatting/plugin controls.
 
 ## 3.2.3
 

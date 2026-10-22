@@ -147,6 +147,7 @@ describe("OpenCode V2 managed configuration", () => {
       [...TOOL_PROFILES.compact.toolNames].map((name) => `homeassistant_${name}`),
     );
     assert.ok(mcpRules.slice(1, -1).every((rule) => rule.effect === "allow" && rule.resource === "*"));
+    assert.ok(mcpRules.some((rule) => rule.action === "homeassistant_recall_decisions" && rule.effect === "allow"));
     assert.deepEqual(mcpRules.at(-1), {
       action: "homeassistant_native_*",
       resource: "*",
@@ -156,6 +157,7 @@ describe("OpenCode V2 managed configuration", () => {
       "homeassistant_call_service",
       "homeassistant_write_config_safe",
       "homeassistant_remember_decision",
+      "homeassistant_supersede_decision",
       "homeassistant_future_mutation",
       "homeassistant_native_HassTurnOn",
     ]) {

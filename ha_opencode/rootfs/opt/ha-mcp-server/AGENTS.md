@@ -128,6 +128,14 @@ Decision notes record *why* an installation is the way it is. That reasoning can
 
 **To read more**, use `recall_decisions`. The injected digest carries only the decisions themselves; the rationale and the superseded history are retrieved on demand. Check it when a note looks relevant but you need the reasoning, or when the user asks what was decided before.
 
+At the start of configuration work, recall relevant notes using the files,
+entities or integrations involved, before drafting changes. Follow `next_cursor`
+with the same filters/limit while relevant results remain; restart if the revision
+changes. Do not repeat a completed lookup unless the scope or notes change.
+Use `id` alone for an exact historical lookup. Superseded notes explain history,
+not current constraints. Respect disabled/unavailable tools rather than bypassing
+them. Pins give digest priority, not guaranteed inclusion in its 2 KiB budget.
+
 **To record**, offer first and then wait. Say what you would store, in the words you would store it, and call `remember_decision` with `user_approved: true` only after the user agrees. A general instruction to "remember this" for the current task is not approval to write a permanent note; asking costs one sentence.
 
 Worth recording:
@@ -217,7 +225,7 @@ its `data`, not the whole envelope. Never reconstruct from a truncated preview.
 
 ### 4. zigporter CLI (Zigbee toolkit)
 
-In the V2 beta, use the `zigporter_run` MCP tool for these commands. Its sidecar
+In this V2 app, use the `zigporter_run` MCP tool for these commands. Its sidecar
 supplies credentials; the agent shell intentionally does not inherit them.
 Do not run setup or create credential files. If the current profile does not
 expose the tool, report that limitation and use available read-only MCP tools.

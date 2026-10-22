@@ -35,6 +35,9 @@ describe("MCP tool profiles", () => {
       "esphome_troubleshoot",
     ]);
     expect(isToolAllowedInProfile("call_service", "compact")).toBe(false);
+    expect(isToolAllowedInProfile("recall_decisions", "compact")).toBe(true);
+    expect(isToolAllowedInProfile("remember_decision", "compact")).toBe(false);
+    expect(isToolAllowedInProfile("supersede_decision", "compact")).toBe(false);
   });
 
   it("adds safe configuration tools without administrative capabilities", () => {

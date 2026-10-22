@@ -16,6 +16,11 @@ const existing = `- alias: Arriving home
 `;
 
 describe("config template pre-validation", () => {
+  it("does not render HA reference arguments, while retaining ordinary and explicitly typed string templates", () => {
+    const content = 'secret: !secret "synthetic_{{ reference }}"\ninclude: !include "synthetic_{{ filename }}.yaml"\ninput: !input "synthetic_{{ input }}"\nplain: "{{ 1 + 1 }}"\ntyped: !!str "{{ 2 + 2 }}"\n';
+    expect(extractTemplateScalars(content)).toEqual(["{{ 1 + 1 }}", "{{ 2 + 2 }}"]);
+  });
+
   it("extracts complete folded Jinja scalars after YAML parsing", () => {
     const templates = extractTemplateScalars(existing);
     expect(templates).toHaveLength(3);

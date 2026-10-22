@@ -3,6 +3,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { updateBrowserURL } from '@/lib/router/serializeRoute';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { probeWorkspace, verifyRecoveryWorkspace, type WorkspaceRead } from '@/lib/workspaceRecovery';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -28,6 +29,7 @@ export function WorkspaceRecoveryGate({ children }: { children: React.ReactNode 
   const [target, setTarget] = React.useState('/homeassistant');
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [failedSelection, setFailedSelection] = React.useState<{ directory: string; runtime: string; sessionId: string | null } | null>(null);
   React.useEffect(() => subscribeRuntimeEndpointChanged(() => setRuntime(getRuntimeKey())), []);
   React.useEffect(() => {
     let active = true;
@@ -47,15 +49,22 @@ export function WorkspaceRecoveryGate({ children }: { children: React.ReactNode 
   }, [directory, runtime, attempt]);
 
   const missing = check?.missing && check.directory === directory && check.runtime === runtime;
+  const unsaved = failedSelection?.directory === workspaceDirectory && failedSelection.runtime === runtime && failedSelection.sessionId === sessionId;
   const recover = async (candidate: string) => {
     const normalized = normalizePath(candidate);
     if (!normalized || busy) return;
     setBusy(true);
     setError('');
-    const current = () => getRuntimeKey() === runtime &&
-      useDirectoryStore.getState().currentDirectory === workspaceDirectory &&
+    const sameSelection = () => getRuntimeKey() === runtime &&
       useSessionUIStore.getState().currentSessionId === sessionId &&
       useSessionUIStore.getState().currentSessionDirectory === sessionDirectory;
+    // A selected conversation owns its workspace. Settings hydration can move
+    // the independent browsing directory without changing that selection.
+    const hasSessionWorkspace = Boolean(sessionId && sessionDirectory);
+    const current = () => sameSelection() && (hasSessionWorkspace ||
+      useDirectoryStore.getState().currentDirectory === workspaceDirectory);
+    const selectionCurrent = () => sameSelection() && (hasSessionWorkspace ||
+      [workspaceDirectory, normalized].includes(useDirectoryStore.getState().currentDirectory));
     try {
       const scopedRead: WorkspaceRead = (path, query, signal) => current()
         ? read(path, query, signal) : Promise.reject(new Error('Workspace selection changed'));
@@ -66,10 +75,24 @@ export function WorkspaceRecoveryGate({ children }: { children: React.ReactNode 
       if (!current()) return;
       const project = await useProjectsStore.getState().addProject(normalized);
       // addProject itself selects the project and updates currentDirectory.
-      if (getRuntimeKey() !== runtime || ![workspaceDirectory, normalized].includes(useDirectoryStore.getState().currentDirectory) ||
-        useSessionUIStore.getState().currentSessionId !== sessionId) return;
+      if (!selectionCurrent()) return;
       if (!project) { setError('Could not select this workspace. Try another existing directory.'); return; }
       useProjectsStore.getState().setActiveProject(project.id);
+      // The directory/project stores queue their settings writes. Do not expose
+      // a recovered draft until that selection is durable: an immediate reload
+      // otherwise hydrates the old server snapshot and reopens the missing path.
+      const saved = await updateDesktopSettings({
+        projects: useProjectsStore.getState().projects,
+        activeProjectId: project.id,
+        lastDirectory: normalized,
+      });
+      if (!selectionCurrent()) return;
+      if (!saved.ok) {
+        setFailedSelection({ directory: normalized, runtime, sessionId });
+        setError('This workspace could not be saved. Check the server connection and try again.');
+        return;
+      }
+      setFailedSelection(null);
       // User navigation clears only the last-open pointer, never session history
       // or its recorded directory. No session move, filesystem create or delete.
       useSessionUIStore.getState().openNewSessionDraft({
@@ -82,20 +105,23 @@ export function WorkspaceRecoveryGate({ children }: { children: React.ReactNode 
         settingsPath: ui.settingsPage }, { replace: true, force: true });
       useDirectoryStore.getState().setDirectory(normalized, { showOverlay: false });
     } catch {
-      if (current()) setError('Workspace selection failed. Your conversations have not been moved or deleted.');
+      if (selectionCurrent()) {
+        setFailedSelection({ directory: useDirectoryStore.getState().currentDirectory, runtime, sessionId });
+        setError('Workspace selection failed. Your conversations have not been moved or deleted.');
+      }
     } finally { setBusy(false); }
   };
 
   if (!check || check.runtime !== runtime) return <div role="status" className="p-6">Checking workspace…</div>;
   // Project registration selects its directory before the awaited call returns;
   // don't remount the application until the old last-open session is cleared.
-  if (!missing && !busy) return <>{children}</>;
+  if (!missing && !busy && !unsaved) return <>{children}</>;
   const candidates = [...new Set(['/homeassistant', ...projects.map(project => project.path), home].filter(Boolean))]
     .filter(path => path !== directory);
   return <main data-testid="workspace-recovery" className="mx-auto max-w-xl space-y-4 p-6">
-    <h1 className="text-xl font-semibold">Workspace unavailable</h1>
-    <p>The selected workspace no longer exists or is not a directory:</p>
-    <pre className="whitespace-pre-wrap break-all">{directory}</pre>
+    <h1 className="text-xl font-semibold">{unsaved ? 'Workspace selection not saved' : 'Workspace unavailable'}</h1>
+    <p>{unsaved ? 'The workspace exists, but its selection has not been saved:' : 'The selected workspace no longer exists or is not a directory:'}</p>
+    <pre className="whitespace-pre-wrap break-all">{unsaved ? workspaceDirectory : directory}</pre>
     <p>Your conversation history is preserved. Open an existing workspace to continue with a new draft. Historical conversations keep their original directory.</p>
     <div className="flex flex-wrap gap-2">
       {candidates.map(path => <button key={path} type="button" disabled={busy} className="rounded border p-2 break-all"

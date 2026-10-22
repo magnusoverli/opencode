@@ -12,11 +12,19 @@ if [ "$(bashio::config 'openchamber_relay_host' 'false')" = "true" ]; then
 else
     OPENCHAMBER_RELAY_HOST="off"
 fi
+# This is an outbound speech opt-in, not permission to change service bindings
+# or inherit arbitrary environment variables. Old installations stay local-only.
+if [ "$(bashio::config 'openchamber_allow_remote_speech' 'false')" = "true" ]; then
+    OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS="true"
+else
+    OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS="false"
+fi
 exec env -i PATH="/usr/local/bin:/usr/bin:/bin" HOME="/data" LANG="C.UTF-8" \
     NODE_OPTIONS="--max-old-space-size=768" \
     LD_PRELOAD="/usr/local/lib/opencode-v2-non-dumpable.so" \
     OPENCHAMBER_DATA_DIR="/data/.config/openchamber" \
     OPENCHAMBER_HOST="127.0.0.1" OPENCHAMBER_RELAY_HOST="$OPENCHAMBER_RELAY_HOST" \
+    OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS="$OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS" \
     OPENCHAMBER_SKIP_API_COMPRESSION="true" OPENCHAMBER_COMPRESS_API="false" \
     OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR="/usr/local/bin" \
     OPENCHAMBER_UPDATE_API_URL="http://127.0.0.1:8099/__ha_openchamber_update_check" \

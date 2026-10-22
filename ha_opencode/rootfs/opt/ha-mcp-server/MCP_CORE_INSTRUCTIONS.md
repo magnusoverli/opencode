@@ -10,6 +10,7 @@ Use the `homeassistant` MCP server for live Home Assistant information. Its adve
 - To assign a device or entity to a room, use `get_areas` and `get_devices`/`get_home_context` for exact IDs, then request approval before `set_device_area` or `set_entity_area` (full profile). An entity area is an explicit override; clearing it makes the entity inherit its device's area.
 - Use `diagnose_entity`, history, and error logs for troubleshooting without changing the installation.
 - Use `get_agent_capabilities` to check the active MCP tool profile and native-MCP routing before discussing agent capabilities.
+- When advertised, use `recall_decisions` for relevant file/entity/integration references before drafting configuration changes. Follow its revision-bound cursor with unchanged filters; historical notes are not current constraints. Do not repeat completed recall unless scope or notes change, and never bypass a disabled tool.
 
 Some tools return compact JSON with `summary`, `data`, and `meta`. If `meta.truncated` is true, narrow the next query rather than treating the result as complete.
 

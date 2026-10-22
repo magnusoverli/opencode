@@ -3,7 +3,36 @@
 Your Home Assistant configuration assistant, powered by OpenCode V2. Use the
 terminal or OpenChamber web workspace with one shared, app-managed backend.
 
+## Upgrading to 3.3
+
+Stable **3.3.0** promotes beta **3.2.4b6**, with pinned OpenCode **2.1.2**,
+OpenChamber **2.5.0** and hab **1.7.2**. It includes parser-based safe-write YAML
+validation, optional remote speech servers, PPQ model discovery/pricing fixes,
+global user-agent activation, expanded decision notes, OpenAI sign-in fixes,
+terminal rendering and durable workspace recovery.
+
+**Back up the stable app, its options and Home Assistant configuration before
+updating through Supervisor.** The app restarts during an update. The first
+startup validates a private copy of existing V2 state, including stable's
+OpenCode 2.0.26 state, before activation. Conversations, provider sign-ins and
+session permissions are preserved; do not delete a generation or journal if
+startup reports a validation failure.
+
+Stable keeps its existing app identity, `/data` volume, `/config/opencode/`
+decision notes and startup hooks. Beta's conversations, settings and sign-ins
+are not copied into stable. Native MCP journal ownership and saved enablement
+stay stable-specific, and the existing Zigporter compatibility fix is retained.
+
+**Rollback requires the pre-upgrade Home Assistant backup**, including the prior
+app version and data. Do not point an older runtime at the newly activated state
+or assume a downgrade can write an enlarged decision-note file. The remote speech
+option remains off until explicitly enabled. Project-scoped agents, separate
+decision archives and automatic relevance injection are not added. PPQ private
+inference and the optional Assist companion retain their experimental limitations.
+
 ## Upgrading to 3.2
+
+These earlier 3.2 changes are also included in 3.3.0.
 
 Stable **3.2.3** adds desktop/mobile OpenChamber workspace recovery. When a restored
 or reopened directory is confirmed missing, select `/homeassistant` or another
@@ -115,14 +144,39 @@ private inference has not completed live qualification.
 | `opencode-container-init` rejects `/homeassistant` | The failure is before migration. The log now identifies a missing mount, a symlink/file, or the observed versus required numeric UID/GID. Include that metadata and your installation type in the report; do not recursively change configuration ownership. |
 | Migrated sessions appear missing | In the TUI session picker, Ctrl+A switches to all projects; Ctrl+O can search across locations. The pinned picker lists at most 50 root sessions and does not paginate or list child sessions. This is a browsing limitation, not evidence of lost history. |
 
-Custom agents in project `.opencode/agents` directories are not loaded by this
-managed runtime. A persistent importer with constrained permissions remains a
-follow-up; use the built-in Home Assistant Read Only agent for supported audits.
+Global user agents are supported through OpenChamber's Settings > Agents, as
+described below. Project `.opencode/agents` directories are not imported; use the
+built-in Home Assistant Read Only agent for the add-on's supported audit policy.
 
 Stable and beta can run side by side. They share Home Assistant configuration
 files and `AGENTS.local.md`, but keep separate app data and decision notes. Stable
 owns the managed `/config/AGENTS.md`. Give each app different host ports if you
 expose both sets of LAN frontends.
+
+### Custom agents
+
+OpenChamber **Settings > Agents** saves global user agents persistently under
+`/data/.config/opencode/agents/`. Saves and deletes succeed only after the managed
+backend confirms activation. Existing Markdown definitions in `agents/`, `agent/`,
+`modes/` and `mode/` are imported at startup; nested names such as `team/reviewer`
+are supported. Manual file edits require an app restart; UI edits activate live.
+Deleting a built-in agent override restores its native defaults.
+
+Use native V2 frontmatter (`description`, `model`, `mode`, `hidden`, `disabled`,
+`color`, `steps`, `request`, `permissions`) and put the system prompt in the
+Markdown body. Limits: 64 agents, 64 KiB per file, 1 MiB total, four name segments.
+Files must be regular, single-link files owned by root, with no group/other write
+access; symlinks, YAML aliases/tags and file/environment substitutions are refused.
+Invalid files are not imported, and a live refresh retains the last validated
+definition rather than applying malformed content. Failed UI activation attempts
+to restore the previous file without replacing a newer edit and reports whether
+backend rollback was verified.
+
+Managed Home Assistant and maintenance agents cannot be overridden. Sensitive-file
+denials and required confirmations cannot be relaxed; stricter user denials remain
+effective. Global JSON configuration/plugins and project `.opencode/agents` are
+not imported, and project-scoped UI saves fail explicitly. This does not enable
+OpenChamber's separate callback/tool integration.
 
 ## Upstream Attribution
 
@@ -133,9 +187,9 @@ team or Anomaly. The complete OpenCode notice is included in the add-on image
 at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 [`THIRD-PARTY-LICENSES.md`](../THIRD-PARTY-LICENSES.md).
 
-## OpenCode 3.2 at a glance
+## OpenCode 3.3 at a glance
 
-- **Official V2 runtime**: CLI and plugin are pinned to OpenCode `2.0.26` using the official `@opencode` packages.
+- **Official V2 runtime**: CLI and plugin are pinned to OpenCode `2.1.2` using the official `@opencode` packages.
 - **Forward state upgrades**: Earlier V2 data upgrades through a validated private copy, preserving conversations, sign-ins and permissions. Successful upgrades remove obsolete generations; failed conversion preserves its input and reports an error. There is no application runtime fallback or rollback selector.
 - **V2-only runtime**: One pinned OpenCode V2 server replaces V1 and the runtime selector. The server runs as root for Home Assistant filesystem compatibility; its attached terminal runs as UID `60001`.
 - **Managed CLI**: `opencode` and `opencode2` address the same V2 server. `opencode status`, `opencode service status`, and `opencode api GET /api/info` inspect the existing server without starting another daemon.
@@ -146,7 +200,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **ESPHome 2026.8 support**: Device Builder migrations can be previewed as validated, hash-guarded candidates; structured DNS/mDNS/ICMP troubleshooting and bounded crash decoding are available; naturally completed log and job streams now finish immediately.
 - **Startup hooks**: Your own `.sh` scripts, kept in your configuration directory, run once every time the add-on starts — the supported way to add a bridge or a small service without editing files inside the container, which never survives a restart. Off by default. See [Startup Hooks (Beta)](#startup-hooks-beta).
 - **Home context**: Sessions now start knowing your installation. A generated **Install briefing** describes your setup (version, areas, entity counts, configuration layout, integrations), **decision notes** carry lasting decisions between sessions once you approve them, and `AGENTS.local.md` holds your own instructions where add-on updates cannot overwrite them. Both options default on and switch off independently. See [Home Context (Beta)](#home-context-beta).
-- **OpenChamber V2**: The web interface is built from pinned release `2.2.0` source and a reviewed security dependency lock. It attaches to the same app-owned V2 backend as the terminal, with independently supervised UI lifecycle and Ingress-adapted assets.
+- **OpenChamber V2**: The web interface is built from pinned release `2.5.0` source and a reviewed security dependency lock. It attaches to the same app-owned V2 backend as the terminal, with independently supervised UI lifecycle and Ingress-adapted assets.
 - **Native Home Assistant MCP bridge**: Optional bridge from OpenCode to Home Assistant Core's native LLM MCP endpoint (`/api/mcp/<API ID>`, default `assist`) for testing the new native LLM/MCP platform when the running Home Assistant version supports it.
 - **Compact Home Assistant context**: New `get_home_context` MCP tool gives agents focused area/domain/entity context with area and device metadata instead of broad state dumps.
 - **Native LLM provider development guide**: New `get_ha_llm_development_guide` MCP tool helps custom integration authors build `<integration>/llm.py` tool providers aligned with Home Assistant's upstream architecture.
@@ -178,7 +232,75 @@ This also fixes a real problem: `AGENTS.md` used to be refreshed on every add-on
 
 **Install briefing** (option, default on). Regenerated at every start: Home Assistant version and installation type, how your configuration is split up (including whether `automations.yaml` is UI-managed), your areas and floors by name, entity counts per domain, integrations and device stacks, and your custom components. It is rebuilt rather than appended to and capped at roughly 500 tokens, so it cannot grow. It is produced by the add-on, not the AI, and never contains `secrets.yaml` values, tokens, or your coordinates.
 
-**Decision notes** (option, default on). Configuration records *what*; notes record *why* — that an integration was removed deliberately, that a toggle is inverted on purpose, that some corner should be left alone. OpenCode proposes a note and writes it only after you approve. Notes are plain YAML in `/config/opencode/decisions.yaml`. Each active note is injected as one line — date, title, decision, and any entities, files or integrations attached to it; rationale and retired notes stay in the file and are fetched on demand via `recall_decisions`. The digest is capped at roughly 500 tokens and up to 40 active notes are stored, so when there are more notes than fit the digest says how many it is showing and the rest stay in force in the file — add `pin: true` to a note to keep it in the digest. Replaced notes are marked superseded rather than deleted, so the per-request cost stays flat. Notes containing a credential or a value from your `secrets.yaml` are rejected.
+**Decision notes** (option, default on). Configuration records *what*; notes record
+*why*. OpenCode proposes a lasting note and writes or retires it only after you
+approve. Stable keeps the plain, hand-editable v1 YAML record in
+`/config/opencode/decisions.yaml`, separate from beta's notes.
+
+**Storage is not prompt size.** The app accepts up to **2 MiB**, with no active-
+or total-note count cap. Existing IDs, metadata and replacement links are preserved;
+replaced notes remain as superseded history. New note text/reference limits still
+apply. Oversized, unsupported-version or malformed files are not overwritten or
+automatically pruned. A readable subset of a partially damaged file can still be
+recalled, explicitly marked incomplete.
+
+**Standing context stays small:** the digest remains capped at **2 KiB** including
+its warnings (roughly 500 English tokens, not an exact tokenizer measurement).
+It includes whole active decisions in priority order and states how many did not
+fit. `pin: true` gives priority, **not guaranteed inclusion**; up to ten notes can
+be pinned. Rationale and superseded history are retrieved only when needed.
+Notes are screened for credential-shaped content before reaching the model.
+
+Approved tool writes refresh the digest automatically. Unchanged digest content
+is not rewritten. The managed V2 backend uses changes on subsequent requests in
+both existing and new conversations; this can reduce prompt-cache reuse after a
+note changes. If saving succeeds but refresh fails, the tool reports **saved;
+context refresh failed**. The note is still retrievable; correct the reported
+filesystem problem and run `ha-context refresh`. Manual edits are picked up at
+app startup or with that command, not merely by opening another conversation.
+
+### Recalling decisions
+
+`recall_decisions` returns at most **8 KiB per response**, including warnings and
+pagination information. The `limit` option (default 20, maximum 100) is an upper
+bound, not a guarantee that that many notes fit.
+
+- Use `id` alone for exact lookup, including superseded notes and their replacement
+  link. Historical notes explain prior choices; they are not current constraints.
+- Search with `query`, or exact `file`, `entity` and `integration` references.
+  Multiple reference filters are combined with AND. Files use the stored relative
+  path, for example `packages/lights.yaml`; missing references may need text search.
+- Search defaults to active notes; set `include_superseded: true` for history.
+- If `has_more` is true, repeat the **same filters and limit** with `next_cursor`
+  as `cursor`. A changed record or readable scope invalidates the cursor: restart
+  without it instead of mixing revisions. Raising `limit` alone is not pagination.
+- An individually oversized note is explicitly marked **not returned**; pagination
+  can continue past it. Its complete contents remain in YAML for local review.
+
+Read-only recall is available in compact and the managed read-only agent when the
+feature is enabled. Recording/retiring remain excluded there. Shipped guidance
+asks the agent to recall relevant decisions before drafting configuration changes
+and avoid repeated lookups unless scope or notes change. There is no automatic
+relevance-injection service, model-powered summarizer or extra inference provider.
+
+### Backups, recovery and older releases
+
+Before overwriting an existing valid record, the writer saves the exact preimage
+in `decisions.yaml.backup` with an app-owned comment marker. This is one rolling
+last-good backup, not a substitute for Home Assistant backups or version control.
+An unrecognised `.backup` file is preserved and blocks the write; legacy `.bak`
+files are not changed. Writes and digest publishing are coordinated across app
+processes. Observed manual-edit conflicts stop the write, but external editors
+do not participate in the app's lock: do not edit notes while a tool is saving.
+
+Back up first and stop the app before restoring. Copy the backup's contents
+**after its first app-owned marker comment** over `decisions.yaml` to restore the
+exact preimage without adding bytes to a near-limit file, then restart. Valid
+dead-process locks are recovered; unknown or live locks are preserved with a
+local-review diagnostic. Never remove a lock without confirming no writer is
+running. Storage remains v1, so no database or archive migration is needed.
+Older releases can read the record but retain their old write limits; downgrading
+does not automatically shrink it or restore history.
 
 Adds three MCP tools: `remember_decision`, `recall_decisions`, `supersede_decision`. With the option off, they are not offered to the AI at all and your existing notes file is left untouched.
 
@@ -607,7 +729,7 @@ native tools. The bridge preserves supplied request metadata but does not invent
 a room/device identity. Native errors should be reported rather than retried
 through broader administrative tools.
 
-Local qualification uses the pinned OpenCode `2.0.26` process, the app's MCP
+Local qualification uses the pinned OpenCode `2.1.2` process, the app's MCP
 registration/forwarding code, and controlled HA/provider fixtures. It covers
 prompt consumption, resource discovery, fresh native context calls, required
 argument validation and read-only policy. Resource reads/cancellation also have
@@ -651,9 +773,9 @@ validity; HA has no atomic conditional save, so a final read/save race remains.
 Marketplace requires HA 2026.11+. CLI updates arrive
 through app updates; use dedicated ESPHome tools for long-running firmware work.
 
-OpenChamber is built from release `2.2.0`, source commit
-`74b79d41eac44ff38790c66f238050936083e0bb`. Its web package reports upstream
-version `2.2.0`; the immutable source identifies this release. Its client
+OpenChamber is built from release `2.5.0`, source commit
+`ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd`. Its web package reports upstream
+version `2.5.0`; the immutable source identifies this release. Its client
 dependencies are independent of the app's backend pin.
 
 The UI binds to `127.0.0.1:3010` behind the app's Ingress proxy. Its backend
@@ -688,13 +810,29 @@ This takes precedence over the new-chat model defaults; those defaults are used
 when no remembered model is available. The configured agent still applies, and
 existing sessions keep their own selections.
 
-In OpenChamber, select **ChatGPT Pro/Plus (browser)** to sign in with OpenAI.
-The sign-in link opens a handoff page: continue to OpenAI, then, if the browser
-cannot open the `localhost` callback, copy its full URL from the address bar
-into the handoff page and select **Complete sign-in**. Return to OpenChamber;
-it will finish connecting automatically. You can also use `/connect` in the
-terminal and choose **ChatGPT Pro/Plus (headless)** for a device-code flow.
-Other providers may have different callback requirements.
+Connect OpenAI directly in **OpenChamber → Settings → Providers → OpenAI**;
+there is no need to switch interfaces or restart the app:
+
+- **Codex device code (legacy)** avoids localhost callbacks. Open the verification
+  link, enter the displayed code, and approve access. Keep the OpenChamber sign-in
+  screen open; it polls automatically and refreshes the provider after approval.
+  This is the legacy Codex authentication route, not the newer ChatGPT sign-in;
+  model availability and supported features may differ.
+- **Sign in with ChatGPT** is the newer method. Its sign-in link opens the app's
+  handoff page: continue to OpenAI and approve access. If the browser cannot open
+  the localhost callback, copy its **full URL**, including all query parameters,
+  from the address bar into the original handoff page and select **Complete
+  sign-in**. OpenChamber detects completion automatically. The handoff supports
+  this method's dynamic callback port and first-time client registration.
+- **Codex browser (legacy)** also uses the handoff, but retains the older Codex
+  browser authentication route. It is not silently substituted for ChatGPT login.
+
+OpenAI login/consent remains necessary. The browser's localhost refers to your
+own device, not the HA container. Do not edit the callback hostname or forward its
+port. Callback URLs contain temporary authorization secrets: paste them only into
+the matching handoff, never into chat, logs or issue reports. Cancel abandoned
+attempts and start again if a handoff expires. OpenCode owns credential storage
+and token refresh. Other providers may have different callback requirements.
 
 The first V2 activation migrates sessions but does not copy legacy V1 provider
 credentials because the formats are incompatible. Authenticate each provider
@@ -847,6 +985,34 @@ existing streams; sign in or pair again. Conversation history, UI settings and
 provider credentials remain persistent. The editor LSP bridge and HA inbound-MCP
 Ingress routes are not exposed on the LAN frontends.
 
+## OpenChamber Custom Speech Servers
+
+With `interface_mode: openchamber`, enable `openchamber_allow_remote_speech` and
+**restart the app** to use a trusted custom OpenAI-compatible server for
+text-to-speech (TTS), speech-to-text (STT), or both. The option defaults to `false`;
+leaving it disabled preserves upstream's local-host restriction.
+
+Then enter the server URL, model, voice and any required speech API key in
+OpenChamber's voice settings. For a speech gateway in another Home Assistant app,
+use its internal DNS name and container port, for example
+`http://<gateway-app-dns-name>:8555/v1/`. Requests originate from OpenChamber's
+container, not your browser. This does not require enabling the LAN web UI,
+publishing a new port, a startup-hook proxy, or forwarding general `env_vars`.
+
+**Trust and privacy:** this permits arbitrary HTTP(S) speech destinations, not
+only Home Assistant apps or your LAN. Those servers receive the text/recordings
+you submit and any speech credentials configured for them. HTTP does not encrypt
+that traffic. The option does not restrict speech to a private/TEE model provider.
+URL-embedded credentials and non-HTTP(S) schemes remain rejected, and upstream
+enterprise restrictions still apply. Managed service bindings, authentication,
+environment isolation and backend credentials are unchanged. General
+OpenChamber environment-variable passthrough is intentionally unsupported.
+
+Microphone capture still requires browser/device permissions and a secure UI
+context (normally HTTPS); this option does not bypass those requirements. Real
+Wyoming/Piper/Whisper playback and recording still need installation-specific
+verification; the option alone does not establish end-to-end speech operation.
+
 ## PPQ Private TEE Models (Beta)
 
 Enable **PPQ private TEE models** and set the PPQ key privately in the app options.
@@ -858,9 +1024,12 @@ inactive with a warning; selecting a PPQ default without its prerequisites stops
 activation with an actionable error.
 
 With the key configured in the app options, use `/models`, not `/connect`: the
-upstream key belongs to the private proxy. Published token/cache prices are
-retained; missing cache rates use ordinary input pricing as an estimate, and
-missing overall pricing stays unknown. Actual PPQ billing is authoritative.
+upstream key belongs to the private proxy. The model-list/API-key dialog no longer
+rejects the catalog for missing cache-price fields. Existing catalog caches are
+upgraded in memory; no manual deletion or key re-entry is needed. Published token
+and cache prices are retained; missing cache rates use ordinary input pricing as
+an estimate, and missing overall pricing stays unknown. Actual PPQ billing is
+authoritative. Registered models are validated against the pinned OpenCode schema.
 
 Search `/models` for **PPQ** and select a currently listed private model. IDs keep
 the form `ppq-private/private/<model-id>`; the app does not maintain a fixed list
@@ -882,7 +1051,8 @@ Tinfoil SDK's attested encrypted transport, never PPQ's ordinary inference API.
 
 Controlled V2 tests verify routing to the local proxy endpoint. Startup does not
 certify proxy readiness, upstream availability, encryption or private inference;
-those require real PPQ acceptance before stable promotion.
+account-backed private inference remains unverified. Model availability and this
+stable release do not establish that experimental end-to-end path.
 
 ## Zigbee diagnostics in V2
 

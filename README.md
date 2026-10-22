@@ -31,8 +31,8 @@ Assistant versions), not a standalone Home Assistant Core/Container integration.
 It supports **amd64** and **aarch64/ARM64**.
 
 Upgrading an existing installation? Back up first and read the
-[3.2 upgrade notes](ha_opencode/DOCS.md#upgrading-to-32), including the native MCP
-selection migration. Coming from 2.x? Follow the
+[3.3 upgrade notes](ha_opencode/DOCS.md#upgrading-to-33), including stable history
+preservation and backup-based rollback. Coming from 2.x? Follow the
 [2.x upgrade guide](ha_opencode/DOCS.md#upgrading-from-2x).
 
 > ⚙️ **Hardware requirement:** x86-64 CPUs need **SSE4.2**, and the regular build also requires **AVX2**. SSE4.2 alone may not be sufficient: the documented upstream baseline-package issue can still prevent non-AVX2 CPUs from running OpenCode. ARM64 is unaffected by these x86 requirements. See [CPU requirements][cpu-req] before installing on older hardware or a VM.

@@ -21,6 +21,13 @@ running version rather than recalling it.
 3. `get_breaking_changes` — when something stopped working after an update.
 4. Read the existing file in full. Every write replaces the whole file.
 
+When decision recall is advertised, call `recall_decisions` for the relevant
+`file`, `entity` or `integration` before drafting. Use focused `query` wording
+when references are missing; follow `next_cursor` with unchanged filters/limit
+until relevant pages are complete. A revision change requires a fresh lookup.
+Do not repeat completed recall unless scope or notes change, and do not treat
+superseded notes as current instructions. This does not approve a write.
+
 Frequently-changed areas worth double-checking:
 
 - Template sensors: `platform: template` under `sensor:` is deprecated — use the

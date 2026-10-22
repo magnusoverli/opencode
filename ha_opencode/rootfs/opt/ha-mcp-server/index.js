@@ -179,15 +179,14 @@ import {
 import {
   DECISION_NOTES_DIR,
   DECISION_NOTES_PATH,
+  DECISION_DIGEST_PATH,
   LIMITS as DECISION_LIMITS,
   activeNotes,
   addNote,
-  parseDecisionNotes,
-  renderDecisionDigest,
-  screenNotesForSecrets,
-  searchNoteMatches,
   supersedeNotes,
 } from "./lib/decision-notes.js";
+import { createDecisionStore } from "./lib/decision-store.js";
+import { recallDecisionPage } from "./lib/decision-recall.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -2164,19 +2163,11 @@ const DECISION_NOTES_FILE = DECISION_NOTES_BASE_DIR === DECISION_NOTES_DIR
   ? DECISION_NOTES_PATH
   : join(DECISION_NOTES_BASE_DIR, "decisions.yaml");
 
-/**
- * Read the user's decision notes.
- *
- * A missing file is the normal starting state, not an error — notes only exist
- * once the user has approved recording one.
- */
-function readDecisionNotes() {
-  if (!existsSync(DECISION_NOTES_FILE)) {
-    return { ok: true, version: 1, notes: [], errors: [], exists: false };
-  }
-  const parsed = parseDecisionNotes(readFileSync(DECISION_NOTES_FILE, "utf8"));
-  return { ...parsed, exists: true };
-}
+const decisionStore = createDecisionStore({
+  notesPath: DECISION_NOTES_FILE,
+  digestPath: process.env.OPENCODE_DECISION_DIGEST_PATH || DECISION_DIGEST_PATH,
+  secretValues: readSecretValues,
+});
 
 /**
  * Values from `secrets.yaml`, used only to reject notes that would leak one.
@@ -2196,69 +2187,6 @@ function readSecretValues() {
 }
 
 /**
- * Write through a temporary file and rename over the target.
- *
- * Rename is atomic within a filesystem, so a reader never sees half a file and
- * an interrupted write cannot leave the user's notes truncated. That matters
- * more here than usual: a corrupt `decisions.yaml` is refused by the parser, so
- * a torn write would block every future note until the user repaired it by hand.
- */
-function writeFileAtomicSync(path, contents) {
-  // Unique per process so two writers cannot share a temp file, and cleaned up
-  // on failure so a partial copy of the user's notes is never left lying around.
-  const temporary = `${path}.${process.pid}.tmp`;
-  try {
-    writeFileSync(temporary, contents, "utf8");
-    renameSync(temporary, path);
-  } catch (error) {
-    try {
-      if (existsSync(temporary)) unlinkSync(temporary);
-    } catch {
-      /* nothing more to do */
-    }
-    throw error;
-  }
-}
-
-/**
- * Persist notes. The injected digest is deliberately not touched.
- *
- * `/data/context/decision-notes.md` is listed in OpenCode's `instructions`, and
- * OpenCode re-reads every instruction file from disk on each request rather
- * than once per session. Rewriting the digest mid-conversation therefore edits
- * the system prompt underneath a live session, discarding the cached prefix
- * from that point on — the digest is ordered newest-first and carries a note
- * count, so a new note changes it at the top and invalidates everything after,
- * including the whole message history. On a hosted model that is a lost cache
- * discount; on a local one it is a full re-prefill mid-task.
- *
- * The digest is derived from this file, and generate-home-context.mjs already
- * rebuilds it at add-on start and on `ha-context refresh`. One writer, at one
- * moment, is the whole point — so recording a note is a write to the notes
- * file and nothing else.
- */
-function persistDecisionNotes(serialized) {
-  mkdirSync(DECISION_NOTES_BASE_DIR, { recursive: true });
-  writeFileAtomicSync(DECISION_NOTES_FILE, serialized);
-}
-
-/**
- * Render the digest the next rebuild would produce, without writing it.
- *
- * This is what lets the tools still tell the user whether a note will fit the
- * standing context. It is a forecast, not a description of a file on disk, and
- * the wording at the call sites says so.
- *
- * Screened again here, not just on the note being added: the file may also
- * hold notes a user wrote by hand, and this render is what would reach the
- * model. No `unreadable` count: both write paths refuse to save while the file
- * has entries the parser rejected, so what is written is always the whole file.
- */
-function previewDecisionDigest(notes) {
-  return renderDecisionDigest(notes, { secretValues: readSecretValues() });
-}
-
-/**
  * Say plainly how much of the record a future session will actually carry.
  *
  * The stored-note limit and the digest budget are different limits, and the
@@ -2266,9 +2194,7 @@ function previewDecisionDigest(notes) {
  * is plenty of room" while notes were quietly falling out of the standing
  * context.
  *
- * This describes a rendered preview, not a file on disk — the digest is
- * rebuilt by generate-home-context.mjs, and the user can edit the notes file
- * before that happens. The wording is a forecast for that reason.
+ * Describes the published digest; refresh failures are reported separately.
  */
 function describeDigestCoverage(digest) {
   const shown = digest?.includedNotes?.length ?? 0;
@@ -2288,32 +2214,18 @@ function describeDigestCoverage(digest) {
   return (
     `**${shown} of ${shown + dropped} active notes fit the session digest** (${bytes} bytes). The other ${dropped} ` +
     "stay in the file and remain in force, but will not be in the standing context of future sessions — they are " +
-    "reachable with `recall_decisions`. To keep a note in the digest, record it with `pin: true`; to shorten the " +
-    `list, supersede notes that no longer apply.${withheldNote}`
+    "reachable with `recall_decisions`. Pinning gives priority, not guaranteed inclusion. Retire a note only " +
+    `when the user confirms it no longer applies.${withheldNote}`
   );
 }
 
-/** Shared refusal when the notes file cannot be parsed, so nothing is clobbered. */
-function decisionNotesParseError(parsed) {
-  return (
-    `# Decision notes — cannot write\n\n` +
-    `\`${DECISION_NOTES_FILE}\` could not be fully parsed, so it will not be overwritten:\n\n` +
-    parsed.errors.map((error) => `- ${error}`).join("\n") +
-    `\n\nAsk the user to fix or remove those entries, then try again. ` +
-    `The notes that do parse are still readable with \`recall_decisions\`.`
-  );
-}
-
-function formatNoteForDisplay(note) {
-  const status = note.pin && note.status === "active" ? "active (pinned)" : note.status;
-  const lines = [`### ${note.title}`, `- id: \`${note.id}\``, `- date: ${note.date}`, `- status: ${status}`];
-  lines.push(`- decision: ${note.decision}`);
-  if (note.rationale) lines.push(`- rationale: ${note.rationale}`);
-  for (const field of ["entities", "files", "integrations"]) {
-    if (note[field]?.length) lines.push(`- ${field}: ${note[field].join(", ")}`);
+function decisionRefreshMessage(result) {
+  const lockNotice = result.lockWarning ? ` **${result.lockWarning}**` : "";
+  if (result.digestError) {
+    sendLog("warning", "decision-notes", { action: "digest_refresh_failed" });
+    return `**${result.digestError}**${lockNotice}`;
   }
-  if (note.superseded_by) lines.push(`- superseded by: \`${note.superseded_by}\``);
-  return lines.join("\n");
+  return `Standing context refreshed automatically (2 KiB maximum). ${describeDigestCoverage(result.digest)}${lockNotice}`;
 }
 
 // ============================================================================
@@ -3047,8 +2959,8 @@ const TOOLS = [
       "Record durable reasoning, not activity: what was decided and why it should stay that way. Do not log routine " +
       "actions, troubleshooting steps, or anything already visible in the configuration files. " +
       "Never include passwords, tokens, or any value from secrets.yaml — such notes are rejected. " +
-      `Up to ${DECISION_LIMITS.maxActive} active notes are stored; how many of them fit the session digest depends ` +
-      "on their length, and the digest states how many it is showing. Supersede notes that no longer apply.",
+      "Storage is bounded at 2 MiB, independently of the 2 KiB digest. Approved writes refresh the digest; " +
+      "notes that do not fit remain retrievable. Never delete history just to record another note.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3093,7 +3005,7 @@ const TOOLS = [
         pin: {
           type: "boolean",
           description:
-            "Keep this note in the session digest even when older notes no longer fit. Use sparingly — only for a " +
+            "Give this note priority in the bounded digest; inclusion is not guaranteed. Use sparingly for a " +
             `constraint that must never be reversed by accident. At most ${DECISION_LIMITS.maxPinned} notes can be ` +
             "pinned, and the user should agree to the pin as well as to the note.",
         },
@@ -3121,22 +3033,30 @@ const TOOLS = [
       "session digest, and superseded history. Use this when you need the reasoning behind a note, when a request " +
       "appears to conflict with one, when you are about to change something that looks deliberate, or when the user " +
       "asks what has been decided before. The session digest is a summary that may be incomplete — this tool is the " +
-      "authority on what has been decided.",
+      "authority on what has been decided. Use id for exact lookup, or query/reference filters for search. " +
+      "Responses are bounded at 8 KiB; follow next_cursor with the same filters and limit until has_more=false. " +
+      "If the revision changes, restart without cursor. Historical notes are not current constraints.",
     inputSchema: {
       type: "object",
       properties: {
+        id: { type: "string", maxLength: 512, description: "Exact note ID, including superseded history. Use alone, without search/reference filters." },
+        entity: { type: "string", maxLength: 512, description: "Exact entity ID reference." },
+        file: { type: "string", maxLength: 512, description: "Exact configuration-file reference, relative to /homeassistant." },
+        integration: { type: "string", maxLength: 512, description: "Exact integration-domain reference. Multiple reference filters are combined with AND." },
+        cursor: { type: "string", maxLength: 512, description: "next_cursor from the previous page; repeat the same filters and limit." },
         query: {
           type: "string",
+          maxLength: 512,
           description:
             "Words to match against title, decision, rationale, and references. Ranked by relevance, so a plain " +
-            "question ('why is the camera toggle inverted') works. Omit to list every note.",
+             "question ('why is the camera toggle inverted') works. Omit to list notes in bounded pages.",
         },
         include_superseded: {
           type: "boolean",
           description: "Include notes that have been superseded (default: false).",
         },
         limit: {
-          type: "number",
+          type: "integer",
           description: "Maximum notes to return (default: 20, max: 100).",
           minimum: 1,
           maximum: 100,
@@ -5332,7 +5252,7 @@ async function handleToolCall(request) {
 
         if (!contentChecks) {
           // Step 3: Run structural YAML checks
-          const structuralIssues = validateYamlStructure(content);
+          const structuralIssues = validateYamlStructure(content, resolvedPath);
 
           // Step 4: Basic YAML lint checks (same as check_config_syntax)
           const lintWarnings = [];
@@ -5768,19 +5688,11 @@ async function handleToolCall(request) {
           });
         }
 
-        const existing = readDecisionNotes();
-        if (!existing.ok) {
-          return makeCompatibleResponse({
-            content: [createTextContent(decisionNotesParseError(existing), { audience: ["user", "assistant"], priority: 1.0 })],
-            isError: true,
-          });
-        }
-
-        const result = addNote(
-          { version: existing.version, notes: existing.notes },
+        const result = decisionStore.mutate((existing) => addNote(
+          existing,
           args,
           { now: new Date(), secretValues: readSecretValues() },
-        );
+        ));
 
         if (result.error) {
           sendLog("info", "decision-notes", { action: "rejected" });
@@ -5790,26 +5702,21 @@ async function handleToolCall(request) {
           });
         }
 
-        persistDecisionNotes(result.serialized);
-        const digest = previewDecisionDigest(result.state.notes);
         sendLog("info", "decision-notes", { action: "recorded", id: result.note.id });
 
         const active = activeNotes(result.state.notes).length;
-        const inDigest = digest.includedNotes.includes(result.note.id);
+        const inDigest = result.digest?.includedNotes.includes(result.note.id);
         return makeCompatibleResponse({
           content: [createTextContent(
             `# Decision recorded\n\n` +
             `**${result.note.title}**${result.note.pin ? " (pinned)" : ""}\n\n` +
             `Saved to \`${DECISION_NOTES_FILE}\` as \`${result.note.id}\`.\n\n` +
-            "This decision is in force now — it is in this conversation, and `recall_decisions` reads it " +
-            "straight from the file. It joins the standing context that starts a session when the digest is " +
-            "next rebuilt: at the next add-on restart, or immediately if the user runs `ha-context refresh`.\n\n" +
-            `${describeDigestCoverage(digest)}\n\n` +
-            (inDigest
+            "This decision is in force now; `recall_decisions` reads it from the current record.\n\n" +
+            `${decisionRefreshMessage(result)}\n\n` +
+            (inDigest || result.digestError
               ? ""
-              : "**This note would not fit the session digest**, so later sessions will not see it up front. " +
-                "Tell the user, and offer to pin it or to retire a note that no longer applies.\n\n") +
-            `Stored active notes: ${active}/${DECISION_LIMITS.maxActive}.\n\n` +
+              : "**This note does not fit the session digest.** It remains in force and retrievable; pinning only gives priority, not guaranteed inclusion.\n\n") +
+            `Stored active notes: ${active}. Storage: ${Buffer.byteLength(result.serialized)} of ${DECISION_LIMITS.maxFileBytes} bytes.\n\n` +
             `The user can read, edit, or delete this file at any time, or run \`ha-context notes\` in the terminal.`,
             { audience: ["user", "assistant"], priority: 0.8 }
           )],
@@ -5824,79 +5731,10 @@ async function handleToolCall(request) {
           });
         }
 
-        const existing = readDecisionNotes();
-        if (!existing.exists) {
-          return makeCompatibleResponse({
-            content: [createTextContent(
-              "No decision notes have been recorded for this installation yet. " +
-              "When a lasting decision is made, offer to record it with `remember_decision`.",
-              { audience: ["assistant"], priority: 0.5 }
-            )],
-          });
-        }
-
-        // This tool returns the rationale too, so it screens the whole note
-        // before anything reaches the model — same rule as the session digest.
-        const screened = screenNotesForSecrets(existing.notes, readSecretValues());
-        const { matches, totalMatched, truncated } = searchNoteMatches(screened.safe, {
-          query: args?.query,
-          includeSuperseded: args?.include_superseded,
-          limit: args?.limit,
-        });
-
-        const totalActive = activeNotes(screened.safe).length;
-        // Deliberately no ids: an id is derived from the note's title, and a
-        // note titled after the thing it leaks would carry the secret into the
-        // very message explaining that it was withheld. The add-on log names
-        // them locally, which is where the user can safely see which.
-        const withheldNotice = screened.withheld.length
-          ? `\n\n> ${screened.withheld.length} note(s) are withheld because they contain credential-shaped text. ` +
-            `Their contents are not shown here and are not sent to the model. Tell the user to review ` +
-            `\`${DECISION_NOTES_FILE}\` — the add-on log names which notes.`
-          : "";
-        // Report what matched, not just what fitted the limit: a truncated count
-        // reads as "that is all there is".
-        const shownOf = truncated ? `${matches.length} of ${totalMatched}` : `${totalMatched}`;
-        const header = args?.query
-          ? `# Decision notes matching "${args.query}" (${shownOf})`
-          : `# Decision notes (${shownOf})`;
-        const truncationNotice = truncated
-          ? `\n\n> Showing the ${matches.length} best matches of ${totalMatched}. Raise \`limit\` to see the rest.`
-          : "";
-        const warning = existing.ok
-          ? ""
-          : `\n\n> Some entries in \`${DECISION_NOTES_FILE}\` could not be parsed and are not shown:\n` +
-            existing.errors.map((error) => `> - ${error}`).join("\n");
-
-        // An empty result is the one answer that must not be mistaken for "no
-        // such decision exists" — say which of the two it is.
-        // The absolute "nothing was ever recorded" sentence is only true for a
-        // file that holds no notes at all. Counted from the whole file, not the
-        // active-and-screened subset: notes that are all superseded, or all
-        // withheld, are still decisions the user made.
-        const totalStored = existing.notes.length;
-        const supersededCount = totalStored - activeNotes(existing.notes).length;
-        let emptyBody;
-        if (totalActive) {
-          emptyBody =
-            `_No note matched that query._\n\nThis installation has ${totalActive} active note` +
-            `${totalActive === 1 ? "" : "s"} that did not match — a decision may still exist under different wording. ` +
-            "Call this tool again without a `query` to read them all before assuming nothing was decided.";
-        } else if (totalStored) {
-          const parts = [];
-          if (supersededCount) parts.push(`${supersededCount} superseded`);
-          if (screened.withheld.length) parts.push(`${screened.withheld.length} withheld for credential-shaped text`);
-          emptyBody =
-            `_Nothing to show._\n\nThis installation has ${totalStored} recorded note` +
-            `${totalStored === 1 ? "" : "s"}${parts.length ? ` (${parts.join(", ")})` : ""}. ` +
-            "Pass `include_superseded: true` to read the retired ones — do not conclude that nothing was decided.";
-        } else {
-          emptyBody = "_No decision notes have been recorded for this installation yet._";
-        }
-        const body = matches.length ? matches.map(formatNoteForDisplay).join("\n\n") : emptyBody;
-
+        const page = recallDecisionPage(decisionStore.load(), args, readSecretValues());
         return makeCompatibleResponse({
-          content: [createTextContent(`${header}${warning}${withheldNotice}${truncationNotice}\n\n${body}`, { audience: ["assistant"], priority: 0.8 })],
+          content: [createTextContent(page.text, { audience: ["assistant"], priority: 0.8 })],
+          ...(page.isError ? { isError: true } : {}),
         });
       }
 
@@ -5920,15 +5758,7 @@ async function handleToolCall(request) {
           });
         }
 
-        const existing = readDecisionNotes();
-        if (!existing.ok) {
-          return makeCompatibleResponse({
-            content: [createTextContent(decisionNotesParseError(existing), { audience: ["user", "assistant"], priority: 1.0 })],
-            isError: true,
-          });
-        }
-
-        const result = supersedeNotes({ version: existing.version, notes: existing.notes }, args?.ids);
+        const result = decisionStore.mutate((existing) => supersedeNotes(existing, args?.ids));
         if (result.error) {
           return makeCompatibleResponse({
             content: [createTextContent(`# Nothing retired\n\n${result.error}`, { audience: ["user", "assistant"], priority: 1.0 })],
@@ -5936,22 +5766,18 @@ async function handleToolCall(request) {
           });
         }
 
-        persistDecisionNotes(result.serialized);
-        const digest = previewDecisionDigest(result.state.notes);
         sendLog("info", "decision-notes", { action: "superseded", ids: result.superseded });
 
         return makeCompatibleResponse({
           content: [createTextContent(
             `# Decision notes retired\n\n` +
-            `Marked superseded: ${result.superseded.map((id) => `\`${id}\``).join(", ")}.\n\n` +
+            `Marked superseded: ${result.superseded.slice(0, 10).map((id) => `\`${id}\``).join(", ")}${result.superseded.length > 10 ? `, and ${result.superseded.length - 10} more` : ""}.\n\n` +
             (result.alreadySuperseded?.length
               ? `Already superseded, unchanged: ${result.alreadySuperseded.map((id) => `\`${id}\``).join(", ")}.\n\n`
               : "") +
-            `They stay in \`${DECISION_NOTES_FILE}\` for the record but no longer reach future sessions. ` +
-            "The standing context still carries them until the digest is next rebuilt — at the next add-on " +
-            "restart, or immediately with `ha-context refresh`.\n\n" +
-            `${describeDigestCoverage(digest)}\n\n` +
-            `Stored active notes: ${activeNotes(result.state.notes).length}/${DECISION_LIMITS.maxActive}.`,
+            `They stay in \`${DECISION_NOTES_FILE}\` as historical notes, not current constraints.\n\n` +
+            `${decisionRefreshMessage(result)}\n\n` +
+            `Stored active notes: ${activeNotes(result.state.notes).length}.`,
             { audience: ["user", "assistant"], priority: 0.8 }
           )],
         });

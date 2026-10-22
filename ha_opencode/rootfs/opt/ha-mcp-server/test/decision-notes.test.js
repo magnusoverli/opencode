@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { parse as parseYaml } from "yaml";
 import {
   DECISION_DIGEST_BUDGET_BYTES,
   LIMITS,
@@ -318,22 +319,18 @@ describe("addNote", () => {
     expect(result.error).toContain("unknown note id");
   });
 
-  it("enforces the active-note cap and explains how to proceed", () => {
-    let state = emptyState();
-    for (let i = 0; i < LIMITS.maxActive; i += 1) {
-      const result = addNote(state, { title: `Note ${i}`, decision: `Decision ${i}.` }, { now: NOW });
-      expect(result.error).toBeUndefined();
-      state = result.state;
-    }
-    const overflow = addNote(state, { title: "One too many", decision: "D." }, { now: NOW });
-    expect(overflow.error).toContain("supersede");
-    expect(overflow.state).toBeUndefined();
+  it("stores more than 40 active and 200 total notes without growing the digest", () => {
+    const state = stateWith(...Array.from({ length: 250 }, (_, i) => sampleNote({ id: `n${i}`, title: `Note ${i}` })));
+    const added = addNote(state, { title: "Another approved choice", decision: "D." }, { now: NOW });
+    expect(added.error).toBeUndefined();
+    expect(activeNotes(added.state.notes)).toHaveLength(251);
+    expect(renderDecisionDigest(added.state.notes).bytes).toBeLessThanOrEqual(2048);
   });
 
-  it("still accepts a note that supersedes another once at the cap", () => {
+  it("accepts a replacement with more than the former active-note cap", () => {
     let state = emptyState();
     let firstId = null;
-    for (let i = 0; i < LIMITS.maxActive; i += 1) {
+    for (let i = 0; i < 45; i += 1) {
       const result = addNote(state, { title: `Note ${i}`, decision: `Decision ${i}.` }, { now: NOW });
       state = result.state;
       if (i === 0) firstId = result.note.id;
@@ -354,6 +351,36 @@ describe("addNote", () => {
     );
     expect(result.note.entities).toHaveLength(LIMITS.maxRefs);
     expect(new Set(result.note.entities).size).toBe(LIMITS.maxRefs);
+  });
+
+  it("preserves custom metadata, hand-written values and long reference lists on replacement", () => {
+    const refs = Array.from({ length: 16 }, (_, i) => `sensor.${'long_'.repeat(30)}${i}`);
+    const raw = { version: 1, installation: { owner: "household" }, notes: [{
+      ...sampleNote(), decision: "Keep\n  this spacing.", entities: refs, custom: { ticket: 193 },
+    }] };
+    const existing = parseDecisionNotes(JSON.stringify(raw));
+    const result = addNote(existing, { title: "Revised choice", decision: "Use the revised approach.", supersedes: [raw.notes[0].id] }, { now: NOW });
+    const reparsed = parseDecisionNotes(result.serialized);
+    expect(reparsed.notes[0].custom).toBeUndefined(); // private metadata is not a model-facing field
+    const stored = parseYaml(result.serialized);
+    expect(stored.installation).toEqual(raw.installation);
+    expect(stored.notes[0]).toEqual({ ...raw.notes[0], status: "superseded", superseded_by: result.note.id });
+    const retired = supersedeNotes(existing, [raw.notes[0].id]);
+    expect(parseYaml(retired.serialized).notes[0]).toEqual({ ...raw.notes[0], status: "superseded" });
+  });
+
+  it("refuses to replace an already-superseded note without altering its link", () => {
+    const state = stateWith(sampleNote({ status: "superseded", superseded_by: "original" }));
+    const result = addNote(state, { title: "Another", decision: "D.", supersedes: [state.notes[0].id] }, { now: NOW });
+    expect(result.error).toContain("already superseded");
+    expect(state.notes[0].superseded_by).toBe("original");
+  });
+
+  it("refuses unsupported versions and files over 2 MiB without parsing them as empty", () => {
+    expect(parseDecisionNotes('version: 2\nnotes: []').ok).toBe(false);
+    const large = parseDecisionNotes(' '.repeat(LIMITS.maxFileBytes + 1));
+    expect(large.ok).toBe(false);
+    expect(large.errors.join(' ')).toContain('2 MiB');
   });
 });
 
