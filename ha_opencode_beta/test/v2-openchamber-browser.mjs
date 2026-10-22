@@ -173,8 +173,23 @@ try {
   await checkTerminalRenderer();
   const page = await browser.newPage();
   const errors = [], escaped = [];
+  let heldRecoverySave;
+  let recoverySaveDirectory;
+  let failRecoverySaves = false;
   await page.setRequestInterception(true);
   page.on('request', req => {
+    if (recoverySaveDirectory && req.method() === 'PUT' &&
+        new URL(req.url()).pathname === base + '/api/config/settings' &&
+        JSON.parse(req.postData() || '{}').lastDirectory === recoverySaveDirectory) {
+      if (failRecoverySaves) {
+        // The persistence adapter can retry via its HTTP fallback. Fail every
+        // attempt during the simulated outage, not just the first transport.
+        void req.respond({ status: 503, contentType: 'application/json', body: '{"error":"fixture save outage"}' });
+        return;
+      }
+      heldRecoverySave = req;
+      return;
+    }
     if (req.method() === 'POST' && new URL(req.url()).pathname === base + '/api/session') {
       const model = JSON.parse(req.postData() || '{}').model;
       if (model?.providerID !== 'fixture' || model?.id !== 'coding') {
@@ -297,7 +312,24 @@ try {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, directory);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }, recoveryDirectory);
+  recoverySaveDirectory = recoveryDirectory;
   await page.evaluate(() => document.querySelector('[data-testid="workspace-recovery"] form').requestSubmit());
+  await wait(() => !!heldRecoverySave, 'recovery settings save');
+  assert.ok(await page.$('[data-testid="workspace-recovery"]'), 'Recovery must not finish before its settings save completes');
+  failRecoverySaves = true;
+  await heldRecoverySave.respond({ status: 503, contentType: 'application/json', body: '{"error":"fixture save outage"}' });
+  await page.waitForFunction(() => document.querySelector('[data-testid="workspace-recovery"] [role="alert"]')?.textContent.includes('could not be saved'));
+  assert.equal(await page.evaluate(() => localStorage.getItem('oc.lastSession.v1')), recoveryLastSession, 'Failed recovery save preserves last-session pointer');
+  assert.equal(new URL(page.url()).searchParams.get('session'), id, 'Failed recovery save preserves the historical URL');
+  failRecoverySaves = false;
+  heldRecoverySave = undefined;
+  await page.evaluate(() => document.querySelector('[data-testid="workspace-recovery"] form').requestSubmit());
+  await wait(() => !!heldRecoverySave, 'retried recovery settings save');
+  assert.ok(await page.$('[data-testid="workspace-recovery"]'), 'Recovery remains blocked during a retried settings save');
+  const savedRecovery = page.waitForResponse(res => res.request() === heldRecoverySave);
+  recoverySaveDirectory = undefined;
+  await heldRecoverySave.continue();
+  assert.equal((await savedRecovery).status(), 200);
   await page.waitForSelector('[data-testid="chat-input"] [contenteditable="true"]', { visible: true, timeout: 30000 });
   await page.waitForFunction(() => document.body.textContent.includes('Fixture model'), { timeout: 30000 });
   await wait(async () => await page.evaluate(directory => localStorage.getItem('lastDirectory') === directory, recoveryDirectory), 'recovered workspace persisted');

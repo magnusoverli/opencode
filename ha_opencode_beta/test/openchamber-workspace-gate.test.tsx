@@ -12,6 +12,8 @@ let response: (path: string) => Promise<Response>;
 let drafts: any[] = [];
 let registrations = 0;
 let routes: any[] = [];
+let settingsWrites: any[] = [];
+let saveSettings: (changes: any) => Promise<{ ok: boolean }>;
 const directory = { currentDirectory: '/missing', homeDirectory: '/homeassistant', setDirectory: (path: string) => { directory.currentDirectory = path; } };
 const projects = {
   projects: [{ id: 'ha', path: '/homeassistant' }],
@@ -43,6 +45,7 @@ mock.module('@/lib/runtime-fetch', () => ({ runtimeFetch: (path: string) => resp
 mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtime, subscribeRuntimeEndpointChanged: (fn: () => void) => { listener = fn; return () => { listener = undefined; }; } }));
 mock.module('@/lib/pathNormalization', () => ({ normalizePath: (path: string) => path.trim() || null }));
 mock.module('@/lib/router/serializeRoute', () => ({ updateBrowserURL: (...args: any[]) => { routes.push(args); } }));
+mock.module('@/lib/persistence', () => ({ updateDesktopSettings: (changes: any) => { settingsWrites.push(changes); return saveSettings(changes); } }));
 mock.module('@/stores/useDirectoryStore', () => ({ useDirectoryStore: store(directory) }));
 mock.module('@/stores/useProjectsStore', () => ({ useProjectsStore: store(projects) }));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: store({ isSettingsDialogOpen: false, settingsPage: 'settings' }) }));
@@ -63,7 +66,8 @@ const nodes = (tree: any): Node[] => {
 };
 const choose = (tree: Node) => nodes(tree).find(node => node.type === 'button' && node.props.children?.[1] === '/homeassistant')!.props.onClick();
 function reset() {
-  values = []; effects = []; pending = []; drafts = []; registrations = 0; routes = [];
+  values = []; effects = []; pending = []; drafts = []; registrations = 0; routes = []; settingsWrites = [];
+  saveSettings = async () => ({ ok: true });
   runtime = 'local'; directory.currentDirectory = '/missing';
   sessions.currentSessionId = null; sessions.currentSessionDirectory = null;
   response = async path => path === '/api/location' ? Response.json({ directory: '/homeassistant' }) :
@@ -100,6 +104,104 @@ test('recovery clears only current selection after addProject has switched direc
   expect(drafts).toEqual([{ target: 'project', selectedProjectId: 'ha', directoryOverride: '/homeassistant' }]);
   expect(routes).toEqual([[{ sessionId: null, isSettingsOpen: false, settingsPath: 'settings' }, { replace: true, force: true }]]);
   expect(directory.currentDirectory).toBe('/homeassistant');
+});
+
+test('recovery waits for durable project selection before clearing the historical pointer or resuming the app', async () => {
+  reset(); sessions.currentSessionId = 'historical'; sessions.currentSessionDirectory = '/missing';
+  render(); const tree = await settle();
+  response = async path => Response.json(path === '/api/location' ? { directory: '/homeassistant' } : { isDirectory: true });
+  let release!: (result: { ok: boolean }) => void;
+  saveSettings = () => new Promise(resolve => { release = resolve; });
+  choose(tree); const saving = await settle();
+  expect(settingsWrites).toEqual([{ projects: projects.projects, activeProjectId: 'ha', lastDirectory: '/homeassistant' }]);
+  expect(saving.props['data-testid']).toBe('workspace-recovery');
+  expect(sessions.currentSessionId).toBe('historical');
+  expect(drafts).toEqual([]); expect(routes).toEqual([]);
+  release({ ok: true }); const resumed = await settle();
+  expect(resumed.props.children).toBe('APP');
+  expect(drafts).toHaveLength(1);
+  expect(sessions.currentSessionId).toBe(null);
+});
+
+test('a failed settings save keeps recovery visible and preserves the historical navigation pointer', async () => {
+  reset(); render(); const tree = await settle();
+  response = async path => Response.json(path === '/api/location' ? { directory: '/homeassistant' } : { isDirectory: true });
+  saveSettings = async () => ({ ok: false });
+  choose(tree); let failed = await settle();
+  expect(failed.props['data-testid']).toBe('workspace-recovery');
+  expect(nodes(failed).some(node => node.props.role === 'alert')).toBe(true);
+  expect(drafts).toEqual([]); expect(routes).toEqual([]);
+  saveSettings = async () => ({ ok: true });
+  const form = nodes(failed).find(node => node.type === 'form')!;
+  form.props.onSubmit({ preventDefault() {} });
+  failed = await settle();
+  expect(failed.props.children).toBe('APP');
+  expect(drafts).toHaveLength(1);
+});
+
+test('a settings save from a previous runtime cannot finish recovery on another host', async () => {
+  reset(); render(); const tree = await settle();
+  response = async path => Response.json(path === '/api/location' ? { directory: '/homeassistant' } : { isDirectory: true });
+  let release!: (result: { ok: boolean }) => void;
+  saveSettings = () => new Promise(resolve => { release = resolve; });
+  choose(tree); await settle();
+  runtime = 'other'; directory.currentDirectory = '/other-host'; listener?.();
+  release({ ok: true }); await settle();
+  expect(drafts).toEqual([]); expect(routes).toEqual([]);
+  expect(directory.currentDirectory).toBe('/other-host');
+});
+
+test('a rejected settings save cannot expose an unsaved draft', async () => {
+  reset(); sessions.currentSessionId = 'historical'; sessions.currentSessionDirectory = '/missing';
+  render(); const tree = await settle();
+  response = async path => Response.json(path === '/api/location' ? { directory: '/homeassistant' } : { isDirectory: true });
+  saveSettings = async () => { throw new Error('offline'); };
+  choose(tree); const failed = await settle();
+  expect(failed.props['data-testid']).toBe('workspace-recovery');
+  expect(nodes(failed).some(node => node.props.role === 'alert')).toBe(true);
+  expect(sessions.currentSessionId).toBe('historical');
+  expect(drafts).toEqual([]); expect(routes).toEqual([]);
+});
+
+test('browsing hydration cannot cancel recovery for the unchanged historical conversation', async () => {
+  reset(); sessions.currentSessionId = 'historical'; sessions.currentSessionDirectory = '/missing';
+  render(); const tree = await settle();
+  let releaseProbe!: (response: Response) => void;
+  response = path => path === '/api/location' ? Promise.resolve(Response.json({ directory: '/homeassistant' })) :
+    new Promise(resolve => { releaseProbe = resolve; });
+  choose(tree);
+  directory.currentDirectory = '/hydrated-browsing';
+  releaseProbe(Response.json({ isDirectory: true }));
+  await settle();
+  expect(drafts).toHaveLength(1);
+  expect(directory.currentDirectory).toBe('/homeassistant');
+});
+
+test('browsing hydration cannot hide a failed recovery save for the unchanged conversation', async () => {
+  reset(); sessions.currentSessionId = 'historical'; sessions.currentSessionDirectory = '/missing';
+  render(); const tree = await settle();
+  response = async path => Response.json(path === '/api/location' ? { directory: '/homeassistant' } : { isDirectory: true });
+  let release!: (result: { ok: boolean }) => void;
+  saveSettings = () => new Promise(resolve => { release = resolve; });
+  choose(tree); await settle();
+  directory.currentDirectory = '/hydrated-browsing';
+  release({ ok: false }); const failed = await settle();
+  expect(failed.props['data-testid']).toBe('workspace-recovery');
+  expect(nodes(failed).some(node => node.props.role === 'alert')).toBe(true);
+  expect(sessions.currentSessionId).toBe('historical');
+  expect(drafts).toEqual([]); expect(routes).toEqual([]);
+});
+
+test('a genuinely different conversation still cancels a pending recovery', async () => {
+  reset(); sessions.currentSessionId = 'historical'; sessions.currentSessionDirectory = '/missing';
+  render(); const tree = await settle();
+  let release!: (response: Response) => void;
+  response = () => new Promise(resolve => { release = resolve; });
+  choose(tree);
+  sessions.currentSessionId = 'newer-selection';
+  release(Response.json({ isDirectory: true })); await settle();
+  expect(registrations).toBe(0);
+  expect(drafts).toEqual([]); expect(routes).toEqual([]);
 });
 
 test('failed location validation does not register a project or clear a historical pointer', async () => {
