@@ -110,6 +110,7 @@ let patchedApiClassifier = false;
 let patchedServiceWorker = false;
 let patchedViteAssetsUrl = false;
 let patchedVitePreloadBaseUrl = false;
+let terminalWasmReferences = 0;
 
 for (const filePath of jsFiles) {
   let content = fs.readFileSync(filePath, "utf8");
@@ -164,11 +165,28 @@ for (const filePath of jsFiles) {
     patchedVitePreloadBaseUrl = true;
   }
 
+  // Unlike fetch("assets/..."), new URL(..., import.meta.url) resolves against
+  // this chunk in dist/assets/, not the document <base>. Make the terminal core
+  // a sibling asset before stripping root paths, or it becomes assets/assets/.
+  content = content.replace(
+    /new URL\(\s*(["'`])\/?assets\/(ghostty-vt-[\w-]+\.wasm)\1\s*,\s*import\.meta\.url\s*\)/g,
+    (_match, quote, file) => {
+      terminalWasmReferences += 1;
+      if (!fs.existsSync(path.join(assetsDir, file))) {
+        fail(`terminal WebAssembly asset not found: ${file}`);
+      }
+      return `new URL(${quote}./${file}${quote},import.meta.url)`;
+    }
+  );
   content = content.replace(/(["'`])\/assets\//g, "$1assets/");
 
   if (content !== original) {
     fs.writeFileSync(filePath, content);
   }
+}
+
+if (terminalWasmReferences !== 1) {
+  fail(`terminal WebAssembly URL expected 1 match, found ${terminalWasmReferences}`);
 }
 
 const rootAssetReferences = jsFiles.flatMap((filePath) => {

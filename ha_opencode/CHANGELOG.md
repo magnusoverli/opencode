@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fix the blank OpenChamber Terminal pane by loading its WebAssembly renderer correctly through Home Assistant ingress and direct access ([#194](https://github.com/magnusoverli/opencode/issues/194)).
 - Refresh README setup, integration and safety guidance, and replace manual contributor lists with an automatically updated GitHub-data image.
 - Fix PPQ model-list/API-key dialog failures caused by incomplete pricing metadata; preserve cache rates and validate models against OpenCode's native schema ([#188](https://github.com/magnusoverli/opencode/issues/188)).
 - Keep PPQ model discovery working when optional capability metadata is malformed.

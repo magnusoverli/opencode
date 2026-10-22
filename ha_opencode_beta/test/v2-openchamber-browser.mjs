@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, request } from 'node:http';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { OpenCode } from '/opt/opencode-v2-homeassistant/node_modules/@opencode/client/dist/promise/index.js';
@@ -44,6 +44,56 @@ const wait = async (check, label) => {
     await sleep(200);
   }
   throw new Error(`Timed out: ${label}`);
+};
+const checkTerminalRenderer = async () => {
+  const assets = '/opt/openchamber-preview/packages/web/dist/assets';
+  const files = await readdir(assets);
+  const chunks = files.filter(file => /^surface-[\w-]+\.js$/.test(file));
+  const wasmFiles = files.filter(file => /^ghostty-vt-[\w-]+\.wasm$/.test(file));
+  assert.equal(chunks.length, 1, 'Expected one pinned terminal renderer chunk');
+  assert.equal(wasmFiles.length, 1, 'Expected one pinned terminal WebAssembly asset');
+  for (const mount of ['', base]) {
+    const terminalPage = await browser.newPage();
+    try {
+      await terminalPage.setRequestInterception(true);
+      terminalPage.on('request', req => {
+        // Isolate the real renderer from unrelated app/PTY startup. All assets
+        // still pass through the shipped proxy, including its JS transforms.
+        if (req.isNavigationRequest() && req.resourceType() === 'document') {
+          void req.respond({ status: 200, contentType: 'text/html', body: `<!doctype html><base href="${mount}/"><div id="terminal" style="width:800px;height:400px"></div>` });
+        } else if (new URL(req.url()).origin === 'http://127.0.0.1:8099') {
+          void req.continue();
+        } else {
+          void req.abort();
+        }
+      });
+      await terminalPage.goto(`http://127.0.0.1:8099${mount}/`, { waitUntil: 'domcontentloaded' });
+      const [wasm, rendered] = await Promise.all([
+        terminalPage.waitForResponse(response => new URL(response.url()).pathname.endsWith(`/${wasmFiles[0]}`), { timeout: 10000 }),
+        terminalPage.evaluate(async chunk => {
+          const { GhosttyTerminalSurface } = await import(new URL(`assets/${chunk}`, document.baseURI).href);
+          // Canvas/input presence alone is insufficient: they are mounted
+          // before WebAssembly loads. Await the actual renderer's factory.
+          const surface = await GhosttyTerminalSurface.create(document.getElementById('terminal'), {
+            theme: { foreground: { r: 240, g: 240, b: 240 }, background: { r: 20, g: 20, b: 20 }, cursor: { r: 255, g: 255, b: 255 } },
+            font: { family: 'monospace', size: 14 }, labels: { input: 'Terminal input', scrollbar: 'Terminal scrollbar' },
+            onData() {}, onResize() {},
+          });
+          try {
+            surface.write('HA_TERMINAL_WASM_OK\r\n');
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            return { cols: surface.cols, rows: surface.rows, canvas: surface.canvas.isConnected };
+          } finally { surface.dispose(); }
+        }, chunks[0]),
+      ]);
+      assert.equal(new URL(wasm.url()).pathname, `${mount}/assets/${wasmFiles[0]}`);
+      assert.equal(wasm.status(), 200);
+      assert.match(wasm.headers()['content-type'], /^application\/wasm\b/);
+      assert.deepEqual(Buffer.from(await wasm.buffer()), await readFile(`${assets}/${wasmFiles[0]}`));
+      assert.ok(rendered.cols > 0 && rendered.rows > 0 && rendered.canvas);
+    } finally { await terminalPage.close(); }
+  }
+  console.log('CHECK: real terminal renderer initializes at root and under Ingress');
 };
 const provider = createServer(async (req, res) => {
   const chunks = [];
@@ -120,6 +170,7 @@ try {
   const url = `http://127.0.0.1:${ingress.address().port}${base}/`;
   await wait(async () => (await fetch(url)).ok, 'Ingress startup');
   browser = await puppeteer.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  await checkTerminalRenderer();
   const page = await browser.newPage();
   const errors = [], escaped = [];
   await page.setRequestInterception(true);

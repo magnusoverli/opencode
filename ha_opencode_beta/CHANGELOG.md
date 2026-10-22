@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Fix the blank OpenChamber Terminal pane by loading its WebAssembly renderer correctly through Home Assistant ingress and direct access ([#194](https://github.com/magnusoverli/opencode/issues/194)).
 - Correct the published 3.2.4b5 release notes.
 
 ## 3.2.4b5
