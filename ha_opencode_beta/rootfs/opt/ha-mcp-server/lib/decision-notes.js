@@ -53,24 +53,12 @@ export const DECISION_DIGEST_BUDGET_BYTES = 2048;
 
 export const LIMITS = {
   /**
-   * Storage cap on active notes.
-   *
-   * This is not the context cap: how many notes reach the model is decided by
-   * the digest's byte budget, which typically fits far fewer than this. Keeping
-   * storage generous is deliberate — a note that no longer fits the digest is
-   * still true, still the user's record, and still reachable through
-   * `recall_decisions`. Anything that reports this number must say which of the
-   * two limits it means.
-   */
-  maxActive: 40,
-  /**
    * Pinned notes lead the digest, so they are the notes that survive when the
    * budget runs out. Capped because pinning everything pins nothing.
    */
   maxPinned: 10,
-  /** Superseded notes stay for the human; the file still needs an end. */
-  maxTotal: 200,
-  maxFileBytes: 64 * 1024,
+  /** Storage safety bound, independent of the 2 KiB prompt budget. Never prune. */
+  maxFileBytes: 2 * 1024 * 1024,
   title: 100,
   decision: 320,
   rationale: 480,
@@ -169,7 +157,7 @@ function toDateString(now) {
 export function buildNoteId(title, dateString, existingIds = new Set()) {
   const base = `${dateString}-${slugify(title) || "note"}`;
   if (!existingIds.has(base)) return base;
-  for (let suffix = 2; suffix < 1000; suffix += 1) {
+  for (let suffix = 2; suffix <= existingIds.size + 2; suffix += 1) {
     const candidate = `${base}-${suffix}`;
     if (!existingIds.has(candidate)) return candidate;
   }
@@ -191,6 +179,23 @@ const KNOWN_NOTE_KEYS = new Set([
 
 /** Carries the user's own keys through a rewrite without exposing them as note fields. */
 const EXTRA_KEYS = Symbol("decision-notes.extraKeys");
+const RAW_NOTE = Symbol("decision-notes.rawNote");
+const DOCUMENT_EXTRAS = Symbol("decision-notes.documentExtras");
+
+function copyMetadata(from, to, keys) {
+  for (const key of keys) {
+    if (Object.hasOwn(from, key)) Object.defineProperty(to, key, { value: from[key], enumerable: false });
+  }
+  return to;
+}
+
+function withStatus(note, changes) {
+  return copyMetadata(note, { ...note, ...changes }, [EXTRA_KEYS, RAW_NOTE]);
+}
+
+function withNotes(state, notes) {
+  return copyMetadata(state ?? {}, { version: state?.version ?? DECISION_NOTES_VERSION, notes }, [DOCUMENT_EXTRAS]);
+}
 
 function normalizeNote(raw, index) {
   const errors = [];
@@ -211,7 +216,7 @@ function normalizeNote(raw, index) {
   // feature exists to prevent.
   const rawStatus = raw.status === undefined || raw.status === null ? "active" : cleanText(raw.status);
   if (rawStatus !== "active" && rawStatus !== "superseded") {
-    errors.push(`${where}: 'status' must be 'active' or 'superseded' (found '${rawStatus}')`);
+    errors.push(`${where}: 'status' must be 'active' or 'superseded'`);
   }
 
   const date = typeof raw.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.date.trim())
@@ -239,7 +244,9 @@ function normalizeNote(raw, index) {
   if (rationale) note.rationale = rationale;
 
   for (const field of REF_FIELDS) {
-    const refs = cleanRefs(raw[field]);
+    // Limits apply to newly submitted references, not the user's existing data.
+    const values = raw[field] == null ? [] : Array.isArray(raw[field]) ? raw[field] : [raw[field]];
+    const refs = [...new Set(values.map(cleanText).filter(Boolean))];
     if (refs.length) note[field] = refs;
   }
 
@@ -253,6 +260,7 @@ function normalizeNote(raw, index) {
   if (Object.keys(extra).length) {
     Object.defineProperty(note, EXTRA_KEYS, { value: extra, enumerable: false });
   }
+  Object.defineProperty(note, RAW_NOTE, { value: raw, enumerable: false });
 
   return { note, errors: [] };
 }
@@ -286,6 +294,9 @@ function describeYamlError(error) {
 }
 
 export function parseDecisionNotes(text) {
+  if (byteLength(text ?? "") > LIMITS.maxFileBytes) {
+    return { ok: false, version: DECISION_NOTES_VERSION, notes: [], errors: ["decisions.yaml exceeds the 2 MiB safety limit; it was not modified. Back it up and review it locally; do not delete history to make space."] };
+  }
   const source = String(text ?? "").trim();
   if (!source) {
     return { ok: true, version: DECISION_NOTES_VERSION, notes: [], errors: [] };
@@ -316,9 +327,18 @@ export function parseDecisionNotes(text) {
     };
   }
 
+  if ((document.version ?? DECISION_NOTES_VERSION) !== DECISION_NOTES_VERSION) {
+    return { ok: false, version: document.version, notes: [], errors: ["decisions.yaml uses an unsupported version; use a compatible add-on or restore a backup. The file was not modified."] };
+  }
+  const extras = Object.fromEntries(Object.entries(document).filter(([key]) => !["version", "notes"].includes(key)));
+  const preserve = (state) => {
+    Object.defineProperty(state, DOCUMENT_EXTRAS, { value: extras, enumerable: false });
+    return state;
+  };
+
   const rawNotes = document.notes;
   if (rawNotes === undefined || rawNotes === null) {
-    return { ok: true, version: document.version ?? DECISION_NOTES_VERSION, notes: [], errors: [] };
+    return preserve({ ok: true, version: document.version ?? DECISION_NOTES_VERSION, notes: [], errors: [] });
   }
   if (!Array.isArray(rawNotes)) {
     return {
@@ -342,7 +362,7 @@ export function parseDecisionNotes(text) {
       return;
     }
     if (seenIds.has(note.id)) {
-      errors.push(`note ${index + 1}: duplicate id '${note.id}'`);
+      errors.push(`note ${index + 1}: duplicate id`);
       rejected += 1;
       return;
     }
@@ -350,7 +370,7 @@ export function parseDecisionNotes(text) {
     notes.push(note);
   });
 
-  return {
+  return preserve({
     ok: errors.length === 0,
     version: document.version ?? DECISION_NOTES_VERSION,
     notes,
@@ -359,29 +379,27 @@ export function parseDecisionNotes(text) {
     // render context need this: a digest built from the readable subset must not
     // present itself as the complete record.
     rejected,
-  };
+  });
 }
 
 /** Serialize state back to the on-disk format, header comment included. */
 export function serializeDecisionNotes(state) {
   const payload = {
+    ...(state?.[DOCUMENT_EXTRAS] ?? {}),
     version: state?.version ?? DECISION_NOTES_VERSION,
     notes: (state?.notes ?? []).map((note) => {
-      const ordered = {
-        id: note.id,
-        date: note.date,
-        title: note.title,
-        decision: note.decision,
+      // Keep hand-written values/metadata intact. Status and replacement links
+      // are the only existing fields these tools are authorised to change.
+      const original = note[RAW_NOTE];
+      const ordered = original ? { ...original } : {
+        id: note.id, date: note.date, title: note.title, decision: note.decision,
+        ...(note.rationale ? { rationale: note.rationale } : {}),
+        ...Object.fromEntries(REF_FIELDS.filter((field) => note[field]?.length).map((field) => [field, note[field]])),
+        ...(note.pin ? { pin: true } : {}),
+        ...(note[EXTRA_KEYS] ?? {}),
       };
-      if (note.rationale) ordered.rationale = note.rationale;
-      for (const field of REF_FIELDS) {
-        if (note[field]?.length) ordered[field] = note[field];
-      }
-      if (note.pin) ordered.pin = true;
       ordered.status = note.status;
-      if (note.superseded_by) ordered.superseded_by = note.superseded_by;
-      // Keys this module does not use are the user's, and survive the rewrite.
-      Object.assign(ordered, note[EXTRA_KEYS] ?? {});
+      if (note.superseded_by && cleanText(ordered.superseded_by) !== note.superseded_by) ordered.superseded_by = note.superseded_by;
       return ordered;
     }),
   };
@@ -417,9 +435,12 @@ export function screenNotesForSecrets(notes = [], secretValues = []) {
 
   for (const note of notes ?? []) {
     const target = [
+      note.id,
+      note.date,
       note.title,
       note.decision,
       note.rationale,
+      note.superseded_by,
       ...REF_FIELDS.flatMap((field) => note[field] ?? []),
     ]
       .filter(Boolean)
@@ -443,8 +464,8 @@ export function screenNotesForSecrets(notes = [], secretValues = []) {
  * @param {{now: Date|string, secretValues?: string[]}} context
  */
 export function addNote(state, input, context) {
+  if ((state?.version ?? DECISION_NOTES_VERSION) !== DECISION_NOTES_VERSION) return { error: "Unsupported decision-notes version; nothing was changed." };
   const notes = [...(state?.notes ?? [])];
-  const version = state?.version ?? DECISION_NOTES_VERSION;
   const dateString = toDateString(context?.now ?? new Date());
 
   const title = cleanText(input?.title);
@@ -485,6 +506,9 @@ export function addNote(state, input, context) {
   if (unknown.length) {
     return { error: `Cannot supersede unknown note id(s): ${describeIds(unknown)}.` };
   }
+  if (notes.some((note) => supersedes.includes(note.id) && (note.status === "superseded" || note.superseded_by))) {
+    return { error: "Cannot replace an already superseded note or one with an existing replacement link. Recall its current replacement and replace that active note instead; existing history links were not changed." };
+  }
 
   const normalizedTitle = title.toLowerCase();
   const duplicate = activeNotes(notes).find(
@@ -500,7 +524,7 @@ export function addNote(state, input, context) {
 
   const superseding = new Set(supersedes);
   const updated = notes.map((note) =>
-    superseding.has(note.id) ? { ...note, status: "superseded" } : note,
+    superseding.has(note.id) ? withStatus(note, { status: "superseded" }) : note,
   );
 
   const id = buildNoteId(title, dateString, knownIds);
@@ -532,27 +556,10 @@ export function addNote(state, input, context) {
 
   const nextNotes = [...updated, note];
 
-  const activeCount = activeNotes(nextNotes).length;
-  if (activeCount > LIMITS.maxActive) {
-    return {
-      error:
-        `This installation is at its limit of ${LIMITS.maxActive} stored active decision notes. Supersede a note that ` +
-        "no longer applies (pass its id in 'supersedes'), or ask the user which one to retire, before recording a " +
-        "new one.",
-    };
-  }
-  if (nextNotes.length > LIMITS.maxTotal) {
-    return {
-      error:
-        `decisions.yaml has reached ${LIMITS.maxTotal} notes including superseded ones. Ask the user to prune old ` +
-        "superseded entries from the file before recording more.",
-    };
-  }
-
-  const nextState = { version, notes: nextNotes };
+  const nextState = withNotes(state, nextNotes);
   const serialized = serializeDecisionNotes(nextState);
   if (byteLength(serialized) > LIMITS.maxFileBytes) {
-    return { error: "decisions.yaml would exceed its size limit. Prune superseded notes before recording more." };
+    return { error: "decisions.yaml would exceed the 2 MiB safety limit. Nothing was changed; back up the record and review storage options rather than deleting history." };
   }
 
   return { state: nextState, note, serialized };
@@ -560,6 +567,7 @@ export function addNote(state, input, context) {
 
 /** Mark notes superseded without deleting them. */
 export function supersedeNotes(state, ids, options = {}) {
+  if ((state?.version ?? DECISION_NOTES_VERSION) !== DECISION_NOTES_VERSION) return { error: "Unsupported decision-notes version; nothing was changed." };
   const notes = [...(state?.notes ?? [])];
   const targets = cleanIdList(ids);
   if (!targets.length) return { error: "Pass at least one note id to supersede." };
@@ -577,17 +585,19 @@ export function supersedeNotes(state, ids, options = {}) {
   const retiring = new Set(targets.filter((id) => known.get(id).status !== "superseded"));
   const nextNotes = notes.map((note) => {
     if (!retiring.has(note.id)) return note;
-    const updated = { ...note, status: "superseded" };
+    const updated = withStatus(note, { status: "superseded" });
     // Never overwrite an existing link: that chain is the record of what
     // replaced what, and a second pass would erase it.
     if (supersededBy && !updated.superseded_by) updated.superseded_by = supersededBy;
     return updated;
   });
 
-  const nextState = { version: state?.version ?? DECISION_NOTES_VERSION, notes: nextNotes };
+  const nextState = withNotes(state, nextNotes);
+  const serialized = serializeDecisionNotes(nextState);
+  if (byteLength(serialized) > LIMITS.maxFileBytes) return { error: "decisions.yaml would exceed the 2 MiB safety limit. Nothing was changed." };
   return {
     state: nextState,
-    serialized: serializeDecisionNotes(nextState),
+    serialized,
     superseded: [...retiring],
     alreadySuperseded: alreadyInactive,
   };
@@ -720,10 +730,14 @@ export function searchNoteMatches(notes = [], options = {}) {
   const requested = Math.trunc(Number(options.limit));
   const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 100) : 20;
 
-  const pool = includeSuperseded ? notes : activeNotes(notes);
+  const pool = (options.id || includeSuperseded ? notes : activeNotes(notes)).filter((note) =>
+    (!options.id || note.id === options.id) &&
+    (!options.entity || (note.entities ?? []).includes(options.entity)) &&
+    (!options.file || (note.files ?? []).includes(options.file)) &&
+    (!options.integration || (note.integrations ?? []).includes(options.integration)));
   const byDate = (a, b) => (a.date === b.date ? b.id.localeCompare(a.id) : b.date.localeCompare(a.date));
 
-  const ranked = !terms.length
+  const ranked = options.id || !terms.length
     ? // No usable terms (empty query, or one made only of stopwords) lists
       // everything rather than nothing — an empty result would read as
       // "no decisions exist".
@@ -734,10 +748,11 @@ export function searchNoteMatches(notes = [], options = {}) {
         .sort((a, b) => b.score - a.score || byDate(a.note, b.note))
         .map((entry) => entry.note);
 
+  const offset = Number.isSafeInteger(options.offset) && options.offset >= 0 ? options.offset : 0;
   return {
-    matches: ranked.slice(0, limit),
+    matches: ranked.slice(offset, offset + limit),
     totalMatched: ranked.length,
-    truncated: ranked.length > limit,
+    truncated: ranked.length > offset + limit,
   };
 }
 
@@ -804,11 +819,8 @@ const DIGEST_INTRO = [
  * reads exactly like a decision that was never made, which is how a deliberate
  * configuration gets "fixed". So the digest always says which case it is in.
  *
- * The completeness claim is bounded to the rebuild it was written at. This file
- * is regenerated at add-on start and on `ha-context refresh`, not when a note is
- * recorded — recording writes decisions.yaml alone, so that adding a note cannot
- * rewrite a prompt OpenCode re-reads on every request. An unbounded "nothing has
- * been left out" would therefore be a claim this function cannot make good on.
+ * The completeness claim is bounded to the rebuild it was written at. Approved
+ * tool changes refresh this file; manual edits need startup or ha-context refresh.
  * The truncated branch needs no such caveat: it already sends the model to
  * `recall_decisions`, which reads the notes file itself.
  */

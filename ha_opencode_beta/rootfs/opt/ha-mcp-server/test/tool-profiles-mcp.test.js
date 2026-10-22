@@ -94,6 +94,7 @@ const MUTATING_TOOLS = [
   { name: "zigporter_run", arguments: { args: ["list-devices"] } },
   { name: "screenshot_url", arguments: { url: "http://homeassistant.local:8123/" } },
   { name: "remember_decision", arguments: { decision: "x", user_approved: true } },
+  { name: "supersede_decision", arguments: { ids: ["fixture"], user_approved: true } },
 ];
 
 describe("MCP tool-profile enforcement", () => {
@@ -114,6 +115,7 @@ describe("MCP tool-profile enforcement", () => {
     const compact = await request("compact", { method: "tools/list", params: {} });
     const compactNames = compact.tools.map((tool) => tool.name);
     expect(compactNames).toContain("get_home_context");
+    expect(compactNames).toContain("recall_decisions");
     expect(compactNames).not.toContain("call_service");
     expect(compactNames).not.toContain("write_config_safe");
     expect(compactNames).not.toContain("hab_run");

@@ -218,7 +218,7 @@ Four files decide what OpenCode knows about your installation before you type an
 | `/config/AGENTS.md` | The add-on's own instructions | The add-on, refreshed on update |
 | `/config/AGENTS.local.md` | **Your** standing instructions | You; the add-on never touches it |
 | `/data/context/home-briefing.md` | Generated summary of your setup | The add-on, rebuilt on every start |
-| `/config/opencode/decisions.yaml` | Lasting decisions you approved | OpenCode, only when you say yes |
+| `/config/opencode_beta/decisions.yaml` | Lasting decisions you approved | OpenCode, only when you say yes |
 
 **Your own instructions.** Create `/config/AGENTS.local.md` for standing preferences — "all Zigbee goes through Zigbee2MQTT", "new config goes in `packages/`", "always show me the diff first". A commented example lands at `/config/AGENTS.local.md.example` on first install. Add-on updates never overwrite it, `AGENTS.md` still wins on conflict, and deleting the file turns it off.
 
@@ -226,7 +226,74 @@ This also fixes a real problem: `AGENTS.md` used to be refreshed on every add-on
 
 **Install briefing** (option, default on). Regenerated at every start: Home Assistant version and installation type, how your configuration is split up (including whether `automations.yaml` is UI-managed), your areas and floors by name, entity counts per domain, integrations and device stacks, and your custom components. It is rebuilt rather than appended to and capped at roughly 500 tokens, so it cannot grow. It is produced by the add-on, not the AI, and never contains `secrets.yaml` values, tokens, or your coordinates.
 
-**Decision notes** (option, default on). Configuration records *what*; notes record *why* — that an integration was removed deliberately, that a toggle is inverted on purpose, that some corner should be left alone. OpenCode proposes a note and writes it only after you approve. Notes are plain YAML in `/config/opencode/decisions.yaml`. Each active note is injected as one line — date, title, decision, and any entities, files or integrations attached to it; rationale and retired notes stay in the file and are fetched on demand via `recall_decisions`. The digest is capped at roughly 500 tokens and up to 40 active notes are stored, so when there are more notes than fit the digest says how many it is showing and the rest stay in force in the file — add `pin: true` to a note to keep it in the digest. Replaced notes are marked superseded rather than deleted, so the per-request cost stays flat. Notes containing a credential or a value from your `secrets.yaml` are rejected.
+**Decision notes** (option, default on). Configuration records *what*; notes record
+*why*. OpenCode proposes a lasting note and writes or retires it only after you
+approve. Beta keeps the plain, hand-editable v1 YAML record in
+`/config/opencode_beta/decisions.yaml`, separate from stable's notes.
+
+**Storage is not prompt size.** The beta accepts up to **2 MiB**, with no active-
+or total-note count cap. Existing IDs, metadata and replacement links are preserved;
+replaced notes remain as superseded history. New note text/reference limits still
+apply. Oversized, unsupported-version or malformed files are not overwritten or
+automatically pruned. A readable subset of a partially damaged file can still be
+recalled, explicitly marked incomplete.
+
+**Standing context stays small:** the digest remains capped at **2 KiB** including
+its warnings (roughly 500 English tokens, not an exact tokenizer measurement).
+It includes whole active decisions in priority order and states how many did not
+fit. `pin: true` gives priority, **not guaranteed inclusion**; up to ten notes can
+be pinned. Rationale and superseded history are retrieved only when needed.
+Notes are screened for credential-shaped content before reaching the model.
+
+Approved tool writes refresh the digest automatically. Unchanged digest content
+is not rewritten. The managed V2 backend uses changes on subsequent requests in
+both existing and new conversations; this can reduce prompt-cache reuse after a
+note changes. If saving succeeds but refresh fails, the tool reports **saved;
+context refresh failed**. The note is still retrievable; correct the reported
+filesystem problem and run `ha-context refresh`. Manual file edits are picked up
+at app startup or with that command, not merely by opening another conversation.
+
+### Recalling decisions
+
+`recall_decisions` returns at most **8 KiB per response**, including warnings and
+pagination information. The `limit` option (default 20, maximum 100) is an upper
+bound, not a guarantee that that many notes fit.
+
+- Use `id` alone for exact lookup, including superseded notes and their replacement
+  link. Historical notes explain prior choices; they are not current constraints.
+- Search with `query`, or exact `file`, `entity` and `integration` references.
+  Multiple reference filters are combined with AND. Files use the stored relative
+  path, for example `packages/lights.yaml`; missing references may need text search.
+- Search defaults to active notes; set `include_superseded: true` for history.
+- If `has_more` is true, repeat the **same filters and limit** with `next_cursor`
+  as `cursor`. A changed record or readable scope invalidates the cursor: restart
+  without it instead of mixing revisions. Raising `limit` alone is not pagination.
+- An individually oversized note is explicitly marked **not returned**; pagination
+  can continue past it. Its complete contents remain in YAML for local review.
+
+Read-only recall is available in compact and the managed read-only agent when the
+feature is enabled. Recording/retiring remain excluded there. Shipped guidance
+asks the agent to recall relevant decisions before drafting configuration changes
+and avoid repeated lookups unless scope or notes change. There is no automatic
+relevance-injection service, model-powered summarizer or extra inference provider.
+
+### Backups, recovery and older releases
+
+Before overwriting an existing valid record, the writer saves the exact preimage
+in `decisions.yaml.backup` with an app-owned comment marker. This is one rolling
+last-good backup, not a substitute for Home Assistant backups or version control.
+An unrecognised `.backup` file is preserved and blocks the write; legacy `.bak`
+files are not changed. Writes and digest publishing are coordinated across app
+processes. Observed manual-edit conflicts stop the write, but external editors
+do not participate in the app's lock: do not edit notes while a tool is saving.
+
+Back up first and stop the beta app before restoring. Copy the backup's contents
+**after its first app-owned marker comment** over `decisions.yaml` to restore the
+exact preimage without adding bytes to a near-limit file, then restart. Valid dead-process locks are recovered; unknown
+or live locks are preserved with a local-review diagnostic. Never remove a lock
+without confirming no writer is running. Storage remains v1, so no database or
+archive migration is needed. Older releases can read the record but retain their
+old write limits; downgrading does not automatically shrink it or restore history.
 
 Adds three MCP tools: `remember_decision`, `recall_decisions`, `supersede_decision`. With the option off, they are not offered to the AI at all and your existing notes file is left untouched.
 

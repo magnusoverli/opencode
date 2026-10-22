@@ -38,11 +38,9 @@ import { collectLiveFacts } from "/opt/ha-mcp-server/lib/ha-live.js";
 import { extractSecretValues } from "/opt/ha-mcp-server/lib/context-budget.js";
 import {
   DECISION_DIGEST_PATH,
-  DECISION_NOTES_DISPLAY_PATH,
   DECISION_NOTES_PATH,
-  parseDecisionNotes,
-  renderDecisionDigest,
 } from "/opt/ha-mcp-server/lib/decision-notes.js";
+import { createDecisionStore } from "/opt/ha-mcp-server/lib/decision-store.js";
 
 const FS_API = { readFile, readdir, stat };
 
@@ -122,56 +120,22 @@ async function generateDecisionDigest() {
     return;
   }
 
-  const source = await readTextOrNull(NOTES_IN);
-  if (source === null) {
-    // No notes recorded yet — nothing to inject, and no empty file to explain.
-    await removeIfPresent(DIGEST_OUT);
-    return;
-  }
-
-  const parsed = parseDecisionNotes(source);
-  if (!parsed.ok) {
-    log(`decisions.yaml could not be fully parsed (${parsed.errors.length} problem(s)); using the notes that are readable`);
-  }
-
-  // The notes file is the user's and is meant to be hand-edited, so the digest
-  // is screened as it is built rather than trusting what was written earlier.
+  // The generator and approved tool writes use the same cross-process lock.
+  // Read/render/publish under that lock, never publish a pre-lock snapshot.
   const secretsYaml = await readTextOrNull(`${CONFIG_DIR}/secrets.yaml`);
-  const digest = renderDecisionDigest(parsed.notes, {
-    secretValues: secretsYaml ? extractSecretValues(secretsYaml) : [],
-    // Entries the parser had to skip are still decisions the user made; the
-    // digest has to say they are missing rather than imply they never existed.
-    unreadable: parsed.rejected,
-  });
-
-  // A file that exists but yields nothing readable must not silently remove the
-  // digest — this runs at every session start, so that would quietly drop the
-  // user's standing context and leave the model believing nothing was decided.
-  if (!digest.markdown && !parsed.ok) {
-    const notice =
-      "# Decision notes\n\n" +
-      `\`${DECISION_NOTES_DISPLAY_PATH}\` exists but could not be read (${parsed.errors.length} problem(s)), so ` +
-      "the decisions it holds are not available this session. Tell the user, and do not treat this as an absence " +
-      "of decisions — offer to help fix the file.\n";
-    await writeFileAtomic(DIGEST_OUT, notice);
-    log("decisions.yaml is unreadable; wrote a notice instead of removing the digest");
-    return;
+  const result = createDecisionStore({
+    notesPath: NOTES_IN,
+    digestPath: DIGEST_OUT,
+    secretValues: () => secretsYaml ? extractSecretValues(secretsYaml) : [],
+  }).refresh();
+  const { digest } = result;
+  if (!result.readable) {
+    log("decisions.yaml could not be fully parsed or read safely; published readable notes or an explicit unavailability notice");
   }
-
-  if (digest.withheldNotes.length) {
-    log(
-      `withheld ${digest.withheldNotes.length} note(s) from the session context because they contain ` +
-        `credential-shaped text: ${digest.withheldNotes.join(", ")}`,
-    );
+  if (digest.withheldNotes.length) log(`withheld ${digest.withheldNotes.length} note(s) containing credential-shaped text`);
+  if (digest.markdown) {
+    log(`decision notes digest: ${digest.includedNotes.length} active note(s), ${digest.bytes} bytes${result.changed ? "" : " (unchanged)"}`);
   }
-
-  if (!digest.markdown) {
-    await removeIfPresent(DIGEST_OUT);
-    return;
-  }
-
-  await writeFileAtomic(DIGEST_OUT, digest.markdown);
-  log(`decision notes digest: ${digest.includedNotes.length} active note(s), ${digest.bytes} bytes`);
 }
 
 async function writeBriefing(layout, live) {
@@ -259,9 +223,7 @@ async function generateBriefing() {
 async function main() {
   await mkdir(OUTPUT_DIR, { recursive: true });
 
-  // `digest` is the cheap, offline half. Session start runs it on its own so a
-  // note the user edited or deleted by hand takes effect at the next session
-  // instead of waiting for an add-on restart.
+  // `digest` is the cheap, offline half; usable independently of live HA facts.
   if (process.env.HOME_CONTEXT_ONLY === "digest") {
     await generateDecisionDigest();
     return;

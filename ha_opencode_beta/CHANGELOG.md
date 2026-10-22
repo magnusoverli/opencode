@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Expand decision-note storage to 2 MiB without note-count caps, preserve history with backups, add bounded paginated/exact recall and refresh the small digest after approved changes ([#193](https://github.com/magnusoverli/opencode/issues/193)).
 ## 3.2.4b4
 
 - Fix OpenAI browser sign-in for dynamic callback ports and first-time client registration, and explain callback-free legacy device-code login directly in OpenChamber.

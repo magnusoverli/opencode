@@ -6,10 +6,11 @@
 
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { spawn } from "child_process";
-import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
+import { mkdtemp, readFile, rm, writeFile, mkdir } from "fs/promises";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { parseDecisionNotes } from "../lib/decision-notes.js";
 
 const SERVER = join(dirname(fileURLToPath(import.meta.url)), "..", "index.js");
 const STARTUP_TIMEOUT_MS = 20000;
@@ -211,9 +212,7 @@ describe("recording a decision end to end", () => {
     };
   });
 
-  it("writes the note without touching the injected digest", async () => {
-    // Pre-seed the digest so "unchanged" is a real assertion rather than one
-    // that passes on a file nothing ever created.
+  it("refreshes the bounded injected digest after an approved write", async () => {
     const before = "# Decision notes\n\nAn earlier digest that must survive.\n";
     await writeFile(digestPath, before, "utf8");
 
@@ -232,17 +231,13 @@ describe("recording a decision end to end", () => {
     const stored = await readFile(join(notesDir, "decisions.yaml"), "utf8");
     expect(stored).toContain("Node-RED automations are off limits");
 
-    // The digest sits in OpenCode's `instructions` and is re-read on every
-    // request. Rewriting it here would edit the system prompt underneath a
-    // live session and throw away the cached prefix, so recording a note must
-    // leave it exactly as it was — the generator owns this file.
-    expect(await readFile(digestPath, "utf8")).toBe(before);
-
-    // The user still has to be told when the note reaches the standing context.
-    expect(textOf(recorded)).toContain("ha-context refresh");
+    const digest = await readFile(digestPath, "utf8");
+    expect(digest).toContain("Node-RED automations are off limits");
+    expect(Buffer.byteLength(digest)).toBeLessThanOrEqual(2048);
+    expect(textOf(recorded)).toContain("refreshed automatically");
   }, STARTUP_TIMEOUT_MS + 5000);
 
-  it("does not delete the injected digest when the last note is superseded", async () => {
+  it("removes obsolete standing context when the last active note is superseded", async () => {
     const before = "# Decision notes\n\nAn earlier digest that must survive.\n";
 
     const [recorded] = await converse(env, [
@@ -263,9 +258,8 @@ describe("recording a decision end to end", () => {
     ]);
     expect(retired.isError).toBeFalsy();
 
-    // Superseding the last active note used to unlink the digest, which removes
-    // a whole block from the system prompt mid-session.
-    expect(await readFile(digestPath, "utf8")).toBe(before);
+    await expect(readFile(digestPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(join(notesDir, "decisions.yaml"), "utf8")).toContain("superseded");
   }, (STARTUP_TIMEOUT_MS + 5000) * 2);
 
   it("refuses to write anything without explicit user approval", async () => {
@@ -329,7 +323,7 @@ describe("recording a decision end to end", () => {
     const text = textOf(missed);
     expect(text).toContain("No note matched that query");
     expect(text).toContain("1 active note");
-    expect(text).toContain("without a `query`");
+    expect(text).toContain("omit query");
   }, STARTUP_TIMEOUT_MS + 5000);
 
   it("finds a note from a plain question", async () => {
@@ -396,6 +390,65 @@ describe("recording a decision end to end", () => {
 
     expect(textOf(recorded)).toContain("fit the session digest");
   }, STARTUP_TIMEOUT_MS + 5000);
+
+  it("serves exact recall in compact while rejecting both write tools", async () => {
+    const [recorded] = await converse(env, [callTool("remember_decision", {
+      title: "Scoped configuration choice", decision: "Keep this choice.", files: ["packages/lights.yaml"], user_approved: true,
+    })]);
+    const id = textOf(recorded).match(/as `([^`]+)`/)?.[1];
+    const [recalled, add, retire] = await converse({ ...env, OPENCODE_MCP_TOOL_PROFILE: "compact" }, [
+      callTool("recall_decisions", { id }),
+      callTool("remember_decision", { title: "Denied", decision: "Do not save.", user_approved: true }),
+      callTool("supersede_decision", { ids: [id], user_approved: true }),
+    ]);
+    expect(recalled.isError).toBeFalsy();
+    expect(textOf(recalled)).toContain("Scoped configuration choice");
+    expect(add.isError).toBe(true);
+    expect(retire.isError).toBe(true);
+    expect(parseDecisionNotes(await readFile(join(notesDir, "decisions.yaml"), "utf8")).notes[0].status).toBe("active");
+  }, (STARTUP_TIMEOUT_MS + 5000) * 2);
+
+  it("does not read, write or refresh notes when the feature is disabled", async () => {
+    const source = "version: 1\nnotes: []\n";
+    await writeFile(join(notesDir, "decisions.yaml"), source);
+    await writeFile(digestPath, "context must remain untouched");
+    const results = await converse({ ...env, OPENCODE_DECISION_NOTES: "false" }, [
+      callTool("recall_decisions", {}),
+      callTool("remember_decision", { title: "Denied", decision: "No.", user_approved: true }),
+      callTool("supersede_decision", { ids: ["fixture"], user_approved: true }),
+    ]);
+    expect(results.every((result) => result.isError)).toBe(true);
+    expect(await readFile(join(notesDir, "decisions.yaml"), "utf8")).toBe(source);
+    expect(await readFile(digestPath, "utf8")).toBe("context must remain untouched");
+    await expect(readFile(join(notesDir, "decisions.yaml.backup"))).rejects.toMatchObject({ code: "ENOENT" });
+  }, STARTUP_TIMEOUT_MS + 5000);
+
+  it("reports a successful save separately when the digest cannot be refreshed", async () => {
+    await mkdir(digestPath); // a directory must never be replaced as a digest
+    const [recorded] = await converse(env, [callTool("remember_decision", {
+      title: "Saved despite projection error", decision: "Keep this approved choice.", user_approved: true,
+    })]);
+    expect(recorded.isError).toBeFalsy();
+    expect(textOf(recorded)).toContain("Saved; context refresh failed");
+    expect(await readFile(join(notesDir, "decisions.yaml"), "utf8")).toContain("Saved despite projection error");
+  }, STARTUP_TIMEOUT_MS + 5000);
+
+  it("exposes working bounded pagination and rejects a stale cursor through MCP", async () => {
+    const records = Array.from({ length: 130 }, (_, i) => ({ id: `fixture-${i}`, date: "2026-10-01", title: `Choice ${i}`, decision: "Keep this setting.", status: "active" }));
+    await writeFile(join(notesDir, "decisions.yaml"), JSON.stringify({ version: 1, notes: records }));
+    const [first] = await converse(env, [callTool("recall_decisions", { limit: 100 })]);
+    const page = JSON.parse(textOf(first).split("Page: ")[1]);
+    expect(page.has_more).toBe(true);
+    expect(Buffer.byteLength(textOf(first))).toBeLessThanOrEqual(8192);
+    const [next] = await converse(env, [callTool("recall_decisions", { limit: 100, cursor: page.next_cursor })]);
+    expect(next.isError).toBeFalsy();
+    const ids = (value) => [...textOf(value).matchAll(/- id: `([^`]+)`/g)].map((match) => match[1]);
+    expect(ids(first).some((id) => ids(next).includes(id))).toBe(false);
+    await writeFile(join(notesDir, "decisions.yaml"), JSON.stringify({ version: 1, notes: records.slice(1) }));
+    const [stale] = await converse(env, [callTool("recall_decisions", { limit: 100, cursor: page.next_cursor })]);
+    expect(stale.isError).toBe(true);
+    expect(textOf(stale)).toContain("Restart recall");
+  }, (STARTUP_TIMEOUT_MS + 5000) * 3);
 
   it("rejects a note containing a credential", async () => {
     const [result] = await converse(env, [
