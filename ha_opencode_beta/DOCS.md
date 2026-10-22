@@ -14,7 +14,9 @@ OpenChamber uses immutable commit `ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd`, bu
 with Bun `1.4.3` and the reviewed security lock. This beta refreshes the private-backend,
 Git and translated update-notice patches and uses upstream's streaming-proxy fix.
 This version fixes blank OpenChamber Terminal panes through Home Assistant ingress
-and direct access. It retains expanded 2 MiB decision-note storage, history backups
+and direct access. It also keeps recovered workspaces selected after reload and
+lets you retry failed selection saves without clearing conversation navigation.
+It retains expanded 2 MiB decision-note storage, history backups
 and coordinated writes, bounded paginated/exact recall, and small-digest refreshes
 after approved changes. See [Decision notes](#home-context-beta)
 for limits and recovery guidance. It retains the OpenAI browser/device sign-in

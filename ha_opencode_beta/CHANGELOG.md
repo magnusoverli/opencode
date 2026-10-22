@@ -2,11 +2,10 @@
 
 ## [Unreleased]
 
-- Keep a recovered workspace selected after reload instead of reopening the missing directory, and report failed selection saves without clearing conversation navigation.
-
 ## 3.2.4b6
 
 - Fix the blank OpenChamber Terminal pane by loading its WebAssembly renderer correctly through Home Assistant ingress and direct access ([#194](https://github.com/magnusoverli/opencode/issues/194)).
+- Keep a recovered workspace selected after reload instead of reopening the missing directory, and report failed selection saves without clearing conversation navigation.
 - Correct the published 3.2.4b5 release notes.
 
 ## 3.2.4b5
