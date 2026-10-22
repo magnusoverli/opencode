@@ -2,7 +2,7 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.2.4b5** is based on released **stable 3.2.3**, with pinned OpenCode `2.1.2`
+Beta **3.2.4b6** is based on released **stable 3.2.3**, with pinned OpenCode `2.1.2`
 and OpenChamber `2.5.0`, stable's desktop/mobile workspace recovery, and live PPQ
 private-model discovery. The unrelated post-3.2.3 Zigporter compatibility patch
 is not included. Beta keeps its own app identity and persistent storage; installing
@@ -13,9 +13,10 @@ is tracked in [#45](https://github.com/magnusoverli/opencode/issues/45).
 OpenChamber uses immutable commit `ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd`, built
 with Bun `1.4.3` and the reviewed security lock. This beta refreshes the private-backend,
 Git and translated update-notice patches and uses upstream's streaming-proxy fix.
-This version expands decision-note storage to 2 MiB, preserves history with
-backups and coordinated writes, adds bounded paginated/exact recall, and refreshes
-the small digest after approved changes. See [Decision notes](#home-context-beta)
+This version fixes blank OpenChamber Terminal panes through Home Assistant ingress
+and direct access. It retains expanded 2 MiB decision-note storage, history backups
+and coordinated writes, bounded paginated/exact recall, and small-digest refreshes
+after approved changes. See [Decision notes](#home-context-beta)
 for limits and recovery guidance. It retains the OpenAI browser/device sign-in
 fixes, parser-based safe-write validation, guarded global Markdown agent imports
 and the opt-in for remote TTS/STT servers. Installed Supervisor
