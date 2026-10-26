@@ -3,34 +3,34 @@
 Your Home Assistant configuration assistant, powered by OpenCode V2. Use the
 terminal or OpenChamber web workspace with one shared, app-managed backend.
 
-## 3.3.3 withdrawn — remain on 3.3.1
+## Upgrading to 3.3.4 — replaces withdrawn 3.3.3
 
-**Do not install 3.3.3.** A runtime fault has been reported and is under
-investigation. The stable listing is temporarily restored to **3.3.1**.
-If you already upgraded to 3.3.3, **restore a pre-upgrade Home Assistant backup**
-including the app and its data; do not downgrade in place against upgraded data.
-Supervisor may offer 3.3.1 because it treats any version difference as an update.
+**Back up the stable app, its options and configuration before updating.**
+3.3.4 fixes `v2_upgrade_records_changed` when the native converter's startup
+cleanup archives a temporarily unavailable project directory. It preserves the
+original project placement and archive state in the private upgrade copy, then
+runs the same strict history, credential and permission checks before activation.
 
-The reported `v2_upgrade_records_changed` startup failure has been reproduced
-with temporarily unavailable project directories. A source fix is being
-qualified; it is not yet a published replacement release. If startup stops at
-this check, the prior generation is preserved: do not delete databases,
-generations or migration journals to work around it. See the
+If 3.3.3 stopped at this error, the prior generation is preserved: update the
+same stable app to **3.3.4** to retry. Do not delete databases, generations or
+migration journals. **Do not install 3.3.3 or downgrade in place to 3.3.1.**
+Rollback requires a pre-upgrade Home Assistant backup including the app and data.
+See the
 [project upgrade regression record](test/QUALIFICATION-PROJECT-UPGRADE.md).
 
-### Withdrawn 3.3.3 component details
-
-Stable **3.3.3** pins OpenCode CLI/plugin **2.1.4**, OpenChamber
-**2.5.2** and hab **1.8.0**. Existing 2.1.2 state upgrades through a validated
-private copy in automated tests; a runtime fault is now under investigation. Beta retains its
+Stable **3.3.4** retains OpenCode CLI/plugin **2.1.4**, OpenChamber
+**2.5.2**, hab **1.8.0** and the preceding security fixes. Beta retains its
 existing release and runtime pins; only the approved source security dependencies
 were refreshed. 3.3.2's native build failed before publishing images; its intended
 replacement 3.3.3 is now withdrawn. Original version tags are retained unchanged.
 OpenChamber retains the Home Assistant editor, Ingress, authentication and managed
 update patches, with refreshed security dependencies and Git credential isolation.
 These are image-delivered changes, not a runtime self-update. Native image checks
-gate image publication; installed Supervisor acceptance remains unverified. See the
-[release qualification record](test/QUALIFICATION-3.3.3.md).
+gate image publication; installed Supervisor acceptance remains unverified.
+
+An Assist refusal about a user-managed companion is a separate ownership
+protection, not the cause of the managed-backend startup failure. This update
+does not overwrite a manual or edited companion installation.
 
 ## Upgrading to 3.3
 

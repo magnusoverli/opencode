@@ -3,13 +3,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 3.3.4
+
+**Before updating:** back up the stable app, its options and Home Assistant configuration. If 3.3.3 stopped at `v2_upgrade_records_changed`, update the same stable app to retry with the preserved data; do not delete databases or migration journals. Restore a pre-upgrade backup to roll back instead of downgrading against upgraded data.
+
 - Fix upgrades stopping at `v2_upgrade_records_changed` when startup cleanup archives a temporarily unavailable project; preserve project placement and archive state while retaining strict history, credential and permission checks.
-- Withdraw 3.3.3 after a reported fault and restore the stable listing to 3.3.1; users already on 3.3.3 must restore a pre-upgrade backup rather than downgrade against upgraded data.
-- Add a manually triggered, digest-guarded emergency restore for the stable 3.3.1 latest image aliases without changing version tags.
+- Retain OpenCode 2.1.4, OpenChamber 2.5.2, hab 1.8.0 and the security fixes from withdrawn 3.3.3; beta is not changed or released.
+- Add native project-cleanup regression coverage and a guarded emergency restore for the previous stable image aliases; 3.3.3 remains withdrawn.
 
 ## 3.3.3
 
-**WITHDRAWN:** a runtime fault has been reported and is under investigation. Do not install this version. Stable is temporarily advertised as 3.3.1. If already upgraded, restore a pre-upgrade backup; do not perform an in-place downgrade against upgraded data.
+**WITHDRAWN:** project cleanup during private state conversion could stop startup at `v2_upgrade_records_changed`. Do not install this version; use 3.3.4. The stable listing was temporarily restored to 3.3.1 during investigation. Do not downgrade against upgraded data; rollback requires a pre-upgrade backup.
 
 **Before updating:** back up the stable app, its options and Home Assistant configuration. Restore that backup to roll back; do not run an older runtime against upgraded data.
 
@@ -19,7 +23,7 @@ All notable changes to this project will be documented in this file.
 
 ## 3.3.2
 
-**Publication status:** native validation failed before container images were published; 3.3.3 has also been withdrawn. Remain on 3.3.1 if not already upgraded. The original tags are retained unchanged.
+**Publication status:** native validation failed before container images were published; 3.3.3 has also been withdrawn. Use 3.3.4. The original tags are retained unchanged.
 
 **Before updating:** back up the stable app, its options and Home Assistant configuration. Restore that backup to roll back; do not run an older runtime against upgraded data. Beta remains unchanged.
 

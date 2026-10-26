@@ -50,6 +50,19 @@ Local migration suite: **17 passed**. Full stable contracts: **532 passed,
 12 skipped**, with isolated HOME/XDG/Git configuration and CI's 022 umask.
 The first broad local run used the host's group-writable umask and three
 agent-storage safety tests rejected their fixtures; no product check was relaxed.
-Native image CI must finish successfully before publishing a replacement. Installed Supervisor
-upgrade acceptance remains separate; 3.3.3 stays withdrawn and the storefront
-remains on 3.3.1 during qualification.
+Candidate commit: `5f1d69d0e960d535229b05f028355aaa2dd81c01`.
+
+- [Native image CI](https://github.com/magnusoverli/opencode/actions/runs/40293341062):
+  passed on amd64 and arm64, including the network-disabled project-sweep fixture.
+- [Shared PR checks](https://github.com/magnusoverli/opencode/actions/runs/40293341085):
+  passed, including both channels' MCP suites, dependency audits, full contracts,
+  root privilege boundaries, companion packaging and functional shell tests.
+  The preceding candidate's unchanged beta MCP test hit a 20-second timeout;
+  no beta test, timeout or audit policy was changed to obtain the green result.
+
+3.3.4 release preparation changes only the manifest version and release
+documentation; executable source matches this validated candidate. Verify the
+tagged builds, both public architecture images, version/latest manifests,
+architecture aliases and all release assets after publication. Installed
+Supervisor upgrade acceptance remains separate and unperformed. 3.3.3 stays
+withdrawn; no live Home Assistant state was modified here.
