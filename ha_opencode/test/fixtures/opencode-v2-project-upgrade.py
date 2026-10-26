@@ -6,6 +6,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+import time
 
 
 sys.dont_write_bytecode = True
@@ -53,7 +54,33 @@ def qualify(binary):
         MIGRATOR.snapshot_database(database, baseline)
         baseline_bytes = baseline.read_bytes()
 
-        MIGRATOR.convert_candidate(candidate, binary, 30, None)
+        # Migration readiness and the asynchronous startup sweep can race.
+        # Keep the real converter alive until this regression's fault has
+        # actually occurred; do not turn a fast successful startup into a skip.
+        stop_process = MIGRATOR.stop_process
+
+        def stop_after_sweep(process):
+            try:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    with sqlite3.connect(database) as connection:
+                        archived = connection.execute(
+                            "SELECT time_archived FROM project WHERE id='missing'"
+                        ).fetchone()[0]
+                    if archived is not None:
+                        return
+                    if process.poll() is not None:
+                        raise AssertionError("converter exited before startup sweep")
+                    time.sleep(0.02)
+                raise AssertionError("real converter startup sweep timed out")
+            finally:
+                stop_process(process)
+
+        MIGRATOR.stop_process = stop_after_sweep
+        try:
+            MIGRATOR.convert_candidate(candidate, binary, 30, None)
+        finally:
+            MIGRATOR.stop_process = stop_process
         with sqlite3.connect(database) as connection:
             assert connection.execute(
                 "SELECT time_archived FROM project WHERE id='missing'"

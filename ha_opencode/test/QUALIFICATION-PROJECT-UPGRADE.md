@@ -41,6 +41,10 @@ modify beta. Missing records and unrelated metadata changes still fail closed.
   permits a clean retry; restart and downgrade-refusal checks remain in place.
 - The new fixture is included in the network-disabled native amd64/arm64
   `boundary-test` image target, not only local/PR tests.
+- The native fixture waits up to ten seconds for the asynchronous sweep before
+  stopping its synthetic converter, so readiness cannot race away the fault.
+  The first native run exposed that fixture timing issue; the production
+  converter's readiness/cleanup behavior was not changed to address it.
 
 Local migration suite: **17 passed**. Full stable contracts: **532 passed,
 12 skipped**, with isolated HOME/XDG/Git configuration and CI's 022 umask.
