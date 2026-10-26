@@ -3,10 +3,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 3.3.3
+
+**Before updating:** back up the stable app, its options and Home Assistant configuration. Restore that backup to roll back; do not run an older runtime against upgraded data.
+
+- Deliver OpenCode 2.1.4, OpenChamber 2.5.2 and hab 1.8.0 with the reviewed Home Assistant patches; 3.3.2 did not publish container images.
 - Fix the native startup fixture's mock context window without relaxing credential, model or disabled-search checks; update the MCP server's Zod dependency to address GHSA-mrhx-c7xc-m3w5.
 - Patch Zod and undici in the private-encryption runtime while retaining its SDK version and encrypted-only request policy.
 
 ## 3.3.2
+
+**Publication status:** native validation failed before container images were published; use 3.3.3 instead. The original tag is retained unchanged.
 
 **Before updating:** back up the stable app, its options and Home Assistant configuration. Restore that backup to roll back; do not run an older runtime against upgraded data. Beta remains unchanged.
 

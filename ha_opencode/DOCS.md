@@ -3,16 +3,19 @@
 Your Home Assistant configuration assistant, powered by OpenCode V2. Use the
 terminal or OpenChamber web workspace with one shared, app-managed backend.
 
-## Upgrading to 3.3.2
+## Upgrading to 3.3.3
 
-Stable **3.3.2** pins OpenCode CLI/plugin **2.1.4**, OpenChamber
+Stable **3.3.3** pins OpenCode CLI/plugin **2.1.4**, OpenChamber
 **2.5.2** and hab **1.8.0**. Existing 2.1.2 state upgrades through a validated
-private copy, preserving conversations, sign-ins and permissions. Beta is unchanged.
+private copy, preserving conversations, sign-ins and permissions. Beta retains its
+existing release and runtime pins; only the approved source security dependencies
+were refreshed. 3.3.2's native build failed before publishing images; 3.3.3 replaces
+it without moving the original tag.
 OpenChamber retains the Home Assistant editor, Ingress, authentication and managed
 update patches, with refreshed security dependencies and Git credential isolation.
 These are image-delivered changes, not a runtime self-update. Native image checks
 gate image publication; installed Supervisor acceptance remains unverified. See the
-[component qualification record](test/QUALIFICATION-COMPONENTS-2.1.4-2.5.2.md).
+[release qualification record](test/QUALIFICATION-3.3.3.md).
 
 ## Upgrading to 3.3
 
