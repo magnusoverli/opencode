@@ -61,10 +61,24 @@ credentials and never opens interactive setup or loads a project `.env`.
 
 ## Renaming — the thing zigporter is for
 
-`hab entity rename` changes the **friendly name**, not the entity ID. The pinned
-CLI has no `entity update` or `device update`. Use `zigporter` for cascade renames
+`hab entity rename` changes the **friendly name**, not the entity ID. hab 1.8.0
+also offers `entity update` and `device update` for verified registry metadata
+edits. Use `hab_run(args=["schema","entity","update"])` / `guide registry` for
+the exact contract. Preview with `--plan`, review the live `changes`, and apply
+only with approval. Empty supported overrides clear; labels/aliases replace the
+whole collection. Explicit `--disabled=false` enables; disabling a device affects
+its entities. Check `saved` / `verified` or `error.details.result`; uncertain saves
+must not be retried blindly. Metadata verification is not runtime activation;
+enabling may need an approved reload/restart. Registry plans have no revision lock.
+
+`hab entity update --entity-id` changes an ID within its domain and preserves
+`unique_id`, but **does not rewrite references**. Related items are not exhaustive:
+dashboards, templates and dynamic references need separate review. History and
+statistics migration is handled by HA and is not verified or repaired by hab;
+check energy/power history after renaming. Use `zigporter` for cascade renames
 across automations, scripts, scenes and Lovelace dashboards, inspecting the dry
-run and the template-reference limitation below.
+run and the template-reference limitation below. Use full IDs for other MCP tools;
+hab's discovered `short_id` prefixes apply only to its supported selectors.
 
 ```
 zigporter rename-entity light.old_id light.new_id      # dry run (the default)

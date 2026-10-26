@@ -125,7 +125,7 @@ test("UI controller validates before writing, serializes mutations, verifies act
   const managedPath = join(root, "managed.json");
   const importer = { managedPath, refresh: async () => { if (failures) { writes++; throw new Error("private backend error"); } const scanned = await store.scan(); return { applied: [...scanned.entries.keys()], rejected: scanned.errors }; } };
   const client = {
-    server: { info: async () => ({ version: "2.1.2" }) },
+    server: { info: async () => ({ version: "2.1.4" }) },
     config: { get: async () => [{ type: "document", path: managedPath, info: { agents: Object.fromEntries([...(await store.scan()).entries].map(([id, entry]) => [id, constrainAgent(entry.config, guards)])) } }] },
     agent: { get: async ({ agentID }) => { const entry = (await store.scan()).entries.get(agentID); return { data: entry ? constrainAgent(entry.config, guards) : null }; } },
   };

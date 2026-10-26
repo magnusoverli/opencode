@@ -210,6 +210,17 @@ command's native compact schema; payload/output contracts and schema IDs are ret
 Load one `guide` topic when useful. Use specific filters and
 `--brief`/`--count`/`--limit` when supported. Schema side-effect labels and `--plan`
 are advisory, not proof of permission, a live diff or complete validation.
+hab 1.8.0's entity/device/area/floor/label `update --plan` reads live metadata;
+review `changes` before approval. Omitted fields stay; empty values clear supported
+overrides; labels/aliases replace collections. Registry plans have no revision lock.
+Check `saved` and `verified`; metadata verification does not prove runtime activation.
+`entity update --entity-id` preserves `unique_id` but rewrites no references and
+does not verify history/statistics migration. Use zigporter for cascade renames,
+with template review. Load `guide registry` for metadata edits.
+Copy `short_id` from discovery only for supported hab selectors; never shorten
+entity IDs/slugs or pass prefixes to other MCP tools. Inspect `metadata.resolved_ids`;
+ambiguous prefixes need fresh discovery, not guessing. Scoped IDs need the same
+scope (calendar events also need the same start/end window).
 For dashboard fields, prefer `dashboard patch`: preview the diff with `--plan`,
 then apply with its unchanged `base_revision` as `--if-match`. Inspect `status`,
 `saved`, `verified` (or `error.details.result`); conflicts require a fresh review.
@@ -232,8 +243,9 @@ expose the tool, report that limitation and use available read-only MCP tools.
 
 Zigbee device management, including **cascade rename** workflows across
 automations, scripts, scenes and Lovelace dashboards; inspect the dry run and
-template-reference limitations. `hab entity rename` changes a friendly name,
-not an entity ID. Also handles device
+template-reference limitations. `hab entity rename` changes a friendly name;
+`hab entity update --entity-id` changes only the registry ID, not its references.
+Also handles device
 inspection across ZHA/Z2M/HA, stale-device cleanup, and mesh visualization.
 
 Dry-run is the default for renames — always preview before `--apply`. The

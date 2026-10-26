@@ -210,7 +210,7 @@ Use these prompts for complex tasks:
 
 The `hab_run` MCP tool provides access to the full Home Assistant admin CLI. It wraps the `hab` (Home Assistant Builder) CLI as a native MCP tool.
 
-The app pins **hab 1.7.2**. Prefer `hab_run(args=[...])`: each argument stays literal,
+The app pins **hab 1.8.0**. Prefer `hab_run(args=[...])`: each argument stays literal,
 including JSON, templates, apostrophes and spaces. The legacy `command` string is
 also accepted; pass exactly one form. The gateway defaults to JSON and disables
 CLI update checks. Shell hab defaults to JSON when non-interactive, text otherwise.
@@ -234,6 +234,60 @@ to `--if-match` on apply. Exact JSON Pointer targets select objects; deep merges
 preserve unrelated fields, supplied arrays replace, and `--remove` deletes fields.
 Existing card/view `update --data` commands still replace the selected object.
 Entity rename changes its friendly name, not its entity ID.
+
+### Verified registry metadata edits
+
+Use `entity update` for names, icons, areas, labels, aliases, scoped categories,
+device class and hidden/disabled overrides; `device update` supports name, area,
+labels and disabled status. Area updates also support aliases, labels, pictures
+(URL/path, not upload), and matching temperature/humidity sensor assignments;
+floors support aliases. Discover the exact schema and `guide registry` first.
+Keep the existing `set_device_area` / `set_entity_area` tools for simple room
+assignments with exact IDs; there is no need to switch all operations to hab.
+
+1. Read the resource and referenced IDs. Preview with `--plan` / `--dry-run`:
+   entity/device/area/floor/label updates read live values and validate references.
+2. Show `changes` before applying with approval. Omitted fields stay unchanged.
+   Empty strings clear supported overrides; empty lists clear labels/aliases.
+   **Labels and aliases replace the whole collection**, not append. Preserve the
+   existing members unless the user approved their removal. Alias order matters
+   for entities. Use explicit `--hidden=false` / `--disabled=false` to reverse a
+   user override. Device disabling affects its entities.
+3. Inspect `mode`, `saved`, `verified` and warnings; failures retain the result at
+   `error.details.result`. Device/area/floor/label no-ops skip writing. A preview
+   is not a save. `saved: null` is uncertain: inspect before retrying, never auto-retry.
+   Registry plans have **no revision lock**; re-review if current metadata changed.
+4. Verification confirms registry metadata, not visibility or runtime availability.
+   Enabling may require reload/restart; report activation warnings and request
+   separate approval. Integration-specific options are unsupported.
+
+`entity update --entity-id` can change an ID within its domain, preserving
+`unique_id` and checking collisions. It **does not rewrite references**. Related
+items are not an exhaustive scan: dashboards, templates and dynamic references
+need separate review even when the list is empty. Keep zigporter for approved
+cascade renames, including its template limitations. HA handles recorder migration;
+hab does not verify or repair history/statistics migration. Check energy/power
+history after ID changes. For uncertain renames, inspect both old and new IDs.
+
+### Short resource IDs
+
+Discovery preserves full opaque IDs and adds `short_id`; `id list <resource>`
+covers other resources. Copy the returned prefix (at least eight characters)
+only into hab selectors supported by the exact schema's `short_id_inputs`.
+Never truncate IDs yourself. Entity IDs, readable slugs and dashboard paths remain
+exact. Other MCP tools still require their exact IDs, not hab prefixes.
+
+Resolution rechecks current data and rejects ambiguous prefixes before writing;
+inspect `metadata.resolved_ids` for expansions. Exact IDs take priority. Categories,
+to-do items, traces and repairs are scoped; calendar event prefixes need the same
+`--start` / `--end` window as discovery. Typed references in supported JSON/YAML
+payloads can expand too; templates and arbitrary variables are not rewritten.
+Resolution may need live authentication even for an otherwise static preview.
+JSON lists include both full and short IDs, so shorter arguments do not guarantee
+smaller discovery results. The gateway invalidates registry and state caches around
+connected CLI operations, including failed or uncertain writes.
+
+### Dashboard verification and command outcomes
 
 Patch `status: verified` confirms stored JSON; `noop` performs no save. On failures,
 inspect `error.details.result.saved` and `.verified`: `saved: null` is uncertain,
@@ -264,6 +318,7 @@ hab_run(args=["schema", "dashboard", "card", "update"])
 hab_run(args=["guide", "dashboard"])
 
 # Focused reads
+hab_run(args=["id", "list", "device"])
 hab_run(args=["entity", "list", "--domain", "light", "--brief", "--limit", "20"])
 hab_run(args=["entity", "get", "light.living_room", "--related"])
 hab_run(args=["automation", "list", "--brief"])
@@ -275,6 +330,16 @@ hab_run(args=["dashboard", "card", "get", "my-dashboard", "home", "0", "--sectio
 hab_run(args=["dashboard", "patch", "my-dashboard", "--target", "/views/0/cards/0", "--data", "{\"name\":\"Kitchen\"}", "--plan"])
 # Replace the placeholder with the exact base_revision returned above
 hab_run(args=["dashboard", "patch", "my-dashboard", "--target", "/views/0/cards/0", "--data", "{\"name\":\"Kitchen\"}", "--if-match", "sha256:<base_revision>"])
+
+# Registry previews; omit --plan only after approval of the exact changes
+hab_run(args=["schema", "entity", "update"])
+hab_run(args=["guide", "registry"])
+hab_run(args=["entity", "update", "light.kitchen", "--name", "Kitchen light", "--icon", "mdi:ceiling-light", "--plan"])
+hab_run(args=["entity", "update", "light.kitchen", "--icon", "", "--hidden=false", "--plan"])
+hab_run(args=["device", "update", "<device_id>", "--area", "kitchen", "--disabled=false", "--plan"])
+hab_run(args=["area", "update", "kitchen", "--aliases", "Kitchen,Cooking area", "--plan"])
+hab_run(args=["floor", "update", "ground", "--aliases", "Ground floor,Downstairs", "--plan"])
+hab_run(args=["label", "update", "lighting", "--description", "", "--plan"])
 
 # Approved API actions that return data; MCP call_service is normally preferred
 hab_run(args=["action", "call", "weather.get_forecasts", "--entity", "weather.home", "--data", "{\"type\":\"daily\"}", "--return-response"])
@@ -318,7 +383,7 @@ The `zigporter_run` MCP tool provides access to zigporter — a Zigbee device ma
 ### When to Use zigporter_run vs Other Tools
 
 - **Use zigporter_run** for: cascade entity/device renames (patches automations, scripts, scenes, dashboards), Zigbee device inspection across integrations, stale device cleanup, Z2M device listing, mesh visualization
-- **Use hab_run** for: entity friendly-name changes, dashboard CRUD, area management, helpers, backups
+- **Use hab_run** for: verified entity/device metadata edits, deliberate registry-only entity-ID changes (no reference rewrite), dashboard CRUD, area management, helpers, backups
 - **Use MCP tools** for: entity state queries, service calls, config writing, history, diagnostics
 
 ### Key difference: cascade rename

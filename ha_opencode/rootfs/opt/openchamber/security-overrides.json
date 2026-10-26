@@ -1,13 +1,14 @@
 {
   "qs": "6.16.0",
-  "body-parser": "2.3.0",
+  "body-parser": "2.4.0",
   "compression": "1.8.2",
   "proxy-addr": "2.0.8",
   "follow-redirects": "1.16.1",
   "http-proxy-middleware": "3.0.7",
   "picomatch@2": "2.3.2",
-  "undici@6": "6.29.0",
+  "undici@6": "6.29.1",
   "path-to-regexp": "8.4.2",
   "simple-git": "4.0.2",
-  "yaml": "2.9.1"
+  "yaml": "2.9.1",
+  "zod": "4.6.6"
 }

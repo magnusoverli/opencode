@@ -3,6 +3,17 @@
 Your Home Assistant configuration assistant, powered by OpenCode V2. Use the
 terminal or OpenChamber web workspace with one shared, app-managed backend.
 
+## Upgrading to 3.3.2
+
+Stable **3.3.2** pins OpenCode CLI/plugin **2.1.4**, OpenChamber
+**2.5.2** and hab **1.8.0**. Existing 2.1.2 state upgrades through a validated
+private copy, preserving conversations, sign-ins and permissions. Beta is unchanged.
+OpenChamber retains the Home Assistant editor, Ingress, authentication and managed
+update patches, with refreshed security dependencies and Git credential isolation.
+These are image-delivered changes, not a runtime self-update. Native image checks
+gate image publication; installed Supervisor acceptance remains unverified. See the
+[component qualification record](test/QUALIFICATION-COMPONENTS-2.1.4-2.5.2.md).
+
 ## Upgrading to 3.3
 
 Stable **3.3.1** fixes V1 history migration when a conversation contains a
@@ -196,7 +207,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 
 ## OpenCode 3.3 at a glance
 
-- **Official V2 runtime**: CLI and plugin are pinned to OpenCode `2.1.2` using the official `@opencode` packages.
+- **Official V2 runtime**: CLI and plugin are pinned to OpenCode `2.1.4` using the official `@opencode` packages.
 - **Forward state upgrades**: Earlier V2 data upgrades through a validated private copy, preserving conversations, sign-ins and permissions. Successful upgrades remove obsolete generations; failed conversion preserves its input and reports an error. There is no application runtime fallback or rollback selector.
 - **V2-only runtime**: One pinned OpenCode V2 server replaces V1 and the runtime selector. The server runs as root for Home Assistant filesystem compatibility; its attached terminal runs as UID `60001`.
 - **Managed CLI**: `opencode` and `opencode2` address the same V2 server. `opencode status`, `opencode service status`, and `opencode api GET /api/info` inspect the existing server without starting another daemon.
@@ -207,7 +218,7 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **ESPHome 2026.8 support**: Device Builder migrations can be previewed as validated, hash-guarded candidates; structured DNS/mDNS/ICMP troubleshooting and bounded crash decoding are available; naturally completed log and job streams now finish immediately.
 - **Startup hooks**: Your own `.sh` scripts, kept in your configuration directory, run once every time the add-on starts — the supported way to add a bridge or a small service without editing files inside the container, which never survives a restart. Off by default. See [Startup Hooks (Beta)](#startup-hooks-beta).
 - **Home context**: Sessions now start knowing your installation. A generated **Install briefing** describes your setup (version, areas, entity counts, configuration layout, integrations), **decision notes** carry lasting decisions between sessions once you approve them, and `AGENTS.local.md` holds your own instructions where add-on updates cannot overwrite them. Both options default on and switch off independently. See [Home Context (Beta)](#home-context-beta).
-- **OpenChamber V2**: The web interface is built from pinned release `2.5.0` source and a reviewed security dependency lock. It attaches to the same app-owned V2 backend as the terminal, with independently supervised UI lifecycle and Ingress-adapted assets.
+- **OpenChamber V2**: The web interface is built from pinned release `2.5.2` source and a reviewed security dependency lock. It attaches to the same app-owned V2 backend as the terminal, with independently supervised UI lifecycle and Ingress-adapted assets.
 - **Native Home Assistant MCP bridge**: Optional bridge from OpenCode to Home Assistant Core's native LLM MCP endpoint (`/api/mcp/<API ID>`, default `assist`) for testing the new native LLM/MCP platform when the running Home Assistant version supports it.
 - **Compact Home Assistant context**: New `get_home_context` MCP tool gives agents focused area/domain/entity context with area and device metadata instead of broad state dumps.
 - **Native LLM provider development guide**: New `get_ha_llm_development_guide` MCP tool helps custom integration authors build `<integration>/llm.py` tool providers aligned with Home Assistant's upstream architecture.
@@ -736,7 +747,7 @@ native tools. The bridge preserves supplied request metadata but does not invent
 a room/device identity. Native errors should be reported rather than retried
 through broader administrative tools.
 
-Local qualification uses the pinned OpenCode `2.1.2` process, the app's MCP
+Local qualification uses the pinned OpenCode `2.1.4` process, the app's MCP
 registration/forwarding code, and controlled HA/provider fixtures. It covers
 prompt consumption, resource discovery, fresh native context calls, required
 argument validation and read-only policy. Resource reads/cancellation also have
@@ -759,14 +770,44 @@ tools to inspect and transform that file before a whole-config dashboard write;
 never save a reconstruction from the preview. Files older than 24 hours are
 pruned on subsequent exports, and a container restart clears them.
 
-The app bundles **hab 1.7.2**, pinned to source
-`0bc138c6ab9f1bbe87914a0ffccbb038c0767e82`. `hab_run` accepts literal `args`
+The app bundles **hab 1.8.0**, pinned to source
+`f200a763798bc2a305c7fe0fad58dc0946e07861`. `hab_run` accepts literal `args`
 arrays and legacy `command` strings, uses native compact schemas by default,
 and preserves their payload/output contracts and schema identities. Search with
 `["schema","--index","--search","dashboard patch","--limit","10"]` and follow
 `next_offset` while `complete` is false. JSON is the default. The process-output bound is 16 MiB; the
 default deadline is 60 seconds, configurable up to 120. After a timeout or
 output-limit failure, inspect current state before retrying a mutation.
+
+Entity and device metadata can be edited through `entity update` / `device update`.
+These and area/floor/label updates support live `--plan` previews and separate
+`saved` / `verified` results. Review the before/after changes and approve before
+applying. Omitted fields stay; supported empty values clear overrides. Labels and
+aliases replace the whole collection; explicit `--disabled=false` enables. Areas
+support aliases, pictures, labels and temperature/humidity sensors; floors support
+aliases. Simple room assignments can still use the existing dedicated MCP tools.
+Registry plans have no revision lock. Verification confirms metadata, not runtime
+activation; enabling may require a separately approved reload/restart. A failed
+acknowledgement (`saved: null`) requires inspection, not automatic retry. Registry
+caches and short-lived state snapshots are invalidated around connected CLI
+operations, including uncertain writes, so later MCP context reads do not retain
+pre-edit registry metadata or entity IDs.
+
+**An entity-ID change is not a cascade rename.** `entity update --entity-id`
+preserves `unique_id` but rewrites no references. Related-item searches do not cover
+all dashboards/templates/dynamic references. Use zigporter for cascade renames
+with its documented template review. hab does not verify or repair recorder
+history/statistics migration; check energy/power history after ID changes.
+
+Opaque resource lists retain full IDs and include a unique `short_id` (at least
+eight characters). Copy it only into hab selectors supported by their schema;
+do not invent prefixes or pass them to other MCP tools. Human-readable entity IDs,
+slugs and dashboard paths remain exact. Ambiguous prefixes fail before writes;
+`metadata.resolved_ids` records expansions. Scoped IDs require the same scope;
+calendar events also require the same start/end window. Resolution needs live
+authentication even for some previews. JSON includes both ID forms, so discovery
+is not necessarily smaller. `id list <resource>` supplies additional discovery.
+Automation trace lookup now resolves entity IDs to their configuration IDs.
 
 Large artifacts retain the CLI envelope: extract successful `data` for a
 dashboard save. A CLI `--plan` can be a static preview; inspect current configuration
@@ -780,10 +821,23 @@ validity; HA has no atomic conditional save, so a final read/save race remains.
 Marketplace requires HA 2026.11+. CLI updates arrive
 through app updates; use dedicated ESPHome tools for long-running firmware work.
 
-OpenChamber is built from release `2.5.0`, source commit
-`ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd`. Its web package reports upstream
-version `2.5.0`; the immutable source identifies this release. Its client
+OpenChamber is built from release `2.5.2`, source commit
+`c4919abc1e7a0a3beeaa126666487806bf79cfe0`. Its web package reports upstream
+version `2.5.2`; the immutable source identifies this release. Its client
 dependencies are independent of the app's backend pin.
+
+This release adds the upstream Work sidebar, server-backed drafts, session
+mentions, worktree archiving and folder-trust prompts. Archiving removes the
+worktree directory while retaining its branch, sessions and uncommitted changes
+for restoration; review and approve it like other filesystem changes.
+Folder trust is an additional OpenChamber gate before opening executable project
+configuration, not a replacement for the app's managed backend policy. Existing
+projects are seeded as trusted once upstream; new executable configuration needs
+review. A trust answer does not enable disabled project configuration, third-party
+plugins or MCP connections, and it does not authorize Home Assistant changes.
+The CLI connects directly to the managed backend, so this UI gate does not protect
+CLI access or code already running. Memory-snapshot diagnostics require OpenCode
+2.1.4; snapshots can contain sensitive session data and must not be shared unreviewed.
 
 The UI binds to `127.0.0.1:3010` behind the app's Ingress proxy. Its backend
 credential stays in process memory, and it receives no Supervisor token. Stopping

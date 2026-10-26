@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { prepareHabRequest, splitHabCommand, formatHabExecution } from "../lib/hab-cli.js";
+import { prepareHabRequest, splitHabCommand, formatHabExecution, withHabRegistryInvalidation } from "../lib/hab-cli.js";
+import { createRegistryCache } from "../lib/registry-cache.js";
 
 const unwrap = (response) => JSON.parse(response.content[0].text);
 
@@ -10,6 +11,8 @@ test("literal argv preserves JSON, Jinja, apostrophes, spaces and empty values",
   assert.deepEqual(prepareHabRequest({ args: ["template", "render", ""] }).argv.slice(-1), [""]);
   assert.equal(prepareHabRequest({ args }).timeoutMs, 60000);
   assert.ok(!prepareHabRequest({ args: ["help", "--text"] }).argv.includes("--json"));
+  const update = ["entity", "update", "light.kitchen", "--icon", "", "--hidden=false", "--disabled=false", "--labels", "", "--plan"];
+  assert.deepEqual(prepareHabRequest({ args: update }).argv, ["--skip-update-check", "--json", ...update]);
 });
 
 test("legacy parsing handles adjacent/escaped quotes without interpreting a shell", () => {
@@ -73,10 +76,11 @@ test("native compact schemas retain payloads, output variants, string children a
   const args = ["schema", "dashboard", "patch"];
   const request = prepareHabRequest({ args });
   assert.deepEqual(request.argv, ["--skip-update-check", "--json", "schema", "--compact", "dashboard", "patch"]);
-  const data = { path: "hab dashboard patch", schema_version: "hab.command.v1.1", cli_version: "1.7.2",
+  const data = { path: "hab dashboard patch", schema_version: "hab.command.v1.1", cli_version: "1.8.0",
     schema_id: "sha256:fixture", envelope_ref: "hab.envelope.v1", transports: ["ws"], preview: "live_diff",
     payload_schema: { type: "object", open: true }, output_contract: { variants: [{ name: "full", data: { type: "object" } }] },
-    subcommands: ["hab dashboard patch child"], input_sources: ["flags"], side_effect: "write" };
+    subcommands: ["hab dashboard patch child"], input_sources: ["flags"], side_effect: "write",
+    short_id_inputs: [{ flag: "device", resource: "device", minimum_length: 8, live_resolution: true }] };
   const result = unwrap(formatHabExecution(request, JSON.stringify({ success: true, operation: "schema", data })));
   assert.deepEqual(result.data.data, data);
   assert.equal(result.data.metadata.compact_schema, true);
@@ -87,7 +91,7 @@ test("searchable discovery preserves query arguments, page bounds and continuati
   const request = prepareHabRequest({ args });
   assert.deepEqual(request.argv, ["--skip-update-check", "--json", ...args]);
   assert.equal(request.schemaDepth, 1);
-  const data = { schema_version: "hab.command.v1.1", cli_version: "1.7.2", envelope_ref: "hab.envelope.v1",
+  const data = { schema_version: "hab.command.v1.1", cli_version: "1.8.0", envelope_ref: "hab.envelope.v1",
     commands: [{ path: "hab dashboard patch", side_effect: "write" }], total: 2, offset: 0, complete: false, next_offset: 1 };
   const result = unwrap(formatHabExecution(request, JSON.stringify({ success: true, operation: "schema", data })));
   assert.deepEqual(result.data.data, data);
@@ -103,6 +107,59 @@ test("dashboard patch failures preserve save certainty and verification evidence
     assert.equal(result.isError, true);
     assert.deepEqual(unwrap(result).data.error, data.error);
   }
+});
+
+test("registry update evidence and short-ID expansion metadata pass through intact", () => {
+  const request = prepareHabRequest({ args: ["device", "update", "12345678", "--disabled=false"] });
+  const metadata = { resolved_ids: [{ resource: "device", scope: "", input: "12345678", id: "1234567890abcdef1234567890abcdef" }] };
+  for (const saved of [false, true, null]) {
+    const result = { mode: "apply", saved, verified: saved === true, changes: { disabled_by: { before: "user", after: null } } };
+    const envelope = saved === null
+      ? { success: false, error: { code: "REGISTRY_UPDATE_FAILED", details: { result, retryable: false } }, metadata }
+      : { success: true, data: result, metadata };
+    const formatted = formatHabExecution(request, JSON.stringify(envelope), saved === null ? { code: 1 } : undefined);
+    const actual = unwrap(formatted).data;
+    assert.deepEqual(actual.metadata, saved === null ? { ...metadata, exit_code: 1 } : metadata);
+    assert.deepEqual(saved === null ? actual.error.details.result : actual.data, result);
+    assert.equal(Boolean(formatted.isError), saved === null);
+  }
+});
+
+for (const outcome of ["success", "rejected", "uncertain", "timeout", "cancelled", "output-limit"]) {
+  test(`connected hab ${outcome} clears old and in-flight registry snapshots`, async () => {
+    let value = "before", release, ready;
+    const started = new Promise((resolve) => { ready = resolve; });
+    const cache = createRegistryCache(async () => value);
+    assert.equal(await cache.get("devices"), "before");
+    const operation = withHabRegistryInvalidation(
+      prepareHabRequest({ args: ["--json", "device", "update", "fixture", "--name", "after"] }),
+      () => cache.clear(),
+      async () => {
+        assert.equal(await cache.get("devices"), "before"); // Read during the CLI invocation.
+        await new Promise((resolve) => { release = resolve; ready(); });
+        if (outcome !== "rejected") value = "after";
+        if (outcome !== "success") throw new Error(outcome);
+        return "result";
+      },
+    );
+    await started;
+    release();
+    if (outcome === "success") assert.equal(await operation, "result");
+    else await assert.rejects(operation, new RegExp(outcome));
+    assert.equal(await cache.get("devices"), value);
+  });
+}
+
+test("local hab discovery does not invalidate registry caches; connected reads/previews are conservative", async () => {
+  let invalidations = 0;
+  for (const root of ["schema", "guide", "help", "version"]) {
+    assert.equal(await withHabRegistryInvalidation({ root }, () => invalidations++, async () => root), root);
+  }
+  assert.equal(invalidations, 0);
+  for (const args of [["device", "list"], ["area", "update", "kitchen", "--name", "Kitchen", "--plan"]]) {
+    await withHabRegistryInvalidation(prepareHabRequest({ args }), () => invalidations++, async () => null);
+  }
+  assert.equal(invalidations, 4);
 });
 
 test("CLI failures, partial results and interrupted mutations keep honest outcomes", () => {

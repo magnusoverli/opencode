@@ -1,5 +1,5 @@
 {
-  "revision": "ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd",
+  "revision": "c4919abc1e7a0a3beeaa126666487806bf79cfe0",
   "source": "packages/ui/src/lib/i18n/messages/*.ts: opencodeUpdate.toast.available.manualDescription",
   "messages": {
     "ar": "الإصدار {version} متاح. حدّث OpenCode بالطريقة التي ثبّته بها، ثم أعد تشغيل OpenChamber.",

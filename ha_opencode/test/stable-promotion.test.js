@@ -36,13 +36,14 @@ test("stable promotion aligns the native runtime and immutable UI pins", () => {
   const build = yaml("build.yaml");
   const pkg = JSON.parse(read("rootfs/opt/opencode-v2-homeassistant/package.json"));
   const lock = JSON.parse(read("rootfs/opt/opencode-v2-homeassistant/package-lock.json"));
-  assert.equal(build.args.OPENCODE_V2_VERSION, "2.1.2");
+  assert.equal(build.args.OPENCODE_V2_VERSION, "2.1.4");
   assert.equal(pkg.dependencies["@opencode/cli"], build.args.OPENCODE_V2_VERSION);
   assert.equal(pkg.dependencies["@opencode/plugin"], build.args.OPENCODE_V2_VERSION);
   assert.deepEqual(lock.packages[""].dependencies, pkg.dependencies);
   assert.equal(pkg.devDependencies["opencode-upgrade-previous"], "npm:@opencode/cli@2.0.26");
-  assert.equal(build.args.OPENCHAMBER_VERSION, "2.5.0");
-  assert.equal(build.args.OPENCHAMBER_REVISION, "ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd");
+  assert.equal(pkg.devDependencies["opencode-stable-previous"], "npm:@opencode/cli@2.1.2");
+  assert.equal(build.args.OPENCHAMBER_VERSION, "2.5.2");
+  assert.equal(build.args.OPENCHAMBER_REVISION, "c4919abc1e7a0a3beeaa126666487806bf79cfe0");
   const docker = read("Dockerfile");
   assert.ok(docker.includes(`ARG OPENCODE_V2_VERSION=${build.args.OPENCODE_V2_VERSION}`));
   assert.ok(docker.includes(`ARG OPENCHAMBER_VERSION=${build.args.OPENCHAMBER_VERSION}`));
@@ -58,7 +59,8 @@ test("stable promotion preserves the reviewed Zigporter compatibility overlay an
   assert.ok(fs.existsSync(path.join(addon, "compat/zigporter/manifest.json")));
   const migration = read("rootfs/usr/local/bin/opencode-v2-migrate.py");
   assert.match(migration, /^V2_UPGRADE_SOURCES = .*"2\.0\.26"/m);
-  assert.match(migration, /^V2_UPGRADE_TARGET = "2\.1\.2"$/m);
+  assert.match(migration, /^V2_UPGRADE_SOURCES = .*"2\.1\.2"/m);
+  assert.match(migration, /^V2_UPGRADE_TARGET = "2\.1\.4"$/m);
   assert.match(read("rootfs/etc/s6-overlay/s6-rc.d/init-opencode/run"), /agents-importer\.js "\$\{V2_CONFIG_TEMP\}"/);
 });
 

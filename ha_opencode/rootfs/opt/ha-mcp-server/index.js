@@ -108,7 +108,8 @@ import { createSupervisorAppsClient } from "./lib/supervisor-apps.js";
 import { setRegistryArea } from "./lib/registry-area.js";
 import { saveHabOutput } from "./lib/hab-output.js";
 import { createCommandOutputContent } from "./lib/command-output.js";
-import { HAB_MAX_OUTPUT_BYTES, prepareHabRequest, formatHabExecution } from "./lib/hab-cli.js";
+import { HAB_MAX_OUTPUT_BYTES, prepareHabRequest, formatHabExecution, withHabRegistryInvalidation } from "./lib/hab-cli.js";
+import { createRegistryCache } from "./lib/registry-cache.js";
 import { discoverNativeLlmApis } from "./lib/ha-llm-apis.js";
 import {
   ESPHomeDeviceBuilderClient,
@@ -493,7 +494,7 @@ async function getErrorLogWithFallback(lines) {
 
 // Short-lived cache for the full state dump â€” many tools fetch /states and
 // filter in JS; this collapses repeat fetches within a burst of agent calls
-const statesCache = { data: null, fetchedAt: 0, inflight: null };
+const statesCache = { data: null, fetchedAt: 0, inflight: null, generation: 0 };
 const STATES_CACHE_TTL = 3000;
 
 async function getCachedStates() {
@@ -504,19 +505,27 @@ async function getCachedStates() {
   if (statesCache.inflight) {
     return statesCache.inflight;
   }
-  statesCache.inflight = callHA("/states")
+  const generation = statesCache.generation;
+  const inflight = callHA("/states")
     .then((states) => {
-      statesCache.data = states;
-      statesCache.fetchedAt = Date.now();
+      if (generation === statesCache.generation) {
+        statesCache.data = states;
+        statesCache.fetchedAt = Date.now();
+      }
       return states;
     })
-    .finally(() => { statesCache.inflight = null; });
-  return statesCache.inflight;
+    .finally(() => {
+      if (statesCache.inflight === inflight) statesCache.inflight = null;
+    });
+  statesCache.inflight = inflight;
+  return inflight;
 }
 
 function invalidateStatesCache() {
+  statesCache.generation++;
   statesCache.data = null;
   statesCache.fetchedAt = 0;
+  statesCache.inflight = null;
 }
 
 // The service catalog changes only when an integration is set up or reloaded,
@@ -1902,18 +1911,10 @@ function callHAWebSocketCommand(commandType, timeoutMs = 5000, url = SUPERVISOR_
 }
 
 // Area/device registries change rarely; cache them to avoid a WS round trip per call
-const registryCache = new Map();
-const REGISTRY_CACHE_TTL = 300000; // 5 minutes
+const registryCache = createRegistryCache((type) => callHAWebSocketCommand(type));
 
 async function getRegistry(commandType) {
-  const cached = registryCache.get(commandType);
-  const now = Date.now();
-  if (cached && (now - cached.fetchedAt) < REGISTRY_CACHE_TTL) {
-    return cached.data;
-  }
-  const data = await callHAWebSocketCommand(commandType);
-  registryCache.set(commandType, { data, fetchedAt: now });
-  return data;
+  return registryCache.get(commandType);
 }
 
 function normalizeForMatch(value) {
@@ -3832,7 +3833,7 @@ const TOOLS = [
   {
     name: "hab_run",
     title: "Run hab CLI Command",
-    description: "Run pinned hab 1.7.2 for dashboards, helpers, registries and HA administration. Prefer args to preserve literal JSON/templates. ['schema'] gives compact discovery; ['schema','--index','--search','dashboard patch','--limit','10'] searches commands (follow next_offset until complete). ['schema',...commandPath] returns native compact payload/output contracts; ['guide','list'] lists topics. Prefer dashboard patch for field edits: inspect its --plan diff, then apply with the exact base_revision as --if-match. Check status/saved/verified or error.details.result; no blind retry of conflicts or uncertain saves. Verification proves stored JSON, not rendering; HA has no atomic conditional save. Other --plan modes may be static. Annotations never grant permission. Read before changes; YAML uses write_config_safe and approved reload. Check nested success/error/partial_result/warnings. Timeout leaves the outcome unverified. Large results provide meta.full_output_path; never reconstruct from a preview. Use dedicated ESPHome tools for long-running work.",
+    description: "Run pinned hab 1.8.0 for dashboards, helpers and registry administration (full profile). Prefer literal args. ['schema'] gives compact discovery; ['schema','--index','--search','entity update','--limit','10'] searches commands (follow next_offset); ['schema',...commandPath] retains exact payload/output contracts. Entity/device/area/floor/label update --plan reads live metadata; review changes before approval. Omitted fields stay; empty values clear supported overrides; labels/aliases replace collections; --disabled=false enables. Entity --entity-id preserves unique_id but rewrites NO references: use zigporter for cascade renames, with template review. Registry plans have no revision lock; saved/verified prove registry metadata, not activation. Copy short_id only from discovery for supported hab selectors, never other MCP tools; inspect metadata.resolved_ids. For dashboard fields prefer patch --plan then --if-match with its base_revision; check status/saved/verified or error.details.result. No blind retry of conflicts or uncertain saves (saved:null). Other plans may be static; annotations grant no permission. YAML uses write_config_safe and approved reload. Inspect nested success/error/partial_result/warnings. Timeouts leave outcomes unverified. Large results provide meta.full_output_path; never reconstruct from previews. Use dedicated ESPHome tools for long-running work.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3846,7 +3847,7 @@ const TOOLS = [
           items: { type: "string" },
           minItems: 1,
           maxItems: 256,
-          description: "Preferred argv array without hab. Examples: ['schema','dashboard','card','update'], ['entity','list','--domain','light','--brief','--limit','20'], ['helper','input-boolean','create','Guest Mode']. Each payload is one literal argument.",
+          description: "Preferred argv array without hab. Examples: ['schema','entity','update'], ['entity','update','light.kitchen','--icon','','--plan'], ['entity','list','--domain','light','--brief','--limit','20']. Each payload, including empty strings and explicit false values, stays literal.",
         },
         timeout_seconds: {
           type: "integer",
@@ -6858,7 +6859,10 @@ async function handleToolCall(request) {
         
         let result, failure;
         try {
-          result = await runCancellableExecFile("/usr/local/bin/hab", request.argv, {
+          result = await withHabRegistryInvalidation(request, () => {
+            registryCache.clear();
+            invalidateStatesCache();
+          }, () => runCancellableExecFile("/usr/local/bin/hab", request.argv, {
             timeoutMs: request.timeoutMs,
             maxBuffer: HAB_MAX_OUTPUT_BYTES,
             env: {
@@ -6869,7 +6873,7 @@ async function handleToolCall(request) {
               ...(HA_ACCESS_TOKEN ? { HA_ACCESS_TOKEN } : {}),
               ...esphomeEnv,
             },
-          });
+          }));
         } catch (error) {
           throwIfRequestCancelled();
           failure = error;

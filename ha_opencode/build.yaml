@@ -9,16 +9,16 @@ build_from:
 args:
   NODE_VERSION: "24.21.0"
   # The only OpenCode runtime in this channel; CLI and plugin pins must match.
-  OPENCODE_V2_VERSION: "2.1.2"
+  OPENCODE_V2_VERSION: "2.1.4"
   # Release identity and immutable source; backend CLI remains pinned separately.
-  OPENCHAMBER_VERSION: "2.5.0"
-  OPENCHAMBER_REVISION: "ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd"
+  OPENCHAMBER_VERSION: "2.5.2"
+  OPENCHAMBER_REVISION: "c4919abc1e7a0a3beeaa126666487806bf79cfe0"
   TINFOIL_VERSION: "1.2.1"
   TSX_VERSION: "4.23.15"
   TTYD_VERSION: "1.7.7"
   YQ_VERSION: "v4.54.1"
-  HAB_VERSION: "1.7.2"
-  HAB_REVISION: "0bc138c6ab9f1bbe87914a0ffccbb038c0767e82"
+  HAB_VERSION: "1.8.0"
+  HAB_REVISION: "f200a763798bc2a305c7fe0fad58dc0946e07861"
   ZIGPORTER_VERSION: "1.4.2"
 labels:
   org.opencontainers.image.title: "OpenCode"

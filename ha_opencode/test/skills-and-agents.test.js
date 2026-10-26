@@ -119,6 +119,20 @@ describe(`${CHANNEL} skills`, () => {
     }
   });
 
+  it("distinguishes verified registry metadata edits from cascade renames in shipped guidance", () => {
+    for (const file of ["AGENTS.md", "INSTRUCTIONS.md", "MCP_PROFILE_FULL.md", "skills/home-assistant-zigbee-esphome/SKILL.md"]) {
+      const source = fs.readFileSync(path.join(MCP_DIR, file), "utf8");
+      assert.match(source, /1\.8\.0/);
+      assert.match(source, /entity.*update|entity\/device/);
+      assert.match(source, /no revision lock/);
+      assert.match(source, /unique_id/);
+      assert.match(source, /rewrites no references|does not rewrite references/);
+      assert.match(source, /zigporter/);
+      assert.match(source, /short_id/);
+      assert.doesNotMatch(source, /CLI has no `entity update` or `device update`/);
+    }
+  });
+
   it("documents the ESPHome troubleshooting and migration tools in shipped guidance", () => {
     const files = [
       path.join(MCP_DIR, "MCP_PROFILE_COMPACT.md"),

@@ -30,7 +30,7 @@ try {
   const result = await request(headers);
   assert.equal(result.status, 200);
   const text = result.text;
-  assert.ok(text.includes("2.1.2"));
+  assert.ok(text.includes("2.1.4"));
   assert.ok(!text.includes(backendPassword) && !text.includes(password));
   headers.origin = "https://untrusted.fixture.test";
   assert.equal((await request(headers)).status, 403);

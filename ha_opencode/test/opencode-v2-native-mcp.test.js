@@ -131,7 +131,7 @@ test(`pinned V2 loads first-session tools, prompts and resources with ${scenario
       try { await client.server.info({ signal: AbortSignal.timeout(500) }); ready = true; break; } catch { await sleep(50); }
     }
     assert.ok(ready, "isolated pinned server readiness");
-    assert.equal((await client.server.info()).version, "2.1.2");
+    assert.equal((await client.server.info()).version, "2.1.4");
     // Location/plugin activation and catalog loading are asynchronous.
     // Wait for the actual MCP connection, not prompts or a warmup model request.
     let connectionReady = false;

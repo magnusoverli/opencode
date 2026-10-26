@@ -13,6 +13,17 @@ warnings. `--plan` may be static; read back after applying. A timeout leaves the
 outcome unverified, so check state before retrying. Use dedicated ESPHome tools
 for long-running builds/uploads rather than the bounded CLI gateway.
 
+hab 1.8.0's entity/device/area/floor/label updates preview live metadata with
+`--plan`; review `changes` before approval. Omitted fields stay; empty supported
+overrides clear. Labels/aliases replace collections; explicit `--disabled=false`
+enables. Check `saved` / `verified` or `error.details.result`: registry verification
+is not runtime activation and plans have no revision lock. Entity `--entity-id`
+preserves `unique_id` but rewrites no references; recorder migration is not verified.
+Keep zigporter for cascade renames with template review. Copy discovered `short_id`
+only into supported hab selectors, never other MCP tools; inspect
+`metadata.resolved_ids` and retain discovery scopes/windows. Uncertain writes
+require inspection, not automatic retries.
+
 For dashboard fields, prefer `dashboard patch`: review its live `--plan` diff, then
 apply with that exact `base_revision` as `--if-match`. Objects merge; supplied arrays
 replace. Inspect `status`, `saved`, `verified`, or `error.details.result` on failure.

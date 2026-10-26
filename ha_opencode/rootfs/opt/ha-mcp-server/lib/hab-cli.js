@@ -4,6 +4,19 @@ import { createCommandOutputContent } from "./command-output.js";
 // independently from the much smaller model-facing preview/artifact threshold.
 export const HAB_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
+/** Only local discovery is known not to change HA. Do not infer safety from
+ * command names, --plan or upstream annotations. Clear on failures too: a lost
+ * acknowledgement, cancellation or timeout can follow an accepted write. */
+export async function withHabRegistryInvalidation(request, invalidate, operation) {
+  if (["schema", "guide", "help", "version"].includes(request.root)) return operation();
+  invalidate();
+  try {
+    return await operation();
+  } finally {
+    invalidate();
+  }
+}
+
 /** Legacy command strings support quoting, not shell evaluation or pipelines. */
 export function splitHabCommand(command) {
   const args = [];

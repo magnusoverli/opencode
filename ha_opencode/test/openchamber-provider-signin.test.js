@@ -12,7 +12,7 @@ function fixture(t, newline = "\n") {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const target = path.join(root, "packages/ui/src/components/sections/providers/ProviderOAuthMethods.tsx");
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  // Independent anchor from pinned OpenChamber 2.5.0. The original component's
+  // Independent anchor from pinned OpenChamber 2.5.2. The original component's
   // method labels, SDK calls, polling and cancellation must remain untouched.
   const original = `// upstream authentication stays unchanged
   return (
@@ -58,7 +58,7 @@ test("requires an explicit upstream checkout", () => {
 
 test("stable builds and exercises the patched provider UI before shipping it", () => {
   const docker = fs.readFileSync(path.join(__dirname, "../Dockerfile"), "utf8");
-  assert.match(docker, /ARG OPENCHAMBER_REVISION=ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd/);
+  assert.match(docker, /ARG OPENCHAMBER_REVISION=c4919abc1e7a0a3beeaa126666487806bf79cfe0/);
   const patch = docker.indexOf("RUN node /tmp/patch-provider-signin.cjs /opt/openchamber-preview");
   assert.ok(patch > docker.indexOf("git checkout --detach FETCH_HEAD"));
   assert.ok(patch < docker.indexOf("bun run --cwd packages/ui type-check"));

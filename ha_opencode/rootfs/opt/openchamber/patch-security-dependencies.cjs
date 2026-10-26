@@ -4,7 +4,7 @@ const root = process.argv[2];
 if (!root) throw new Error("Provide the pinned OpenChamber source directory");
 const file = path.join(root, "package.json");
 const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
-if (pkg.name !== "openchamber-monorepo" || pkg.version !== "2.5.0") {
+if (pkg.name !== "openchamber-monorepo" || pkg.version !== "2.5.2") {
   throw new Error("Review dependency overrides for this OpenChamber release");
 }
 const overrides = JSON.parse(fs.readFileSync(path.join(__dirname, "security-overrides.json"), "utf8"));

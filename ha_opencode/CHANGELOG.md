@@ -3,6 +3,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 3.3.2
+
+**Before updating:** back up the stable app, its options and Home Assistant configuration. Restore that backup to roll back; do not run an older runtime against upgraded data. Beta remains unchanged.
+
+- Update stable to OpenCode 2.1.4 and OpenChamber 2.5.2 with reviewed Home Assistant patches and validated preservation of existing runtime data.
+- Refresh OpenChamber's security dependencies and preserve explicit Git credential configuration isolation during fallback.
+- Upgrade stable to hab 1.8.0 with verified registry metadata edits, short-ID discovery, safer rename guidance and fresh Home Assistant registry context after CLI operations.
+
 ## 3.3.1
 
 - Fix startup migration for compacted V1 conversations while preserving summaries, retained context and original history ([#195](https://github.com/magnusoverli/opencode/issues/195)).
