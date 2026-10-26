@@ -3,7 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Withdraw 3.3.3 after a reported fault and restore the stable listing to 3.3.1; users already on 3.3.3 must restore a pre-upgrade backup rather than downgrade against upgraded data.
+
 ## 3.3.3
+
+**WITHDRAWN:** a runtime fault has been reported and is under investigation. Do not install this version. Stable is temporarily advertised as 3.3.1. If already upgraded, restore a pre-upgrade backup; do not perform an in-place downgrade against upgraded data.
 
 **Before updating:** back up the stable app, its options and Home Assistant configuration. Restore that backup to roll back; do not run an older runtime against upgraded data.
 
@@ -13,7 +17,7 @@ All notable changes to this project will be documented in this file.
 
 ## 3.3.2
 
-**Publication status:** native validation failed before container images were published; use 3.3.3 instead. The original tag is retained unchanged.
+**Publication status:** native validation failed before container images were published; 3.3.3 has also been withdrawn. Remain on 3.3.1 if not already upgraded. The original tags are retained unchanged.
 
 **Before updating:** back up the stable app, its options and Home Assistant configuration. Restore that backup to roll back; do not run an older runtime against upgraded data. Beta remains unchanged.
 
