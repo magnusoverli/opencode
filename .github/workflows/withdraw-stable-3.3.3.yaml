@@ -1,0 +1,71 @@
+---
+name: Restore stable 3.3.1 latest aliases
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: stable-registry-withdrawal
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore only latest aliases to the verified 3.3.1 images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.request
+
+          accept = ','.join([
+              'application/vnd.oci.image.index.v1+json',
+              'application/vnd.docker.distribution.manifest.list.v2+json',
+              'application/vnd.oci.image.manifest.v1+json',
+              'application/vnd.docker.distribution.manifest.v2+json',
+          ])
+          credentials = base64.b64encode(
+              (os.environ['GH_ACTOR'] + ':' + os.environ['GH_TOKEN']).encode()
+          ).decode()
+
+          def request(url, headers, data=None, method=None):
+              with urllib.request.urlopen(urllib.request.Request(
+                  url, headers=headers, data=data, method=method
+              ), timeout=60) as response:
+                  return response.read(), response.headers
+
+          base = 'magnusoverli/ha_opencode'
+          prepared = []
+          for repo in [base, base + '/amd64', base + '/aarch64']:
+              raw, _ = request(
+                  'https://ghcr.io/token?service=ghcr.io&scope=repository:' + repo + ':pull,push',
+                  {'Authorization': 'Basic ' + credentials},
+              )
+              headers = {'Authorization': 'Bearer ' + json.loads(raw)['token'], 'Accept': accept}
+              url = 'https://ghcr.io/v2/' + repo + '/manifests/'
+              manifest, metadata = request(url + '3.3.1', headers)
+              digest = metadata['Docker-Content-Digest']
+              if repo == base:
+                  assert digest == 'sha256:3bbec1e43437d982b8a6d0cb66059a09eaa81c3dd0a40af35db6f1bc100f4c95'
+              _, current = request(url + 'latest', headers)
+              print(repo + ' previous latest: ' + current['Docker-Content-Digest'], flush=True)
+              prepared.append((repo, url, manifest, metadata, headers, digest))
+
+          for repo, url, manifest, metadata, headers, digest in prepared:
+              request(url + 'latest', {
+                  **headers, 'Content-Type': metadata['Content-Type'],
+              }, manifest, 'PUT')
+              _, latest = request(url + 'latest', headers)
+              assert latest['Docker-Content-Digest'] == digest
+              print(repo + ':latest now matches 3.3.1 at ' + digest, flush=True)
+          PY

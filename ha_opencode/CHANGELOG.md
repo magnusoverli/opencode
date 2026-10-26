@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Withdraw 3.3.3 after a reported fault and restore the stable listing to 3.3.1; users already on 3.3.3 must restore a pre-upgrade backup rather than downgrade against upgraded data.
+- Add a manually triggered, digest-guarded emergency restore for the stable 3.3.1 latest image aliases without changing version tags.
 
 ## 3.3.3
 
