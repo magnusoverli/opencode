@@ -69,6 +69,18 @@ function sqliteTableCounts(python, database) {
   return JSON.parse(result.stdout);
 }
 
+function sqliteProject(python, database) {
+  const result = spawnSync(python, ["-c", [
+    "import json,sqlite3,sys",
+    "c=sqlite3.connect(sys.argv[1])",
+    "c.row_factory=sqlite3.Row",
+    "print(json.dumps(dict(c.execute(\"SELECT * FROM project WHERE id='unavailable-project'\").fetchone())))",
+    "c.close()",
+  ].join("; "), database], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
 describe("OpenCode V2 copy-on-write migration", () => {
   let python;
   let sandbox;
@@ -140,6 +152,14 @@ describe("OpenCode V2 copy-on-write migration", () => {
   it("migrates automatic and manual compactions with or without retained context using the pinned converter", () => {
     const result = spawnSync(python, [
       join(ADDON_ROOT, "test", "fixtures", "opencode-v2-compaction.py"), V2_BIN, TARGET_VERSION,
+    ], { encoding: "utf8", timeout: 60_000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), "ok");
+  });
+
+  it("preserves project placement and archive state without accepting unrelated upgrade changes", () => {
+    const result = spawnSync(python, [
+      join(ADDON_ROOT, "test", "fixtures", "opencode-v2-project-upgrade.py"), V2_BIN,
     ], { encoding: "utf8", timeout: 60_000 });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), "ok");
@@ -624,15 +644,17 @@ describe("OpenCode V2 copy-on-write migration", () => {
       "import json,sqlite3,sys",
       "c=sqlite3.connect(sys.argv[1])",
       "c.execute(\"INSERT OR IGNORE INTO project (id,worktree,time_created,time_updated,sandboxes) VALUES (?,?,?,?,?)\", ('global','/',1,1,'[]'))",
+      "c.execute(\"INSERT INTO project (id,worktree,time_created,time_updated,sandboxes) VALUES (?,?,?,?,?)\", ('unavailable-project',sys.argv[3],1,1,'[]'))",
       "c.execute(\"INSERT INTO credential (id,integration_id,label,value,time_created,time_updated) VALUES (?,?,?,?,?,?)\", ('v2-auth','anthropic','API key',json.dumps({'type':'key','key':sys.argv[2]}),1,1))",
       "c.execute(\"INSERT INTO session_v2 (id,project_id,slug,directory,title,version,time_created,time_updated,permission) VALUES (?,?,?,?,?,?,?,?,?)\", ('ses_upgrade','global','upgrade','/homeassistant','Preserved conversation','2',1,2,json.dumps([{'action':'shell','resource':'*','effect':'deny'}])))",
       "c.execute(\"INSERT INTO session_v2 (id,project_id,slug,directory,title,version,time_created,time_updated) VALUES (?,?,?,?,?,?,?,?)\", ('ses_other','global','other','/tmp/other','Other project','2',3,4))",
       "c.execute(\"INSERT INTO session_message (id,session_id,type,seq,time_created,time_updated,data) VALUES (?,?,?,?,?,?,?)\", ('msg_upgrade','ses_upgrade','user',0,1,2,json.dumps({'text':'Keep this conversation','time':{'created':1}})))",
       "c.commit()", "c.close()",
-    ].join("; "), database, AUTH_SECRET], { encoding: "utf8" });
+    ].join("; "), database, AUTH_SECRET, join(sandbox, "unavailable-project")], { encoding: "utf8" });
     assert.equal(seed.status, 0, seed.stderr);
     await writeFile(join(previousRoot, "state", "retained-state"), "keep me");
     const before = hash(await readFile(database));
+    const projectBefore = sqliteProject(python, database);
     const markerBefore = await readFile(join(previousRoot, "generation.json"), "utf8");
     const args = ["prepare", "--root", root, "--source-data", source,
       "--v2-bin", V2_BIN, "--target-version", TARGET_VERSION, "--timeout", "30"];
@@ -645,6 +667,34 @@ describe("OpenCode V2 copy-on-write migration", () => {
     assert.equal((await readFile(join(root, "current"), "utf8")).trim(), previous);
     assert.equal(hash(await readFile(database)), before);
     assert.equal(await readFile(join(previousRoot, "generation.json"), "utf8"), markerBefore);
+
+    if (version === "2.1.2") {
+      // A different metadata change must still abort after the real converter
+      // ran, leave the active generation untouched, and permit a clean retry.
+      const corrupted = spawnSync(python, ["-c", [
+        "import importlib.util,json,sqlite3,sys",
+        "path,args=sys.argv[1:]",
+        "spec=importlib.util.spec_from_file_location('migration',path)",
+        "migration=importlib.util.module_from_spec(spec)",
+        "spec.loader.exec_module(migration)",
+        "restore=migration.restore_project_maintenance",
+        "def corrupt(before, after):",
+        "    restore(before, after)",
+        "    with sqlite3.connect(after) as c:",
+        "        c.execute(\"UPDATE project SET name='synthetic-corruption' WHERE id='unavailable-project'\")",
+        "migration.restore_project_maintenance=corrupt",
+        "sys.argv=[path,*json.loads(args)]",
+        "sys.exit(migration.main())",
+      ].join("\n"), MIGRATOR, JSON.stringify(args)], { encoding: "utf8", timeout: 60_000 });
+      assert.equal(corrupted.status, 1, corrupted.stderr);
+      assert.match(corrupted.stderr, /v2_upgrade_records_changed/);
+      assert.doesNotMatch(corrupted.stdout + corrupted.stderr, /synthetic-corruption/);
+      assert.equal((await readFile(join(root, "current"), "utf8")).trim(), previous);
+      assert.equal(hash(await readFile(database)), before);
+      assert.equal(await readFile(join(previousRoot, "generation.json"), "utf8"), markerBefore);
+      assert.deepEqual(await readdir(join(root, "generations")), [previous]);
+      assert.deepEqual(await readdir(join(root, "work")), [".migration.lock"]);
+    }
 
     const upgraded = runMigrator(python, args);
     assert.equal(upgraded.status, 0, upgraded.stderr);
@@ -663,6 +713,10 @@ describe("OpenCode V2 copy-on-write migration", () => {
     assert.equal(marker.target_version, TARGET_VERSION);
     assert.equal(marker.workspace_projection, "/run/opencode-v2/workspace");
     assert.equal(marker.target.relocated_session_count, 1);
+    const projectAfter = sqliteProject(python, join(current, "data", "opencode", "opencode.db"));
+    for (const [column, value] of Object.entries(projectBefore)) {
+      assert.deepEqual(projectAfter[column], value, `project ${column} must survive the upgrade`);
+    }
     const placement = spawnSync(python, ["-c", [
       "import json,sqlite3,sys",
       "c=sqlite3.connect(sys.argv[1])",

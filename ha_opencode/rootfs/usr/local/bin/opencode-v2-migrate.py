@@ -1810,6 +1810,31 @@ def restore_session_permissions(before: Path, after: Path, table: str) -> None:
         target.close()
 
 
+def restore_project_maintenance(before: Path, after: Path) -> None:
+    """Undo converter-startup project sweeping in the private upgrade copy."""
+    # Starting the native converter also starts Project.sweep. The managed
+    # workspace is not mounted yet, so an idle project can be archived or have
+    # its canonical checkout replaced. Neither is a schema migration. Preserve
+    # these two fields from the read-only baseline, just as we preserve session
+    # permissions, then run the unchanged exact-record validator. Missing rows
+    # and changes to every other project/user field must still fail closed.
+    source = sqlite3.connect(before.resolve().as_uri() + "?mode=ro", uri=True)
+    target = sqlite3.connect(after)
+    try:
+        available = {row[1] for row in source.execute("PRAGMA table_info(project)")}
+        columns = [name for name in ("worktree", "time_archived") if name in available]
+        if "worktree" not in columns:
+            raise MigrationError("v2_upgrade_schema_mismatch")
+        names = ",".join(columns)
+        assignments = ",".join(name + "=?" for name in columns)
+        for row in source.execute(f"SELECT id,{names} FROM project"):
+            target.execute(f"UPDATE project SET {assignments} WHERE id=?", (*row[1:], row[0]))
+        target.commit()
+    finally:
+        source.close()
+        target.close()
+
+
 def normalize_managed_workspace(database: Path) -> int:
     """Place Home Assistant sessions in the isolated project used by the V2 UI."""
     connection = sqlite3.connect(database)
@@ -1970,6 +1995,7 @@ def upgrade_generation(root: Path, current: str, prior: dict, args: argparse.Nam
         snapshot_database(target, baseline)
         convert_candidate(candidate, args.v2_bin.resolve(), args.timeout, args.runtime_user)
         restore_session_permissions(baseline, target, "session_v2")
+        restore_project_maintenance(baseline, target)
         validate_tree(candidate)
         validate_database(target)
         validate_v2_upgrade(baseline, target)

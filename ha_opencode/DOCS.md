@@ -11,6 +11,13 @@ If you already upgraded to 3.3.3, **restore a pre-upgrade Home Assistant backup*
 including the app and its data; do not downgrade in place against upgraded data.
 Supervisor may offer 3.3.1 because it treats any version difference as an update.
 
+The reported `v2_upgrade_records_changed` startup failure has been reproduced
+with temporarily unavailable project directories. A source fix is being
+qualified; it is not yet a published replacement release. If startup stops at
+this check, the prior generation is preserved: do not delete databases,
+generations or migration journals to work around it. See the
+[project upgrade regression record](test/QUALIFICATION-PROJECT-UPGRADE.md).
+
 ### Withdrawn 3.3.3 component details
 
 Stable **3.3.3** pins OpenCode CLI/plugin **2.1.4**, OpenChamber

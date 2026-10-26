@@ -389,6 +389,11 @@ RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-compaction
         python3 /tmp/compaction/test/fixtures/opencode-v2-compaction.py \
         /usr/local/libexec/opencode-v2 "${OPENCODE_V2_VERSION}"
 
+RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-project-upgrade.py,target=/tmp/compaction/test/fixtures/opencode-v2-project-upgrade.py,readonly \
+    timeout --signal=TERM --kill-after=10s 120s \
+        python3 /tmp/compaction/test/fixtures/opencode-v2-project-upgrade.py \
+        /usr/local/libexec/opencode-v2
+
 RUN --network=none --mount=type=bind,source=test/hab-cli-fixture.mjs,target=/tmp/hab-cli-fixture.mjs,readonly \
     timeout --signal=TERM --kill-after=10s 120s node /tmp/hab-cli-fixture.mjs
 
