@@ -7,9 +7,10 @@
   "dependencies": {
     "tinfoil": "1.2.1",
     "tsx": "4.23.15",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "overrides": {
-    "@ai-sdk/openai-compatible": "3.0.62"
+    "@ai-sdk/openai-compatible": "3.0.62",
+    "undici": "7.30.1"
   }
 }

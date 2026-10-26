@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fix the native startup fixture's mock context window without relaxing credential, model or disabled-search checks; update the MCP server's Zod dependency to address GHSA-mrhx-c7xc-m3w5.
+- Patch Zod and undici in the private-encryption runtime while retaining its SDK version and encrypted-only request policy.
+
 ## 3.3.2
 
 **Before updating:** back up the stable app, its options and Home Assistant configuration. Restore that backup to roll back; do not run an older runtime against upgraded data. Beta remains unchanged.

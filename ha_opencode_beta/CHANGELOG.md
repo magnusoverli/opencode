@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Update the MCP server's Zod dependency to address GHSA-mrhx-c7xc-m3w5; no beta version or runtime pin changes.
+- Patch Zod and undici in the private-encryption runtime without changing its SDK or releasing beta.
 - Fix startup migration for compacted V1 conversations while preserving summaries, retained context and original history ([#195](https://github.com/magnusoverli/opencode/issues/195)).
 
 ## 3.2.4b6

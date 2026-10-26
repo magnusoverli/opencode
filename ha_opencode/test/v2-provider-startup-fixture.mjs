@@ -59,7 +59,9 @@ if (mode === "serve") {
         name: "Native startup fixture", env: ["FIXTURE_API_KEY"],
         package: "@opencode/ai/providers/openai-compatible",
         settings: { baseURL: `http://127.0.0.1:${mockPort}/v1`, timeout: 5000 },
-        models: { coding: { modelID: model, capabilities: { tools: true, input: ["text"], output: ["text"] }, limit: { context: 32000, output: 1000 } } },
+        // This verifies startup with the full tool catalogue, not compaction.
+        // A 32K mock window can force a separate summary request without tools.
+        models: { coding: { modelID: model, capabilities: { tools: true, input: ["text"], output: ["text"] }, limit: { context: 128000, output: 1000 } } },
       } },
     }),
   }), { mode: 0o600 });
