@@ -1,10 +1,20 @@
 # Changelog
 
-## [Unreleased]
+## 3.5.0b1
 
 - Reuse native image-check caches for beta release builds and keep version-only labels out of expensive build layers. Existing tests and audits remain enabled.
 - Correct the OpenCode readiness test's stale 2.1.2 expectation to the shipped 2.2.5 pin.
 - Explicitly establish remote `HEAD` in OpenChamber's option-like-remote test fixture for Debian Git 2.47, without weakening its branch-discovery or security assertions. Add fail-closed source-patcher regression tests.
+- Ship OpenCode CLI/plugin **2.2.5**, OpenChamber **2.5.3** and Bun **1.4.4**, retaining the Ingress asset/API/terminal-WebAssembly and private-backend adaptations. Refresh reviewed security locks; local production dependency audits report zero advisories within their documented scope.
+- Fix compacted V1 conversation migration while preserving summaries, retained context and original history ([#195](https://github.com/magnusoverli/opencode/issues/195)). Support guarded copy-on-write upgrades from OpenCode **2.1.2**; stop rather than discard nonempty pending input.
+- Reconcile narrowly checked root-owned terminal state and improve path-specific errors ([#197](https://github.com/magnusoverli/opencode/issues/197), [#206](https://github.com/magnusoverli/opencode/issues/206)). Add read-only migration diagnostics while preserving unknown artifacts; definitive repairs still need affected-host evidence ([#202](https://github.com/magnusoverli/opencode/issues/202), [#207](https://github.com/magnusoverli/opencode/issues/207)).
+- Add revision-guarded atomic safe writes, verified recovery copies, a shared writer lock and truthful recovery outcomes ([#198](https://github.com/magnusoverli/opencode/issues/198)). Writes require the dry-run revision. Full HA validation remains post-save; external editors are outside the shared lock, and uncertain transactions stop for recovery review.
+- Add redacted Supervisor app inspection and expiring, revision-bound preview/approval flows, preserving secrets and verifying readback ([#199](https://github.com/magnusoverli/opencode/issues/199)). Supervisor lacks atomic conditional saves; credentials, array replacement and deletion remain manual.
+- Add a separately permissioned read-only HAB inspection subset with enforced command/flag restrictions ([#203](https://github.com/magnusoverli/opencode/issues/203)).
+- Add LAN-local single-use pairing, expiring device credentials and individual revocation without exposing the private backend credential ([#205](https://github.com/magnusoverli/opencode/issues/205)). Trusted HTTPS/proxy checks remain mandatory; app/worker restart revokes local devices. Physical native-client acceptance remains unverified.
+- Wait for same-location integration/plugin activation before OpenChamber OAuth, mitigating a cold-start race without replaying authorization ([#208](https://github.com/magnusoverli/opencode/issues/208)). Real-account sign-in and model rejection still need confirmation; the report is not claimed resolved.
+- Document and schema-test remote ProsperoAI inference independently of optional search MCP ([#200](https://github.com/magnusoverli/opencode/issues/200)).
+- Beta only; stable is unchanged. Focused checks and native CI boundary tests do not replace installed Supervisor, real-account or physical-client acceptance. Unavailable checks and unresolved reports remain explicitly unverified.
 
 ## 3.5.0b0
 

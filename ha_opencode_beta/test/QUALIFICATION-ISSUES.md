@@ -1,19 +1,19 @@
-# Eleven-issue beta 3.5.0b0 qualification
+# Eleven-issue beta 3.5.0b1 qualification
 
 Date: 2026-11-01. Baseline: `09dd405`.
 Scope: #195, #197, #198, #199, #200, #202, #203, #205, #206, #207, #208.
 Issues #45 and #90 are excluded. Stable source and release version are unchanged.
-The user authorized beta 3.5.0b0 publication and the runtime-pin upgrade; see
+The user authorized beta 3.5.0b1 publication and the runtime-pin upgrade; see
 `QUALIFICATION-runtime-2.2.5-openchamber-2.5.3.md` for its separate current evidence.
 Publication uses the tag-triggered release/image workflows. No issue closures
 are authorized or implied by this release.
 
-## Release status: beta 3.5.0b0 image publication blocked
+## Release status: authorized beta 3.5.0b1
 
-The user authorized commit, push and beta publication after the focused checks.
-The prerelease notes were published, but both native image builds failed before
-image push. See the runtime qualification's CI follow-up for failures and local
-fixture corrections.
+The user authorized the corrected beta after 3.5.0b0's image build failure.
+Native amd64/arm64 image boundary checks passed in run `41299753856` after the
+fixture corrections. See the runtime qualification's CI follow-up for evidence;
+full release image publication is separate from these successful boundary checks.
 This local evidence is not a claim that all reports are resolved. CI image
 publication is separate from the local results; unavailable installed-system,
 real-account and physical-client acceptance remains explicitly unverified.

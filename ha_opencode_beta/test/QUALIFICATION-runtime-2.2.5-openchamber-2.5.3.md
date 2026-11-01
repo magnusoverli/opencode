@@ -1,6 +1,6 @@
-# Beta 3.5.0b0 runtime refresh: OpenCode 2.2.5 / OpenChamber 2.5.3
+# Beta 3.5.0b1 runtime refresh: OpenCode 2.2.5 / OpenChamber 2.5.3
 
-Checked 2026-11-01. The user authorized commit, push and release as beta 3.5.0b0.
+Checked 2026-11-01. The user authorized commit, push and release as beta 3.5.0b1.
 This updates beta only, not stable. Publication uses the tag-triggered release
 and native image workflows; local results below do not claim remote CI success.
 Historical qualification for 2.1.2/2.5.0 is not reused as proof of this release.
@@ -32,8 +32,17 @@ unchanged.
   `/tmp/opencode/git247-patched-suite.txt`,
   `/tmp/opencode/git256-patched-suite.txt`.
 
-These corrections are follow-up source changes, not proof of successful remote
-image publication. A corrected release identity requires user confirmation.
+Native amd64 and arm64 boundary image checks subsequently passed in run
+`41299753856` on corrected commit `8f5eb6e`. Its PR workflow's beta contracts,
+beta audits and root boundaries passed; the later stable audit failed, which is
+outside this beta-only scope and is not described as a passing full PR workflow.
+No stable dependency changes were made to mask that result.
+
+The user then authorized the corrected release as **3.5.0b1**. Build caches are
+shared with native image checks, and release-only version labels no longer
+invalidate runtime/boundary layers. Workflow YAML and **38** focused contracts
+pass locally; actual release build-time savings are not yet measured. Successful
+boundary checks are not proof that release image publication has completed.
 
 ## Verified upstream inputs
 
