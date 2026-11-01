@@ -112,13 +112,15 @@ jobs:
           push: false
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
-            BUILD_VERSION=${{ steps.version.outputs.version }}
             BUILD_ARCH=${{ matrix.ha_arch }}
             ADDON_CHANNEL=beta
             OPENCODE_V2_VERSION=${{ steps.beta_build_args.outputs.opencode_v2_version }}
             OPENCHAMBER_VERSION=${{ steps.beta_build_args.outputs.openchamber_version }}
             OPENCHAMBER_REVISION=${{ steps.beta_build_args.outputs.openchamber_revision }}
-          cache-from: type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
+          cache-from: |
+            type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
+            type=gha,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
+          cache-to: type=gha,mode=max,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -145,7 +147,9 @@ jobs:
             OPENCODE_V2_VERSION=${{ steps.beta_build_args.outputs.opencode_v2_version }}
             OPENCHAMBER_VERSION=${{ steps.beta_build_args.outputs.openchamber_version }}
             OPENCHAMBER_REVISION=${{ steps.beta_build_args.outputs.openchamber_revision }}
-          cache-from: type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
+          cache-from: |
+            type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
+            type=gha,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
           cache-to: type=gha,mode=max,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
           labels: |
             io.hass.arch=${{ matrix.ha_arch }}

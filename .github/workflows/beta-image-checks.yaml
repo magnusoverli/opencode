@@ -89,8 +89,9 @@ jobs:
           push: false
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
-            BUILD_VERSION=ci
             BUILD_ARCH=${{ matrix.ha_arch }}
             ADDON_CHANNEL=beta
-          cache-from: type=gha,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
+          cache-from: |
+            type=gha,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
+            type=gha,scope=ha_opencode_beta-${{ matrix.ha_arch }}
           cache-to: type=gha,mode=max,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}

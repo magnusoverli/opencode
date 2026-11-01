@@ -102,7 +102,6 @@ RUN case "${BUILD_ARCH}" in amd64|aarch64) ;; *) echo "Unsupported BUILD_ARCH: $
 FROM $BUILD_FROM AS runtime
 
 # Build arguments
-ARG BUILD_VERSION
 ARG BUILD_ARCH
 ARG NODE_VERSION
 # Release-channel identity for paths shared through /homeassistant. Stable and
@@ -422,7 +421,9 @@ WORKDIR /homeassistant
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -fsS --max-time 5 http://127.0.0.1:8099/ > /dev/null && opencode status > /dev/null || exit 1
 
+# Keep release-only metadata out of shared runtime and boundary-test cache keys.
 # Labels for Home Assistant
+ARG BUILD_VERSION
 LABEL \
     io.hass.name="OpenCode" \
     io.hass.description="AI coding agent for editing Home Assistant configuration" \

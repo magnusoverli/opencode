@@ -13,7 +13,7 @@ are authorized or implied by this release.
 The user authorized commit, push and beta publication after the focused checks.
 The prerelease notes were published, but both native image builds failed before
 image push. See the runtime qualification's CI follow-up for failures and local
-fixture corrections. The public release warns users not to install it yet.
+fixture corrections.
 This local evidence is not a claim that all reports are resolved. CI image
 publication is separate from the local results; unavailable installed-system,
 real-account and physical-client acceptance remains explicitly unverified.

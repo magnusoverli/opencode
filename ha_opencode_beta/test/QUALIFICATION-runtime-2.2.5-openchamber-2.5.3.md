@@ -8,8 +8,8 @@ Historical qualification for 2.1.2/2.5.0 is not reused as proof of this release.
 ## Release CI follow-up: 3.5.0b0 blocked
 
 The prerelease notes and optional companion were published, but both native
-container builds failed before any image push. The public release now warns
-users not to install/test it. The existing release tag remains unchanged.
+container builds failed before any image push. The existing release tag remains
+unchanged.
 
 - Build Beta run `41298416271`: amd64 and aarch64 each recorded **1336 passed,
   4 skipped, 1 failed** in the upstream Git suites. The option-like remote test

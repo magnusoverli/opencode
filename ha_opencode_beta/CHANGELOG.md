@@ -2,12 +2,11 @@
 
 ## [Unreleased]
 
+- Reuse native image-check caches for beta release builds and keep version-only labels out of expensive build layers. Existing tests and audits remain enabled.
 - Correct the OpenCode readiness test's stale 2.1.2 expectation to the shipped 2.2.5 pin.
 - Explicitly establish remote `HEAD` in OpenChamber's option-like-remote test fixture for Debian Git 2.47, without weakening its branch-discovery or security assertions. Add fail-closed source-patcher regression tests.
 
 ## 3.5.0b0
-
-> **Build blocked — not ready to install.** Container builds failed before image publication; wait for a corrected beta before testing.
 
 - Pin the latest released OpenCode CLI/plugin **2.2.5** and OpenChamber **2.5.3** (immutable source `95af6769797693bf049f4e6a801e373b5220447b`), with upstream's Bun **1.4.4** toolchain. Rebase editor/mobile recovery patches, retain Ingress assets/API/terminal-WebAssembly and private-backend adaptations, and use upstream's Git 4 service policy. Refresh security overrides/locks for newly reported OpenChamber dependency advisories.
 - Support guarded copy-on-write upgrades from the previously shipped OpenCode **2.1.2**. Accept upstream's removed `session_pending` table only when empty and its exact native migration is recorded; preserve the original generation and stop if pending data would be dropped.

@@ -78,6 +78,14 @@ describe(`${CHANNEL} runtime pin`, () => {
   const dockerfileOpenchamberPin = /^ARG OPENCHAMBER_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
   const buildYamlOpenchamberPin = /^\s*OPENCHAMBER_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
 
+  it("keeps release-only version metadata out of runtime and boundary-test cache keys", () => {
+    const finalStage = dockerfile.indexOf("FROM runtime AS final");
+    assert.ok(finalStage > 0);
+    assert.doesNotMatch(dockerfile.slice(0, finalStage), /\bBUILD_VERSION\b/);
+    assert.match(dockerfile.slice(finalStage), /^ARG BUILD_VERSION$/m);
+    assert.match(dockerfile.slice(finalStage), /io\.hass\.version="\$\{BUILD_VERSION\}"/);
+  });
+
   it("copies one exact supported Node runtime into the Home Assistant base", () => {
     assert.match(dockerfileNodePin, /^24\.\d+\.\d+$/);
     assert.equal(buildYamlNodePin, dockerfileNodePin);
