@@ -41,6 +41,15 @@ for (const [before, after] of [
   fixed = fixed.replace(before, after);
 }
 if (original.includes("process.env.PATH =")) throw new Error("Upstream enterprise fixture already supplies PATH; review before patching");
+// Git 2.47 in Debian trixie does not create a remote HEAD during this fetch.
+// Establish the fixture's symbolic-ref precondition explicitly, retaining all
+// branch discovery, pruning and option-like remote security assertions.
+const serviceTestFile = path.join(root, "packages/web/server/lib/git/service.test.js");
+const serviceTestSource = fs.readFileSync(serviceTestFile, "utf8");
+const remoteBefore = "    addOptionLikeRemote(repository, remote);\n    const head = runGit(repository, ['rev-parse', 'HEAD']).trim();";
+if (serviceTestSource.split(remoteBefore).length !== 2) throw new Error("Review option-like remote HEAD fixture");
+const remoteAfter = "    addOptionLikeRemote(repository, remote);\n    runGit(repository, ['symbolic-ref', `refs/remotes/${OPTION_LIKE_REMOTE}/HEAD`, `refs/remotes/${OPTION_LIKE_REMOTE}/react`]);\n    const head = runGit(repository, ['rev-parse', 'HEAD']).trim();";
 fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
 fs.writeFileSync(testFile, testSource.slice(0, start) + fixed + testSource.slice(end));
+fs.writeFileSync(serviceTestFile, serviceTestSource.replace(remoteBefore, remoteAfter));
 console.log(`Applied ${Object.keys(overrides).length} explicit security dependency pins`);

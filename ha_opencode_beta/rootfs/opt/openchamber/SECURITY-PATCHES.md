@@ -51,6 +51,9 @@ project-variable filtering upstream. The old 2.5.0 service rewrite is removed;
 the dependency patcher instead checks the reviewed upstream policy anchors.
 It also fixes one upstream test's missing fake-gh PATH setup/restoration; no
 production enterprise-host trust behavior is changed or assertion skipped.
+The option-like-remote test explicitly establishes its remote HEAD symbolic ref
+because Debian Git 2.47 does not create it during fetch. Branch-discovery,
+pruning and option-handling assertions remain unchanged.
 Project overrides cannot add executable or repository-location variables.
 The retained dependency-level `patch-git-environment.cjs`
 permits explicitly allowlisted inherited keys for compatibility callers, without

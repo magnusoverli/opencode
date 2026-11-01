@@ -5,6 +5,36 @@ This updates beta only, not stable. Publication uses the tag-triggered release
 and native image workflows; local results below do not claim remote CI success.
 Historical qualification for 2.1.2/2.5.0 is not reused as proof of this release.
 
+## Release CI follow-up: 3.5.0b0 blocked
+
+The prerelease notes and optional companion were published, but both native
+container builds failed before any image push. The public release now warns
+users not to install/test it. The existing release tag remains unchanged.
+
+- Build Beta run `41298416271`: amd64 and aarch64 each recorded **1336 passed,
+  4 skipped, 1 failed** in the upstream Git suites. The option-like remote test
+  assumed `fetch` created a remote `HEAD`; Debian Git 2.47 does not. Restore that
+  fixture precondition explicitly, leaving every assertion enabled.
+- PR Checks run `41298403509`: beta contract tests found a stale version-probe
+  assertion for 2.1.2 instead of 2.2.5. Correct that exact expectation.
+- Reproduced the remote-HEAD failure using an isolated extracted Debian Git
+  **2.47.3**. With the fixture correction, its complete service file passes
+  **297 tests / 3 skipped**. The full Git/GitHub suite on host Git **2.56.0**
+  passes **1337 tests / 4 skipped** in a scrubbed environment and disposable HOME.
+- A broader run using extracted Debian Git also hit two HTTPS tests because the
+  extracted executable lacks host `libcurl-gnutls.so.4`; this is a local test
+  environment limitation, not a passing full Debian suite or a production result.
+- The corrected runtime probe plus new source-patcher precondition/drift tests
+  pass **4/4**. The patcher validates both fixture anchors before writing files;
+  production Git behavior and trust checks are unchanged.
+- Logs: `/tmp/opencode/git247-unpatched-remote-fixture.txt`,
+  `/tmp/opencode/git247-patched-service.txt`,
+  `/tmp/opencode/git247-patched-suite.txt`,
+  `/tmp/opencode/git256-patched-suite.txt`.
+
+These corrections are follow-up source changes, not proof of successful remote
+image publication. A corrected release identity requires user confirmation.
+
 ## Verified upstream inputs
 
 - Official npm `@opencode/cli/latest` and `@opencode/plugin/latest`: **2.2.5**.
