@@ -8,16 +8,21 @@
     "verify:versions": "node scripts/verify-versions.js"
   },
   "dependencies": {
-    "@opencode/cli": "2.1.2",
-    "@opencode/plugin": "2.1.2",
+    "@opencode/cli": "2.2.5",
+    "@opencode/plugin": "2.2.5",
     "prettier": "3.9.9",
     "vscode-jsonrpc": "8.2.1",
     "yaml": "2.9.1"
+  },
+  "overrides": {
+    "glob": "14.0.2",
+    "minimatch": "11.0.1"
   },
   "devDependencies": {
     "@opencode-ai/cli": "0.0.0-beta-18684",
     "opencode-previous": "npm:@opencode/cli@2.0.13",
     "opencode-beta-previous": "npm:@opencode/cli@2.0.22",
-    "opencode-upgrade-previous": "npm:@opencode/cli@2.0.26"
+    "opencode-upgrade-previous": "npm:@opencode/cli@2.0.26",
+    "opencode-release-previous": "npm:@opencode/cli@2.1.2"
   }
 }

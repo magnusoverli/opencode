@@ -7,18 +7,34 @@ import { join } from "node:path";
 
 const root = process.env.SAFE_WRITE_FIXTURE_ROOT;
 if (!root) throw new Error("Missing safe-write fixture root");
-const original = Object.fromEntries(["readFileSync", "writeFileSync", "copyFileSync", "unlinkSync", "existsSync", "mkdirSync", "appendFileSync"].map(name => [name, fs[name]]));
+const original = Object.fromEntries(["readFileSync", "writeFileSync", "copyFileSync", "unlinkSync", "existsSync", "mkdirSync", "appendFileSync", "lstatSync", "openSync", "renameSync", "rmdirSync", "readdirSync", "linkSync"].map(name => [name, fs[name]]));
 const state = () => JSON.parse(original.readFileSync(join(root, "state.json"), "utf8"));
 const record = event => original.appendFileSync(join(root, "trace.jsonl"), JSON.stringify(event) + "\n");
 const translate = file => typeof file === "string" && (file === "/homeassistant" || file.startsWith("/homeassistant/"))
   ? join(root, "config", file.slice("/homeassistant".length)) : file;
 const inConfig = file => translate(file) !== file;
 
-for (const name of ["readFileSync", "existsSync"]) fs[name] = (file, ...args) => original[name](translate(file), ...args);
-for (const name of ["writeFileSync", "unlinkSync", "mkdirSync"]) fs[name] = (file, ...args) => {
+for (const name of ["readFileSync", "existsSync", "lstatSync", "readdirSync"]) fs[name] = (file, ...args) => original[name](translate(file), ...args);
+for (const name of ["writeFileSync", "unlinkSync", "mkdirSync", "rmdirSync"]) fs[name] = (file, ...args) => {
   if (inConfig(file)) record({ operation: name, path: file });
   return original[name](translate(file), ...args);
 };
+fs.openSync = (file, flags, ...args) => {
+  if (inConfig(file) && typeof flags === "number" && (flags & fs.constants.O_WRONLY)) {
+    record({ operation: "open_write", path: file });
+    if (state().backupFailure && String(file).endsWith(".bak")) throw new Error("Synthetic backup failure");
+  }
+  return original.openSync(translate(file), flags, ...args);
+};
+let destinationReplacements = 0;
+fs.renameSync = (from, to) => {
+  if (inConfig(to)) {
+    record({ operation: "renameSync", from, to });
+    if (String(to).endsWith("synthetic.yaml") && ++destinationReplacements === 2 && state().rollbackFailure) throw new Error("Synthetic rollback failure");
+  }
+  return original.renameSync(translate(from), translate(to));
+};
+fs.linkSync = (from, to) => original.linkSync(translate(from), translate(to));
 fs.copyFileSync = (from, to, ...args) => {
   if (inConfig(from) || inConfig(to)) {
     record({ operation: "copyFileSync", from, to });

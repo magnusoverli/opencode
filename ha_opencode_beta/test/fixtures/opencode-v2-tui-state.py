@@ -54,7 +54,27 @@ for path in [config / "opencode.json", config / "opencode.jsonc", config / "plug
     before = (root / "config/opencode/cli.json").read_bytes()
     state.prepare(root, legacy)
     assert (root / "config/opencode/cli.json").read_bytes() == before
+    # Resume after an interruption between fchown and fchmod, and after mkdir
+    # under a restrictive umask. Never require blanket recursive repair.
+    os.chmod(root / "config/opencode", 0o1750)
+    os.chmod(root / "config", 0o700)
+    state.prepare(root, legacy)
+    assert (root / "config/opencode").stat().st_mode & 0o7777 == 0o1770
+    assert (root / "config").stat().st_mode & 0o7777 == 0o755
     assert json.loads((root / "state/opencode/kv.json").read_text())["session_picker"] == "all"
+    # Reproduce #197's root-only state. Files retain their bytes; only these
+    # explicitly recognized directory identities and preferences may converge.
+    os.chown(root / "config/opencode", 0, 0)
+    os.chmod(root / "config/opencode", 0o750)
+    for leaf in ("data", "state"):
+        for path in (root / leaf, root / leaf / "opencode"):
+            os.chown(path, 0, 0)
+            os.chmod(path, 0o700)
+    os.chown(root / "state/opencode/kv.json", 0, 0)
+    state.prepare(root, legacy)
+    assert (root / "state/opencode/kv.json").stat().st_uid == 60001
+    assert (root / "config/opencode").stat().st_mode & 0o7777 == 0o1770
+    assert (root / "config/opencode/cli.json").read_bytes() == before
     # Reject replaced persistent directories without following them or altering
     # their target. Existing preferences must survive a failed preparation.
     (root / "data").rename(root / "retained-data")

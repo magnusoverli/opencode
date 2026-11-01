@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { packageYaml } from "./fixtures/safe-write-package.js";
+import { createHash } from "node:crypto";
 
 const fixtures = [];
 afterEach(async () => {
@@ -34,7 +35,9 @@ async function fixture(existing = null, state = {}) {
   return {
     target,
     call: async (args = {}) => {
-      const result = await client.callTool({ name: "write_config_safe", arguments: { file_path: "packages/synthetic.yaml", content: packageYaml, ...args } }, undefined, { timeout: 10000 });
+      let revision = "missing";
+      try { revision = createHash("sha256").update(await readFile(target)).digest("hex"); } catch (error) { if (error.code !== "ENOENT") throw error; }
+      const result = await client.callTool({ name: "write_config_safe", arguments: { file_path: "packages/synthetic.yaml", content: packageYaml, expected_revision: revision, ...args } }, undefined, { timeout: 10000 });
       return result.content.filter(item => item.type === "text").map(item => item.text).join("\n");
     },
     trace: async () => (await readFile(join(root, "trace.jsonl"), "utf8")).trim().split("\n").filter(Boolean).map(line => JSON.parse(line)),
@@ -61,9 +64,11 @@ describe("safe-write MCP integration (synthetic filesystem and HA)", () => {
     expect(await f.call({ dry_run: true })).toContain("PASSED");
     expect(await f.call()).toContain("Safe Config Write - SUCCESS");
     expect(await readFile(f.target, "utf8")).toBe(packageYaml);
-    expect(await readFile(f.target + ".bak", "utf8")).toBe(original);
-    const operations = (await f.trace()).map(event => event.operation);
-    expect(operations).toEqual(["copyFileSync", "writeFileSync", "check_config"]);
+    const trace = await f.trace();
+    const backup = trace.find(event => event.operation === "open_write" && event.path.endsWith(".bak"));
+    expect(await readFile(join(f.target, "../..", backup.path.slice("/homeassistant/".length)), "utf8")).toBe(original);
+    expect(trace.some(event => event.operation === "renameSync" && event.to.endsWith("synthetic.yaml"))).toBe(true);
+    expect(trace.filter(event => event.operation === "check_config")).toHaveLength(1);
   });
 
   it("does not render or resolve Jinja-looking HA reference arguments during a dry run", async () => {
@@ -108,9 +113,9 @@ describe("safe-write MCP integration (synthetic filesystem and HA)", () => {
 
   it("does not write when the backup cannot be created", async () => {
     const f = await fixture(packageYaml, { backupFailure: true });
-    expect(await f.call()).toContain("Could not create backup");
+    expect(await f.call()).toContain("backup_or_journal_failed");
     expect(await readFile(f.target, "utf8")).toBe(packageYaml);
-    expect((await f.trace()).map(event => event.operation)).toEqual(["copyFileSync"]);
+    expect((await f.trace()).some(event => event.operation === "check_config")).toBe(false);
   });
 
   it.each(["invalid", "unavailable"])("restores the prior file or removes a new file when HA check is %s", async check => {
@@ -120,9 +125,25 @@ describe("safe-write MCP integration (synthetic filesystem and HA)", () => {
       if (original === null) await expect(access(f.target)).rejects.toThrow();
       else {
         expect(await readFile(f.target, "utf8")).toBe(original);
-        expect(await readFile(f.target + ".bak", "utf8")).toBe(original);
+        expect((await f.trace()).some(event => event.operation === "open_write" && event.path.endsWith(".bak"))).toBe(true);
       }
       expect((await f.trace()).some(event => event.operation === "check_config")).toBe(true);
     }
+  });
+
+  it("reports failed rollback as recovery required, never as restored", async () => {
+    const f = await fixture(packageYaml.replace("synthetic_nested", "synthetic_original"), { check: "invalid", rollbackFailure: true });
+    const result = await f.call();
+    expect(result).toContain("recovery_required");
+    expect(result).not.toContain("original state restored");
+    expect(await readFile(f.target, "utf8")).toBe(packageYaml);
+  });
+
+  it("refuses missing and stale source revisions before a production write", async () => {
+    const f = await fixture(packageYaml);
+    expect(await f.call({ expected_revision: undefined })).toContain("expected_revision_required");
+    expect(await f.call({ expected_revision: "0".repeat(64) })).toContain("conflict");
+    expect(await readFile(f.target, "utf8")).toBe(packageYaml);
+    expect((await f.trace()).some(event => event.operation === "check_config")).toBe(false);
   });
 });

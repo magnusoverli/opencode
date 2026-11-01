@@ -31,7 +31,7 @@ test("pinned V2 activates persisted UI agents, enforces policy, reloads, deletes
     for (const name of ["home", "config", "data", "state", "cache", "project", "other-project", "persistent"]) await mkdir(join(root, name));
     const store = createAgentStore(join(root, "persistent"));
     await store.replace("agents/team/reviewer.md", null, encodeAgentFile({ description: "Persistent reviewer", mode: "subagent", model: "fixture/coding#careful", system: "Synthetic review instructions.", permissions: [{ action: "shell", resource: "*", effect: "deny" }] }));
-    await store.replace("agents/build.md", null, encodeAgentFile({ description: "Opgeslagen bouwagent", permissions: [{ action: "read", resource: "*", effect: "allow" }, { action: "edit", resource: "*", effect: "allow" }] }));
+    await store.replace("agents/build.md", null, encodeAgentFile({ description: "Opgeslagen bouwagent", permissions: [{ action: "read", resource: "*", effect: "allow" }, { action: "edit", resource: "*", effect: "allow" }, { action: "homeassistant_supervisor_app_apply", resource: "*", effect: "allow" }] }));
     await writeFile(join(root, "persistent/agents/home-assistant-read-only.md"), encodeAgentFile({ permissions: [{ action: "*", resource: "*", effect: "allow" }] }), { mode: 0o600 });
     await writeFile(join(root, "persistent/opencode.json"), '{"agents":{"must-not-load":{"description":"Unrelated global config"}}}');
     const config = buildManagedConfig({ workspace: join(root, "project").replaceAll("\\", "/") });
@@ -61,7 +61,10 @@ test("pinned V2 activates persisted UI agents, enforces policy, reloads, deletes
     assert.equal((await get("build")).description, "Opgeslagen bouwagent");
     assert.equal(effect(await get("build"), "read", "secrets.yaml"), "deny");
     assert.equal(effect(await get("build"), "edit", "safe.yaml"), "ask");
+    assert.equal(effect(await get("build"), "homeassistant_supervisor_app_apply", "*"), "ask");
+    assert.equal(effect(await get("build"), "read", ".opencode-safe-write-backups/recovery.bak"), "deny");
     assert.equal(effect(await get("home-assistant-read-only"), "shell", "echo unsafe"), "deny");
+    assert.equal(effect(await get("home-assistant-read-only"), "homeassistant_supervisor_app_apply", "*"), "deny");
     await assert.rejects(get("must-not-load"), isAgentNotFoundError);
     await bridge.handle("create", "helper", { description: "Saved in Settings", mode: "all", system: "Do not mutate files", permissions: [{ action: "edit", resource: "*", effect: "deny" }] });
     assert.equal(effect(await get("helper"), "edit", "safe.yaml"), "deny");

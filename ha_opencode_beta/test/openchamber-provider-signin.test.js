@@ -12,10 +12,11 @@ function fixture(t, newline = "\n") {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const target = path.join(root, "packages/ui/src/components/sections/providers/ProviderOAuthMethods.tsx");
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  // Independent anchor from pinned OpenChamber 2.5.0. The original component's
+  // Independent anchor from pinned OpenChamber 2.5.3. The original component's
   // method labels, SDK calls, polling and cancellation must remain untouched.
   const original = `// upstream authentication stays unchanged
-  return (
+      const { data } = await sdk().integration.oauth.connect({
+   return (
     <div className={cn('space-y-4', className)}>
       {methods.map((method) => {
         const isActive = activeMethodID === method.id;
@@ -35,7 +36,9 @@ for (const newline of ["\n", "\r\n"]) {
     assert.match(result, /detects approval automatically/);
     assert.match(result, /no restart or Terminal switch/);
     assert.match(result, /OpenCode handles credential storage and refresh/);
-    assert.equal(result.replace(/      \{integrationId === 'openai'[\s\S]*?      \)\}\n/, ""), original);
+    assert.match(result, /await client\.integration\.list\(\);\n      const \{ data \} = await client\.integration\.oauth\.connect/);
+    const withoutWarmup = result.replace(/      \/\/ The pinned server's list handler[\s\S]*?      const \{ data \} = await client.integration.oauth.connect\(\{/, "      const { data } = await sdk().integration.oauth.connect({");
+    assert.equal(withoutWarmup.replace(/      \{integrationId === 'openai'[\s\S]*?      \)\}\n/, ""), original);
     assert.throws(() => patchProviderSignin(root), /Unexpected preview provider sign-in source/);
     assert.equal(fs.readFileSync(target, "utf8"), result);
   });
@@ -56,9 +59,17 @@ test("requires an explicit upstream checkout", () => {
   assert.match(result.stderr, /Usage: patch-provider-signin.cjs/);
 });
 
+test("late OAuth source drift rejects the entire patch before writing guidance", t => {
+  const { root, target, original } = fixture(t);
+  const changed = original.replace("sdk().integration.oauth.connect", "sdk().integration.oauth.start");
+  fs.writeFileSync(target, changed);
+  assert.throws(() => patchProviderSignin(root), /Unexpected preview OAuth connection source/);
+  assert.equal(fs.readFileSync(target, "utf8"), changed);
+});
+
 test("beta builds and exercises the patched provider UI before shipping it", () => {
   const docker = fs.readFileSync(path.join(__dirname, "../Dockerfile"), "utf8");
-  assert.match(docker, /ARG OPENCHAMBER_REVISION=ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd/);
+  assert.match(docker, /ARG OPENCHAMBER_REVISION=95af6769797693bf049f4e6a801e373b5220447b/);
   const patch = docker.indexOf("RUN node /tmp/patch-provider-signin.cjs /opt/openchamber-preview");
   assert.ok(patch > docker.indexOf("git checkout --detach FETCH_HEAD"));
   assert.ok(patch < docker.indexOf("bun run --cwd packages/ui type-check"));

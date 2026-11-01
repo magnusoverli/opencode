@@ -42,7 +42,8 @@ Frequently-changed areas worth double-checking:
 
 `write_config_safe` is the sanctioned write path. It validates, backs up, blocks
 writes that would drop list entries or top-level keys or shrink a file
-suspiciously, and restores on failure.
+suspiciously, and attempts verified recovery on failure. Recovery can fail: inspect
+the transaction result and never claim restoration merely because it was attempted.
 
 ```
 1. get_config()                                -> installed version
@@ -52,12 +53,20 @@ suspiciously, and restores on failure.
 5. write_config_safe(path, yaml, dry_run=true) -> pre-validate
 6. fix and repeat 5 until clean
 7. show the user, wait for approval
-8. write_config_safe(path, yaml)               -> write for real
+8. write_config_safe(file_path=path, content=yaml,
+   expected_revision=<source revision from step 5>) -> write for real
 ```
 
 **Never write partial content to a config file.** Read first, include everything
 that was already there. `write_config_safe` blocks the worst cases, but the
 draft you show the user must already be complete.
+
+The dry run returns a source revision, not proof of full HA validation of the
+proposed content. Actual writes require that unchanged revision. A conflict needs
+a fresh read, dry run and approval; do not silently refresh the revision. Full HA
+validation runs against live files after atomic replacement. A recovery-required
+or uncertain outcome needs local inspection before retrying. Never delete the
+writer lock or recovery copies to bypass an unresolved transaction.
 
 If the `write_config_safe` tool is not present, the add-on is running a reduced
 MCP tool profile. Say so rather than falling back to shell redirection.
@@ -179,7 +188,8 @@ to API editing or hand-built JSON/shell commands.
 5. Show the draft and explain that `automation.reload` applies it without a Core
    restart, but stops currently running automation actions. Ask for approval of
    the write and reload together; approval of only the write is not reload consent.
-6. Write the approved content with `write_config_safe`. If writing or validation
+6. Write the approved content with `write_config_safe`, passing the dry run's
+   unchanged `expected_revision`. If writing or validation
    fails, stop and report the failure; do not reload. If the source changed since
    it was read, reread it and reconcile the draft before writing.
 7. Once the write succeeds and reload is approved, use the structured MCP call

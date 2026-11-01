@@ -64,6 +64,7 @@ export function buildReadOnlyPermissions(workspace = DEFAULT_WORKSPACE) {
       effect: "allow",
     })),
     { action: "homeassistant_native_*", resource: "*", effect: "deny" },
+    { action: "read", resource: "*.opencode-safe-write-backups/*", effect: "deny" },
     ...SENSITIVE_READ_PATTERNS.map((resource) => ({ action: "read", resource, effect: "deny" })),
   ];
 }
@@ -104,11 +105,13 @@ export function buildManagedConfig({
     { action: "shell", resource: "tee *", effect: "ask" },
     { action: "shell", resource: "rm *", effect: "ask" },
     { action: "shell", resource: "mv *", effect: "ask" },
+    { action: "homeassistant_supervisor_app_apply", resource: "*", effect: "ask" },
     { action: "external_directory", resource: workspace, effect: "allow" },
     { action: "external_directory", resource: `${workspace}/**`, effect: "allow" },
   ];
 
   if (restrictSensitiveFiles) {
+    permissions.push({ action: "read", resource: "*.opencode-safe-write-backups/*", effect: "deny" });
     for (const resource of SENSITIVE_READ_PATTERNS) {
       permissions.push({ action: "read", resource, effect: "deny" });
     }

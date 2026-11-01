@@ -8,9 +8,9 @@ FROM node:${NODE_VERSION}-trixie-slim AS node-runtime
 
 # OpenChamber's web release is independently pinned; its desktop CLI is never
 # installed. Build with the reviewed security lock, on the target's native runner.
-FROM oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288 AS openchamber-bun
+FROM oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4 AS openchamber-bun
 FROM node-runtime AS openchamber-builder
-ARG OPENCHAMBER_REVISION=ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd
+ARG OPENCHAMBER_REVISION=95af6769797693bf049f4e6a801e373b5220447b
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client python3 g++ make \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=openchamber-bun /usr/local/bin/bun /usr/local/bin/bun
@@ -20,7 +20,7 @@ RUN git init \
     && git -c http.version=HTTP/1.1 fetch --depth 1 origin "${OPENCHAMBER_REVISION}" \
     && git checkout --detach FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = "${OPENCHAMBER_REVISION}" \
-    && test "$(bun --version)" = 1.4.3
+    && test "$(bun --version)" = 1.4.4
 COPY rootfs/opt/openchamber/patch-security-dependencies.cjs rootfs/opt/openchamber/security-overrides.json /tmp/
 RUN node /tmp/patch-security-dependencies.cjs /opt/openchamber-preview
 COPY rootfs/opt/openchamber/security.bun.lock /opt/openchamber-preview/bun.lock
@@ -111,8 +111,8 @@ ARG NODE_VERSION
 ARG ADDON_CHANNEL=stable
 ARG TTYD_VERSION=1.7.7
 # One pinned V2 runtime and its matching plugin API. No V1 runtime is installed.
-ARG OPENCODE_V2_VERSION=2.1.2
-ARG OPENCHAMBER_VERSION=2.5.0
+ARG OPENCODE_V2_VERSION=2.2.5
+ARG OPENCHAMBER_VERSION=2.5.3
 ARG TINFOIL_VERSION=1.2.1
 ARG TSX_VERSION=4.23.15
 ARG YQ_VERSION=v4.54.1

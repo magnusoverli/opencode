@@ -1,9 +1,19 @@
 # Changelog
 
-## [Unreleased]
+## 3.5.0b0
 
-- Update the MCP server's Zod dependency to address GHSA-mrhx-c7xc-m3w5; no beta version or runtime pin changes.
-- Patch Zod and undici in the private-encryption runtime without changing its SDK or releasing beta.
+- Pin the latest released OpenCode CLI/plugin **2.2.5** and OpenChamber **2.5.3** (immutable source `95af6769797693bf049f4e6a801e373b5220447b`), with upstream's Bun **1.4.4** toolchain. Rebase editor/mobile recovery patches, retain Ingress assets/API/terminal-WebAssembly and private-backend adaptations, and use upstream's Git 4 service policy. Refresh security overrides/locks for newly reported OpenChamber dependency advisories.
+- Support guarded copy-on-write upgrades from the previously shipped OpenCode **2.1.2**. Accept upstream's removed `session_pending` table only when empty and its exact native migration is recorded; preserve the original generation and stop if pending data would be dropped.
+- Resolve the 24 moderate production npm audit findings by pinning the reviewed `glob` 14.0.2 / `minimatch` 11.0.1 pair and refreshing the runtime lock. Production audit reports zero vulnerabilities; focused consumer and cancellation/amplification regressions cover the major-version compatibility changes.
+- Add bounded, backend-independent migration metadata diagnostics and path-specific terminal failures; reconcile only narrowly checked root-owned TUI state while preserving preferences and unknown migration work ([#197](https://github.com/magnusoverli/opencode/issues/197), [#206](https://github.com/magnusoverli/opencode/issues/206), [#202](https://github.com/magnusoverli/opencode/issues/202), [#207](https://github.com/magnusoverli/opencode/issues/207)). The unknown-work and unsafe-path reports still need affected-host evidence for a definitive repair.
+- Replace direct safe writes with revision-guarded atomic replacement, unique verified recovery copies, a shared writer lock and truthful recovery outcomes ([#198](https://github.com/magnusoverli/opencode/issues/198)). Actual writes now require the source revision from a dry run. Full HA validation remains post-save; external editors are not covered by atomic CAS. Interrupted/uncertain transactions stop further automated writes for local recovery review.
+- Add a separately permissioned, enforced read-only HAB subset for dashboard/helper inspection, retaining full-profile boundaries and rejecting unreviewed commands and flags ([#203](https://github.com/magnusoverli/opencode/issues/203)).
+- Add redacted Supervisor app inspection, expiring revision-bound previews and separately approved option/lifecycle application, with secret preservation, self-protection and readback verification ([#199](https://github.com/magnusoverli/opencode/issues/199)). Supervisor has no atomic conditional-save API; credentials, array replacement and deletion remain manual.
+- Add LAN-local single-use pairing, expiring device credentials and individual revocation without distributing the private backend credential ([#205](https://github.com/magnusoverli/opencode/issues/205)). Existing trusted-proxy/TLS checks remain mandatory; LAN worker/app restart revokes devices. Physical native-client acceptance remains unverified.
+- Wait for same-location integration/plugin activation before starting OpenChamber OAuth, mitigating the upstream cold-start race without replaying authorization ([#208](https://github.com/magnusoverli/opencode/issues/208)). Account-backed model rejection remains under investigation; this is not claimed resolved.
+- Document and schema-test an inference-only remote ProsperoAI recipe, separating optional search MCP and managed agent permissions ([#200](https://github.com/magnusoverli/opencode/issues/200)).
+- Beta-only release; stable is unchanged. Testing is proportional to each change rather than requiring an exhaustive acceptance matrix. Local native-image, installed Supervisor, account-backed and physical mobile checks remain unverified; release images are built separately by CI. Known unresolved reports are not marked fixed.
+- Update the MCP server's Zod dependency to address GHSA-mrhx-c7xc-m3w5, and patch Zod and undici in the private-encryption runtime without changing its SDK.
 - Fix startup migration for compacted V1 conversations while preserving summaries, retained context and original history ([#195](https://github.com/magnusoverli/opencode/issues/195)).
 
 ## 3.2.4b6

@@ -77,6 +77,7 @@ import { detectAnomaly, searchEntities, generateSuggestions, generateStateSummar
 import { validateYamlStructure, resolveConfigPath } from "./lib/validation.js";
 import { validateConfigTemplates } from "./lib/template-validation.js";
 import { configApplyGuidance } from "./lib/config-apply.js";
+import { createSafeConfigWriter } from "./lib/safe-config-store.js";
 import { captureHomeAssistantPage } from "./lib/screenshot.js";
 import { extractContentFromHtml, extractConfigurationSection, extractYamlExamples } from "./lib/html-parser.js";
 import {
@@ -105,10 +106,12 @@ import {
 import { createNativeMcpHandler } from "./lib/native-mcp-handler.js";
 import { formatErrorLogResult, readErrorLogWithFallback } from "./lib/ha-error-log.js";
 import { createSupervisorAppsClient } from "./lib/supervisor-apps.js";
+import { createSupervisorAppManager } from "./lib/supervisor-app-management.js";
 import { setRegistryArea } from "./lib/registry-area.js";
 import { saveHabOutput } from "./lib/hab-output.js";
 import { createCommandOutputContent } from "./lib/command-output.js";
 import { HAB_MAX_OUTPUT_BYTES, prepareHabRequest, formatHabExecution } from "./lib/hab-cli.js";
+import { prepareReadOnlyHabRequest, redactReadOnlyHabOutput } from "./lib/hab-read-only.js";
 import { discoverNativeLlmApis } from "./lib/ha-llm-apis.js";
 import {
   ESPHomeDeviceBuilderClient,
@@ -398,6 +401,7 @@ const supervisorApps = createSupervisorAppsClient({
   onFallback: (details) => sendLog("notice", "supervisor-api", { action: "v2_apps_fallback", ...details }),
   onRecovered: (details) => sendLog("info", "supervisor-api", { action: "v2_apps_recovered", ...details }),
 });
+const supervisorAppManager = createSupervisorAppManager({ apps: supervisorApps, selfSlug: getSelfAddonSlug });
 
 const supervisorMetricsCache = new Map();
 
@@ -2912,7 +2916,7 @@ const TOOLS = [
   {
     name: "write_config_safe",
     title: "Safe Config Writer",
-    description: "Write YAML configuration to a file with automatic validation and content protection. Checks for deprecations, validates Jinja2 templates through HA's engine, verifies structural correctness, and runs HA's full config check. If validation fails, the original file is restored and errors are returned for correction. IMPORTANT: This tool blocks writes that would accidentally reduce content â€” removing list entries, dropping top-level keys, or significantly shrinking the file. Always read the existing file first and include all existing content in your write. Use dry_run=true to validate without writing.",
+    description: "Write YAML with content preflight, expected-source revision checks, atomic replacement, verified recovery copies and HA validation after saving. First use dry_run=true; pass its source revision as expected_revision on the approved write. A failed HA check attempts verified rollback; recovery failures are explicitly reported. Full HA validation checks live files, not staged content. Concurrent external writers cannot be atomically excluded. Include all existing content; content-loss guardrails still apply. Saving does not reload HA.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2927,6 +2931,11 @@ const TOOLS = [
         dry_run: {
           type: "boolean",
           description: "If true, validate without writing to disk (default: false). Use this to pre-check config before committing.",
+        },
+        expected_revision: {
+          type: "string",
+          pattern: "^(missing|[a-f0-9]{64})$",
+          description: "Required for actual writes: source revision returned by dry_run, or 'missing' for a reviewed new file. A mismatch refuses the write.",
         },
         validate_templates: {
           type: "boolean",
@@ -3828,6 +3837,46 @@ const TOOLS = [
       readOnly: false,
       idempotent: false,
     },
+  },
+  {
+    name: "supervisor_app_inspect",
+    title: "Inspect Supervisor App",
+    description: "Read app state and redacted configuration with an opaque inspection revision (full profile). All option strings are withheld. Use get_support_logs(source='addon', addon_slug=...) for bounded redacted logs. No app configuration or lifecycle changes are made.",
+    inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"], additionalProperties: false },
+    annotations: { readOnly: true, idempotent: true },
+  },
+  {
+    name: "supervisor_app_preview",
+    title: "Preview Supervisor App Change",
+    description: "Create a five-minute, single-use preview from supervisor_app_inspect's revision. For action=options provide an object merge in changes; omitted fields and nested secrets remain intact. Credentials, arrays and deletions require manual app configuration. Other actions: start, stop, restart. Supervisor validates full options without saving. Current-app mutations are blocked. Show the proposal and obtain approval before supervisor_app_apply. A preview grants no permission.",
+    inputSchema: { type: "object", properties: {
+      slug: { type: "string" }, expected_revision: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      action: { type: "string", enum: ["options", "start", "stop", "restart"] },
+      changes: { type: "object", additionalProperties: true },
+    }, required: ["slug", "expected_revision"], additionalProperties: false },
+    annotations: { readOnly: true, idempotent: false },
+  },
+  {
+    name: "supervisor_app_apply",
+    title: "Apply Approved Supervisor App Change",
+    description: "Apply one reviewed supervisor_app_preview after explicit native tool-permission approval. Revalidates options and rechecks the inspection revision; Supervisor has no atomic conditional-save API. Preview IDs expire on restart or after five minutes and are consumed before execution. No blind retries of uncertain outcomes. Saving options does not restart the app; lifecycle readiness is checked separately.",
+    inputSchema: { type: "object", properties: {
+      preview_id: { type: "string", pattern: "^[a-f0-9]{48}$" },
+      review: { type: "object", description: "Copy the preview's exact review object so native approval displays the affected app, action and redacted changes.", additionalProperties: true },
+    }, required: ["preview_id", "review"], additionalProperties: false },
+    annotations: { readOnly: false, idempotent: false, destructive: true },
+  },
+  {
+    name: "hab_run_read_only",
+    title: "Read-only HAB",
+    description: "Enforced read-only subset of pinned HAB 1.7.2 (full profile). Literal args only: ['dashboard','list'], ['dashboard','get','lovelace'], ['helper','list'], ['helper','types']. Lists accept --brief, --count and --limit 1..5000; helper list accepts one type filter. Unknown commands, aliases, global overrides, writes, backups, execution and --plan are denied before execution. Credential-like JSON fields are redacted; output can still contain private home configuration. Permission this tool separately from hab_run.",
+    inputSchema: {
+      type: "object", properties: {
+        args: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 12 },
+        timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
+      }, required: ["args"], additionalProperties: false,
+    },
+    annotations: { readOnly: true, idempotent: true, destructive: false },
   },
   {
     name: "hab_run",
@@ -5241,11 +5290,13 @@ async function handleToolCall(request) {
           });
         }
         
-        // Template validation depends on the current file as well as the proposed content.
-        let previousContent = null;
-        if (validate_templates && existsSync(resolvedPath)) {
-          try { previousContent = readFileSync(resolvedPath, "utf-8"); } catch (_) { /* validate without a baseline */ }
+        const writer = createSafeConfigWriter();
+        let baseline;
+        try { baseline = writer.snapshot(resolvedPath); }
+        catch {
+          return makeCompatibleResponse({ content: [createTextContent("Safe Config Write - REFUSED: source path is unsafe, unavailable or oversized. No file was modified.")], isError: true });
         }
+        const previousContent = validate_templates ? baseline.bytes?.toString("utf8") ?? null : null;
         const memoKey = createHash("sha256")
           .update(JSON.stringify([resolvedPath, validate_templates, previousContent, content])).digest("hex");
         let contentChecks = getValidationMemo(memoKey);
@@ -5393,6 +5444,7 @@ async function handleToolCall(request) {
           let responseText = `# Safe Config Write - Dry Run\n\n`;
           responseText += `**File:** \`${file_path}\`\n`;
           responseText += `**Mode:** Validation only (no file changes)\n\n`;
+          responseText += `**Source Revision:** \`${baseline.revision}\`\nPass this as expected_revision after approval. This preflight does not run full HA validation against the proposed content.\n\n`;
           
           if (hasBlockingErrors) {
             responseText += `## BLOCKING ERRORS (must fix before writing)\n\n`;
@@ -5491,134 +5543,26 @@ async function handleToolCall(request) {
           });
         }
         
-        // Step 8: Backup existing file (if it exists)
-        const backupPath = resolvedPath + ".bak";
-        let hadExistingFile = false;
-        try {
-          if (existsSync(resolvedPath)) {
-            copyFileSync(resolvedPath, backupPath);
-            hadExistingFile = true;
-            sendLog("info", "config", { action: "backup_created", path: backupPath });
-          }
-        } catch (error) {
-          return makeCompatibleResponse({
-            content: [createTextContent(
-              `# Safe Config Write - ERROR\n\n` +
-              `**Error:** Could not create backup of existing file: ${error.message}\n` +
-              `File was NOT modified.`,
-              { audience: ["user", "assistant"], priority: 1.0 }
-            )],
-            isError: true,
-          });
-        }
-        
-        // Step 9: Write the new content
-        try {
-          // Ensure parent directory exists
-          const parentDir = dirname(resolvedPath);
-          if (!existsSync(parentDir)) {
-            mkdirSync(parentDir, { recursive: true });
-          }
-          writeFileSync(resolvedPath, content, "utf-8");
-          sendLog("info", "config", { action: "file_written", path: resolvedPath });
-        } catch (error) {
-          // Restore backup if write failed
-          if (hadExistingFile) {
-            try { copyFileSync(backupPath, resolvedPath); } catch (_) { /* best effort */ }
-          }
-          return makeCompatibleResponse({
-            content: [createTextContent(
-              `# Safe Config Write - ERROR\n\n` +
-              `**Error:** Could not write file: ${error.message}\n` +
-              `${hadExistingFile ? "Original file has been restored from backup." : "No file was created."}`,
-              { audience: ["user", "assistant"], priority: 1.0 }
-            )],
-            isError: true,
-          });
-        }
-        
-        // Step 10: Run HA's full config validation
-        let validationResult = "skipped";
-        let validationErrors = "";
-        let backupRestored = false;
-        
-        try {
-          const haCheck = await callHA("/config/core/check_config", "POST", null, CHECK_CONFIG_TIMEOUT_MS);
-          validationResult = haCheck.result || "valid";
-          validationErrors = haCheck.errors || "";
-          
-          if (validationResult === "invalid") {
-            sendLog("warning", "config", { action: "validation_failed", errors: validationErrors });
-            
-            // Restore the backup
-            if (hadExistingFile) {
-              try {
-                copyFileSync(backupPath, resolvedPath);
-                backupRestored = true;
-                sendLog("info", "config", { action: "backup_restored", path: resolvedPath });
-              } catch (restoreError) {
-                sendLog("error", "config", { action: "backup_restore_failed", error: restoreError.message });
-              }
-            } else {
-              // No original file existed - remove the invalid one
-              try {
-                unlinkSync(resolvedPath);
-                backupRestored = true;
-              } catch (_) { /* best effort */ }
-            }
-          }
-        } catch (error) {
-          sendLog("error", "config", { action: "validation_call_failed", error: error.message });
-          validationResult = "skipped";
-          validationErrors = `Could not run HA config check: ${error.message}`;
-          
-          // Cannot confirm the config is valid â€” restore backup same as "invalid"
-          if (hadExistingFile) {
-            try {
-              copyFileSync(backupPath, resolvedPath);
-              backupRestored = true;
-              sendLog("info", "config", { action: "backup_restored", path: resolvedPath });
-            } catch (restoreError) {
-              sendLog("error", "config", { action: "backup_restore_failed", error: restoreError.message });
-            }
-          } else {
-            // No original file existed â€” remove the unvalidated one
-            try {
-              unlinkSync(resolvedPath);
-              backupRestored = true;
-            } catch (_) { /* best effort */ }
-          }
-        }
-        
-        // Retain .bak file as a recovery point â€” do NOT delete on success.
-        // The backup always contains the file content from right before this write.
-        // The next write_config_safe call to this file will overwrite it with the
-        // then-current version, so there is always one recovery point available.
-        
-        // Step 11: Build response
-        const success = validationResult === "valid";
+        let validationResult = "not_run";
+        throwIfRequestCancelled();
+        const transaction = await writer.write({
+          path: resolvedPath, content, expectedRevision: args.expected_revision,
+          validate: async () => {
+            const check = await callHA("/config/core/check_config", "POST", null, CHECK_CONFIG_TIMEOUT_MS);
+            validationResult = check?.result === "valid" ? "valid" : "invalid_or_unknown";
+            return validationResult === "valid";
+          },
+        });
+        const success = transaction.status === "saved";
         let responseText = `# Safe Config Write - ${success ? "SUCCESS" : "FAILED"}\n\n`;
         responseText += `**File:** \`${file_path}\`\n`;
         responseText += `**HA Config Validation:** ${validationResult}\n`;
-        responseText += `**File Written:** ${success ? "Yes" : "No (restored original)"}\n\n`;
-        
-        if (!success) {
-          responseText += `## Validation Errors\n\n`;
-          responseText += `\`\`\`\n${validationErrors}\n\`\`\`\n\n`;
-          responseText += `**The original file has been restored.** Fix the errors above and retry.\n\n`;
-          
-          // Include any error log entries that might help
-          try {
-            const { text: log, source } = await getErrorLogWithFallback(20);
-            const recentLines = log.split("\n").slice(-20).join("\n");
-            if (recentLines.trim()) {
-              const heading = source === "core_journal"
-                ? "Recent Core Journal Logs (Error Log Unavailable)"
-                : "Recent Error Log";
-              responseText += `## ${heading}\n\n\`\`\`\n${recentLines}\n\`\`\`\n\n`;
-            }
-          } catch (_) { /* best effort */ }
-        }
+        responseText += `**Transaction:** ${transaction.status}\n`;
+        responseText += `**File Written:** ${success ? "Yes; verified" : transaction.status === "restored" ? "No; original state restored and verified" : transaction.saved === null ? "Unknown; inspect before retrying" : "No change committed"}\n\n`;
+        if (transaction.reason) responseText += `**Reason:** ${transaction.reason}\n`;
+        if (transaction.backupPath) responseText += `**Recovery copy:** \`${transaction.backupPath}\`\n`;
+        if (transaction.journalPath) responseText += `**Transaction journal:** \`${transaction.journalPath}\`\n`;
+        if (!success) responseText += "Inspect the outcome before retrying. Conflicts require a fresh dry run and approval. A retained .opencode-safe-write.lock requires local recovery review, not automatic deletion.\n\n";
         
         if (depWarnings.length > 0) {
           responseText += `## Deprecation Warnings\n\n`;
@@ -6826,9 +6770,21 @@ async function handleToolCall(request) {
         });
       }
 
+      case "supervisor_app_inspect":
+      case "supervisor_app_preview":
+      case "supervisor_app_apply": {
+        const result = name === "supervisor_app_inspect" ? await supervisorAppManager.inspect(args.slug)
+          : name === "supervisor_app_preview" ? await supervisorAppManager.preview(args)
+          : await supervisorAppManager.apply(args.preview_id, args.review);
+        return makeCompatibleResponse({ content: [createTextContent(JSON.stringify(result))],
+          ...(result.status && result.status !== "saved" ? { isError: true } : {}) });
+      }
+
       // === HAB CLI INTEGRATION ===
+      case "hab_run_read_only":
       case "hab_run": {
-        const request = prepareHabRequest(args);
+        const readOnly = name === "hab_run_read_only";
+        const request = readOnly ? prepareReadOnlyHabRequest(args) : prepareHabRequest(args);
         sendLog("info", "hab", { action: "run_command", command: request.root, argument_count: request.argv.length });
         
         // For esphome subcommands, pre-discover the ESPHome ingress URL so
@@ -6876,6 +6832,10 @@ async function handleToolCall(request) {
           result = error.stdout || "";
         }
         
+        if (readOnly) {
+          result = redactReadOnlyHabOutput(result, [SUPERVISOR_TOKEN, HA_ACCESS_TOKEN]);
+          if (failure) failure = { code: typeof failure.code === "number" ? failure.code : "PROCESS_FAILED" };
+        }
         return makeCompatibleResponse(formatHabExecution(request, result, failure, {
             audience: ["user", "assistant"], priority: 0.7,
             saveLargeOutput: saveHabOutput,
@@ -7329,7 +7289,7 @@ First load the home-assistant-configuration skill and resolve automation include
 6. Define the action(s) to take
 7. Provide the complete YAML that contains ALL existing automations PLUS the new one
 8. Preserve existing IDs and prevalidate with \`write_config_safe(file_path=..., content=..., dry_run=true)\`. Show the draft and obtain approval for both writing and reloading (automation reload stops running actions).
-9. Save with \`write_config_safe\`; stop if writing or validation fails. Only after success and reload approval, use \`call_service(domain="automation", service="reload")\`.
+9. Save with \`write_config_safe\`, passing the dry run's unchanged \`expected_revision\`; stop on conflicts, uncertain recovery, writing or validation failure. Only after success and reload approval, use \`call_service(domain="automation", service="reload")\`.
 10. Check the reload result and affected runtime entity using read-only tools; inspect relevant errors if needed. Never trigger or enable the automation just to verify loading.
 11. Report saved/reloaded/load-verified separately. If reload is unapproved or call_service is absent, report saved, pending reload; offer HA Developer Tools → YAML or the full profile after an add-on restart. Never bypass a reduced profile via shell/API calls.
 

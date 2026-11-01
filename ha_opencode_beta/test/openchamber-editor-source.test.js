@@ -9,7 +9,7 @@ const front = 'packages/ui/src/components/views/FilesView.tsx';
 const back = 'packages/web/server/lib/opencode/bootstrap-runtime.js';
 const frontend = `import { runtimeFetch } from '@/lib/runtime-fetch';
     const language = staticLanguageExtension ?? dynamicLanguageExtension;
-}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap]);`;
+}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension]);`;
 const backend = `export const createBootstrapRuntime = (dependencies) => {
     registerAuthAndAccessRoutes(app, {
     });
@@ -31,7 +31,7 @@ test('source patch installs both editor views through shared extensions and moun
   const ui = await readFile(join(root, front), 'utf8');
   const server = await readFile(join(root, back), 'utf8');
   assert.match(ui, /if \(canEdit\) extensions.push\(createHaEditorLsp\(selectedFile.path, runtimeFetch\)\)/);
-  assert.match(ui, /fileEditorKeymap, canEdit, runtimeKey\]/);
+  assert.match(ui, /fileEditorKeymap, t, importLinksExtension, canEdit, runtimeKey\]/);
   assert.ok(server.indexOf('    registerAuthAndAccessRoutes') < server.indexOf('    registerEditorLspRoutes'));
   const routes = await readFile(join(root, 'packages/web/server/lib/opencode/ha-editor-lsp-routes.mjs'), 'utf8');
   assert.match(routes, /loadClient = \(\) => import\("\/opt\/opencode-v2-homeassistant\/lsp-client.js"\)/);

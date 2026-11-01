@@ -16,8 +16,15 @@ let cancellations: any[] = [];
 let connections: any[] = [];
 let successes: string[] = [];
 let attempt: any;
+let activated = false;
+let activationFails = false;
 const same = (a: any[], b: any[]) => a.length === b.length && a.every((value, i) => value === b[i]);
 const React = {
+  useMemo: (fn: any, deps: any[]) => {
+    const position = index++;
+    if (!values[position] || !same(values[position].deps, deps)) values[position] = { value: fn(), deps };
+    return values[position].value;
+  },
   useState: (initial: any) => {
     const position = index++;
     if (!(position in values)) values[position] = initial;
@@ -42,8 +49,10 @@ const React = {
     });
   },
 };
-const sdk = { integration: { oauth: {
-  connect: async (input: any) => { connections.push(input); return { data: attempt }; },
+const sdk = { integration: {
+  list: async () => { if (activationFails) throw new Error('Synthetic activation failure'); activated = true; return { data: [] }; },
+  oauth: {
+  connect: async (input: any) => { if (!activated) throw new Error('OAuth called before plugin activation'); connections.push(input); return { data: attempt }; },
   status: async () => { statusCalls++; return { data: { status, message: 'Synthetic rejection' } }; },
   cancel: async (input: any) => { cancellations.push(input); },
   complete: async () => { throw new Error('Auto attempts must not submit pasted codes'); },
@@ -62,6 +71,7 @@ mock.module('@/lib/utils', () => ({ cn: (...args: any[]) => args.filter(Boolean)
 mock.module('@/lib/clipboard', () => ({ copyTextToClipboard: async (value: string) => { copies.push(value); return { ok: true }; } }));
 mock.module('@/lib/url', () => ({ openExternalUrl: async (value: string) => { opens.push(value); } }));
 mock.module('@/lib/opencode/client', () => ({ opencodeClient: { getSdkClient: () => sdk, getScopedSdkClient: () => sdk } }));
+mock.module('@/lib/opencode/integration-catalog', () => ({ getIntegrationClient: () => sdk }));
 mock.module('./ProviderFormFields', () => ({ ProviderFormFields: 'form-fields' }));
 const { ProviderOAuthMethods } = await import('./ProviderOAuthMethods');
 const methods = [
@@ -90,6 +100,7 @@ function reset() {
   values = []; effects = []; pending = []; index = 0;
   connected = 0; statusCalls = 0; status = 'pending'; opens = []; copies = [];
   cancellations = []; connections = []; successes = [];
+  activated = false; activationFails = false;
   attempt = { attemptID: 'fixture-attempt', mode: 'auto', url: 'https://auth.openai.com/codex/device', instructions: 'Enter code: ABCD-12345' };
 }
 afterEach(() => { for (const effect of effects) effect?.cleanup?.(); });
@@ -154,4 +165,12 @@ test('a failed attempt is shown without refreshing provider state or claiming su
   expect(nodes(tree).some(node => node.props?.children === 'Synthetic rejection')).toBe(true);
   expect(connected).toBe(0);
   expect(successes).toEqual([]);
+});
+
+test('activation failure never starts or retries an OAuth authorization attempt', async () => {
+  reset(); activationFails = true;
+  begin('Sign in with ChatGPT'); await settle();
+  expect(connections).toEqual([]);
+  expect(opens).toEqual([]);
+  expect(connected).toBe(0);
 });

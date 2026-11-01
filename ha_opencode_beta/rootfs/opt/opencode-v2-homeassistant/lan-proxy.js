@@ -1,6 +1,7 @@
 import http from "node:http";
 import { BlockList, isIP } from "node:net";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { createLanPairing } from "./lan-pairing.js";
 
 const hash = (value) => createHash("sha256").update(value).digest();
 const normalizeIp = (ip = "") => ip.startsWith("::ffff:") ? ip.slice(7) : ip;
@@ -36,6 +37,14 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
   const upstreamAuthorization = mode === "api" ? `Basic ${Buffer.from(`opencode:${backendPassword}`).toString("base64")}` : null;
   const sockets = new Set();
   const outgoing = new Set();
+  const deviceSockets = new Map();
+  const requestPath = Symbol("lanPath");
+  const administrator = Symbol("lanAdministrator");
+  const device = Symbol("lanDevice");
+  const cookieName = publicUrl.port ? `opencode_session_${publicUrl.port}` : "opencode_session";
+  const pairing = mode === "api" ? createLanPairing({ onRevoke(id) {
+    for (const [socket, ids] of deviceSockets) if (ids.has(id)) socket.destroy();
+  } }) : null;
 
   function authorize(req, upgrade) {
     const remote = normalizeIp(req.socket.remoteAddress);
@@ -57,11 +66,35 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
       path = decodeURIComponent(new URL(req.url, origin).pathname);
       if (path.includes("%") || path.includes("\\")) return 400;
     } catch { return 400; }
+    req[requestPath] = path;
     if (path.startsWith("/api/ha-editor-lsp") || path.startsWith("/api/hassio_ingress") || path.startsWith("/__ha") || /^\/ha-(?:mcp|assist)(?:\/|$)/.test(path)) return 403;
     if (mode === "api") {
-      if (!(path.startsWith("/api/") || path === "/openapi.json")) return 404;
+      const redeem = req.method === "GET" && /^\/auth\/connect\/[A-Za-z0-9_-]{22}$/.test(path) && !upgrade;
+      if (!(path.startsWith("/api/") || path === "/openapi.json" || redeem)) return 404;
       if (req.method === "OPTIONS" && originHeader && req.headers["access-control-request-method"]) return 204;
-      if (!timingSafeEqual(hash(String(req.headers.authorization || "")), lanAuthorization)) return 401;
+      req[administrator] = timingSafeEqual(hash(String(req.headers.authorization || "")), lanAuthorization);
+      if (req[administrator]) deviceSockets.delete(req.socket);
+      if (redeem) return 0; // The local handler atomically consumes the capability.
+      if (!req[administrator]) {
+        const encoded = /^Basic ([A-Za-z0-9+/=]{1,2048})$/i.exec(req.headers.authorization ?? "")?.[1];
+        const decoded = encoded ? Buffer.from(encoded, "base64").toString("utf8") : "";
+        let id = decoded.startsWith("opencode:") ? pairing.authenticate(decoded.slice(9)) : null;
+        if (!id) {
+          const cookies = String(req.headers.cookie ?? "").split(";").map(value => value.trim());
+          const matches = cookies.filter(value => value.startsWith(`${cookieName}=`));
+          if (matches.length === 1) id = pairing.authenticate(matches[0].slice(cookieName.length + 1));
+          if (id && (upgrade || !["GET", "HEAD"].includes(req.method)) && originHeader !== origin) return 403;
+        }
+        if (!id) return 401;
+        req[device] = id;
+        if (!deviceSockets.has(req.socket)) {
+          deviceSockets.set(req.socket, new Set());
+          req.socket.once("close", () => deviceSockets.delete(req.socket));
+        }
+        deviceSockets.get(req.socket).add(id);
+      }
+      // Only the administrator can issue pairings or inspect/revoke devices.
+      if ((path === "/api/pair" || path.startsWith("/api/lan/devices")) && !req[administrator]) return 403;
     }
     return 0;
   }
@@ -93,6 +126,7 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
 
   function responseHeaders(req, source) {
     const result = cleanHeaders(source);
+    if (mode === "api") delete result["set-cookie"];
     // OpenChamber answers packaged-app origins with its own CORS headers; keep them.
     if (!nativeOrigins.has(req.headers.origin)) {
       for (const name of Object.keys(result)) if (name.startsWith("access-control-")) delete result[name];
@@ -111,6 +145,40 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
   const server = http.createServer({ maxHeaderSize: 16384 }, (req, res) => {
     const denied = authorize(req, false);
     if (denied) return reject(req, res, denied);
+    if (pairing) {
+      const path = req[requestPath];
+      const json = (status, data, extra = {}) => {
+        req.resume();
+        res.writeHead(status, { ...cors(req), "content-type": "application/json", "cache-control": "no-store", "referrer-policy": "no-referrer", ...extra });
+        res.end(JSON.stringify(data));
+      };
+      if (path === "/api/pair") {
+        if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+        const code = pairing.issue();
+        return json(code ? 200 : 429, code ?? { error: "pairing_capacity_reached" });
+      }
+      if (path.startsWith("/auth/connect/")) {
+        const result = pairing.consume(path.slice("/auth/connect/".length));
+        if (!result) return json(401, { error: "pairing_expired_or_used" });
+        if (req.headers.accept?.includes("text/html")) {
+          req.resume();
+          res.writeHead(303, { location: "/api/info", "cache-control": "no-store", "referrer-policy": "no-referrer",
+            "set-cookie": `${cookieName}=${result.token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000` });
+          return res.end();
+        }
+        return json(200, { token: result.token });
+      }
+      if (path === "/api/lan/devices") {
+        if (req.method !== "GET") return json(405, { error: "method_not_allowed" });
+        return json(200, { devices: pairing.list(), restart_revokes_all: true });
+      }
+      if (path.startsWith("/api/lan/devices/")) {
+        if (req.method !== "DELETE") return json(405, { error: "method_not_allowed" });
+        const id = path.slice("/api/lan/devices/".length);
+        if (!/^[a-f0-9]{24}$/.test(id)) return json(400, { error: "invalid_device" });
+        return json(200, { revoked: pairing.revoke(id) });
+      }
+    }
     const upstream = http.request({ host: "127.0.0.1", port: upstreamPort, path: req.url, method: req.method, headers: headers(req) }, (reply) => {
       res.writeHead(reply.statusCode, responseHeaders(req, reply.headers));
       reply.on("error", () => res.destroy());
@@ -160,6 +228,7 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
   return {
     server,
     async close() {
+      pairing?.close();
       for (const request of outgoing) request.destroy();
       for (const socket of sockets) socket.destroy();
       await new Promise((resolve) => server.close(resolve));

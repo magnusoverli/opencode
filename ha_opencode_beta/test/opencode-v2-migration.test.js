@@ -31,7 +31,7 @@ const V2_BIN = join(
   "bin",
   "opencode.exe",
 );
-const TARGET_VERSION = "2.1.2";
+const TARGET_VERSION = "2.2.5";
 const PREVIOUS_VERSION = "0.0.0-beta-18684";
 const PREVIOUS_BIN = join(ADDON_ROOT, "rootfs", "opt", "opencode-v2-homeassistant",
   "node_modules", "@opencode-ai", "cli", "bin", "opencode2.exe");
@@ -99,6 +99,30 @@ describe("OpenCode V2 copy-on-write migration", () => {
       part_count: 0,
       content_part_count: 0,
     });
+  });
+
+  it("accepts only the recorded empty pending-table removal, never dropped pending data", () => {
+    const result = spawnSync(python, ["-B", "-c", `
+import importlib.util, pathlib, sqlite3, tempfile
+spec=importlib.util.spec_from_file_location('migration',${JSON.stringify(MIGRATOR)})
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as directory:
+    old=pathlib.Path(directory)/'old.db'; new=pathlib.Path(directory)/'new.db'
+    a=sqlite3.connect(old); a.execute('CREATE TABLE session_pending (id TEXT, data TEXT)'); a.commit()
+    b=sqlite3.connect(new); b.execute('CREATE TABLE migration (id TEXT)'); b.commit()
+    def rejected(code):
+        try: m.validate_v2_upgrade(old,new)
+        except m.MigrationError as error: assert error.code == code, error.code
+        else: raise AssertionError('unsafe upgrade was accepted')
+    rejected('v2_upgrade_schema_mismatch')
+    b.execute('INSERT INTO migration VALUES (?)',('20261025154125_drop_session_pending',)); b.commit()
+    m.validate_v2_upgrade(old,new)
+    a.execute('INSERT INTO session_pending VALUES (?,?)',('pending','synthetic pending input')); a.commit()
+    rejected('v2_upgrade_pending_input')
+    assert a.execute('SELECT data FROM session_pending').fetchone()[0] == 'synthetic pending input'
+    a.close(); b.close()
+`], { encoding: "utf8", timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr);
   });
 
   it("accepts a database and WAL above the old 16 GiB cap but still rejects files beyond 32 GiB", async () => {
@@ -606,7 +630,8 @@ describe("OpenCode V2 copy-on-write migration", () => {
   for (const [version, binary] of [[PREVIOUS_VERSION, PREVIOUS_BIN],
     ["2.0.13", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-previous/bin/opencode.exe")],
     ["2.0.22", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-beta-previous/bin/opencode.exe")],
-    ["2.0.26", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-upgrade-previous/bin/opencode.exe")]]) {
+    ["2.0.26", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-upgrade-previous/bin/opencode.exe")],
+    ["2.1.2", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-release-previous/bin/opencode.exe")]]) {
   it(`preserves failed-upgrade input and validated state when upgrading ${version}`, async () => {
     const root = join(sandbox, `upgrade-v2-${version}`);
     const source = join(sandbox, `upgrade-v1-${version}`);

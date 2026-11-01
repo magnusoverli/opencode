@@ -10,6 +10,24 @@ function supervisorError(status, message = "unavailable") {
 }
 
 describe("Supervisor application API compatibility", () => {
+  it.each(["v1", "v2"])("uses the confirmed %s validation, options and lifecycle contracts", async version => {
+    const request = vi.fn(async endpoint => {
+      if (endpoint === "/v2/apps") {
+        if (version === "v1") throw supervisorError(404);
+        return { apps: [] };
+      }
+      return { valid: true };
+    });
+    const client = createSupervisorAppsClient({ request });
+    const prefix = version === "v1" ? "/addons/example" : "/v2/apps/example";
+    await client.validateOptions("example", { enabled: true });
+    await client.setOptions("example", { enabled: true });
+    await client.lifecycle("example", "restart");
+    expect(request).toHaveBeenCalledWith(`${prefix}/options/validate`, "POST", { enabled: true }, undefined);
+    expect(request).toHaveBeenCalledWith(`${prefix}/options`, "POST", { options: { enabled: true } }, undefined);
+    expect(request).toHaveBeenCalledWith(`${prefix}/restart`, "POST", null, undefined);
+    expect(() => client.lifecycle("example", "uninstall")).toThrow();
+  });
   it("uses V2 application and store routes when the V2 list is available", async () => {
     const request = vi.fn(async (endpoint, method = "GET", body = null, timeoutMs) => {
       if (endpoint === "/v2/apps") return { apps: [{ slug: "esphome" }] };

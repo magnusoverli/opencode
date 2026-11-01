@@ -30,8 +30,8 @@ FORMAT = "ha-opencode-v2-migration/v1"
 GENERATION_RE = re.compile(r"^[a-f0-9]{32}$")
 # Shipped beta generations whose native V2 schema is covered by the upgrade
 # fixture. Unknown builds and downgrades must not open a user's database.
-V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242", "2.0.13", "2.0.22", "2.0.26"}
-V2_UPGRADE_TARGET = "2.1.2"
+V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242", "2.0.13", "2.0.22", "2.0.26", "2.1.2"}
+V2_UPGRADE_TARGET = "2.2.5"
 MAX_DATABASE_BYTES = 32 * 1024 * 1024 * 1024
 LEGACY_WORKSPACE = "/homeassistant"
 MANAGED_WORKSPACE = "/run/opencode-v2/workspace"
@@ -118,7 +118,7 @@ class MigrationError(Exception):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("inventory", "prepare"), nargs="?", default="prepare")
+    parser.add_argument("command", choices=("inventory", "prepare", "diagnose"), nargs="?", default="prepare")
     parser.add_argument("--root", type=Path, default=Path("/data/v2"))
     parser.add_argument("--source-data", type=Path, default=Path("/data/.local/share/opencode"))
     parser.add_argument("--retained-root", action="append", type=Path, default=[])
@@ -129,19 +129,36 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def path_details(path: Path, expected: str) -> tuple[str, ...]:
+    # Metadata only: do not dereference links, include targets or read contents.
+    name = re.sub(r"[^A-Za-z0-9/._-]", "_", str(path)[-160:])
+    try:
+        info = path.lstat()
+    except OSError as error:
+        return (f"path={name}", f"expected={expected}",
+                "type=missing" if error.errno == 2 else "type=unavailable",
+                f"errno={error.errno}")
+    kind = ("symlink" if stat.S_ISLNK(info.st_mode) else
+            "directory" if stat.S_ISDIR(info.st_mode) else
+            "file" if stat.S_ISREG(info.st_mode) else "other")
+    return (f"path={name}", f"expected={expected}", f"type={kind}",
+            f"uid={info.st_uid}", f"gid={info.st_gid}",
+            f"mode={stat.S_IMODE(info.st_mode):04o}", f"links={info.st_nlink}")
+
+
 def ensure_plain_directory(path: Path, *, create: bool = False) -> None:
     path = Path(os.path.abspath(path))
     parent = path.parent
     if parent != path:
         ensure_plain_directory(parent, create=create)
     if path.is_symlink():
-        raise MigrationError("unsafe_symlink")
+        raise MigrationError("unsafe_symlink", details=path_details(path, "directory"))
     if path.exists():
         if not path.is_dir():
-            raise MigrationError("unsafe_path_type")
+            raise MigrationError("unsafe_path_type", details=path_details(path, "directory"))
         return
     if not create:
-        raise MigrationError("missing_directory")
+        raise MigrationError("missing_directory", details=path_details(path, "directory"))
     path.mkdir(mode=0o700)
 
 
@@ -149,9 +166,9 @@ def ensure_plain_file(path: Path, *, hardlinks: bool = True) -> None:
     ensure_plain_directory(path.parent)
     stat = path.lstat()
     if path.is_symlink() or not path.is_file():
-        raise MigrationError("unsafe_path_type")
+        raise MigrationError("unsafe_path_type", details=path_details(path, "file"))
     if hardlinks and stat.st_nlink != 1:
-        raise MigrationError("unsafe_hardlink")
+        raise MigrationError("unsafe_hardlink", details=path_details(path, "single-link-file"))
 
 
 def fsync_directory(path: Path) -> None:
@@ -1665,7 +1682,7 @@ def validate_tree(root: Path) -> None:
         for name in directories:
             child = path / name
             if child.is_symlink() or not child.is_dir():
-                raise MigrationError("unsafe_path_type")
+                raise MigrationError("unsafe_path_type", details=path_details(child, "directory"))
         for name in files:
             file = path / name
             ensure_plain_file(file)
@@ -1922,6 +1939,21 @@ def validate_v2_upgrade(before: Path, after: Path) -> None:
                 continue
             quoted = '"' + table.replace('"', '""') + '"'
             columns = connection.execute(f"PRAGMA previous.table_info({quoted})").fetchall()
+            if table == "session_pending" and not connection.execute(
+                "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone():
+                # OpenCode 2.2.5's reviewed upstream migration
+                # 20261025154125_drop_session_pending removes this obsolete
+                # projection. Accept ONLY an empty source plus its recorded
+                # native migration, never silently discard pending user input.
+                if connection.execute("SELECT 1 FROM previous.session_pending LIMIT 1").fetchone():
+                    raise MigrationError("v2_upgrade_pending_input")
+                if not connection.execute(
+                    "SELECT 1 FROM main.migration WHERE id=?",
+                    ("20261025154125_drop_session_pending",),
+                ).fetchone():
+                    raise MigrationError("v2_upgrade_schema_mismatch")
+                continue
             if table == "session_v2":
                 columns = [row for row in columns if row[1] != "permission"]
                 for session_id, raw in connection.execute("SELECT id, permission FROM previous.session_v2"):
@@ -2350,6 +2382,28 @@ def prepare(args: argparse.Namespace) -> dict:
 def main() -> int:
     args = parse_args()
     try:
+        if args.command == "diagnose":
+            # No lock, mkdir, SQLite connection, journal update or preparation.
+            # Inspect only fixed roots and direct work-entry metadata. A broken
+            # component is reported without traversing through it or following it.
+            for path in (args.root, args.root / "work", args.root / "generations", args.source_data):
+                try:
+                    ensure_plain_directory(path)
+                    print(" ".join(path_details(path, "directory")))
+                except MigrationError as error:
+                    print(f"error={error.code} " + " ".join(error.details))
+            for parent in (args.root / "work", args.root / "generations"):
+                try:
+                    ensure_plain_directory(parent)
+                    with os.scandir(parent) as entries:
+                        for index, entry in enumerate(entries):
+                            if index >= 100:
+                                print("entries_truncated=true")
+                                break
+                            print(" ".join(path_details(Path(entry.path), "migration-entry")))
+                except (OSError, MigrationError):
+                    pass
+            return 0
         if args.command == "inventory":
             print(json.dumps(inventory(args.source_data), sort_keys=True))
             return 0

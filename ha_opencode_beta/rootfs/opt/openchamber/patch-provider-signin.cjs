@@ -11,6 +11,14 @@ function patchProviderSignin(root) {
   if (source.split(before).length !== 2 || source.includes("ha-openai-signin-guidance")) {
     throw new Error("Unexpected preview provider sign-in source");
   }
+  const connectBefore = `      const { data } = await sdk().integration.oauth.connect({`;
+  if (source.split(connectBefore).length !== 2) throw new Error("Unexpected preview OAuth connection source");
+  const connectAfter = `      // The pinned server's list handler waits for plugin activation; its
+      // OAuth handler does not. Warm the SAME scoped client before resolving
+      // plugin-owned OAuth methods, without retrying an authorization attempt.
+      const client = sdk();
+      await client.integration.list();
+      const { data } = await client.integration.oauth.connect({`;
   const after = `    <div className={cn('space-y-4', className)}>
       {integrationId === 'openai' && (
         <p data-testid="ha-openai-signin-guidance" className="typography-meta text-muted-foreground">
@@ -23,7 +31,7 @@ function patchProviderSignin(root) {
         </p>
       )}
       {methods.map((method) => {`;
-  fs.writeFileSync(target, source.replace(before, after));
+  fs.writeFileSync(target, source.replace(before, after).replace(connectBefore, connectAfter));
 }
 
 module.exports = { patchProviderSignin };
