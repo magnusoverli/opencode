@@ -166,7 +166,7 @@
   },
   {
     "id": "entity-id-in-data",
-    "pattern": "data:\\s*\\n\\s*entity_id:",
+    "pattern": "^[ \\t]*data:[ \\t]*\\r?\\n(?:[ \\t]*\\r?\\n)*[ \\t]*entity_id:",
     "flags": "m",
     "message": "Placing entity_id inside 'data:' is deprecated for service calls. Use 'target:' instead.",
     "suggestion": "Move entity_id from data: to target:\n  target:\n    entity_id: light.example",
