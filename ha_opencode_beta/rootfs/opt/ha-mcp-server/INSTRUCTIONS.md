@@ -122,7 +122,7 @@ Use the documentation tools proactively:
 | `get_integration_docs` | **Before writing ANY integration config** |
 | `get_breaking_changes` | When config stopped working, or checking compatibility |
 | `check_config_syntax` | Before presenting YAML to user |
-| `write_config_safe` | **ALWAYS use this to write config files** — blocks accidental content loss (see below) |
+| `write_config_safe` / `patch_config_safe` | Use these approved YAML write paths; patch supports bounded exact-text replacements with revision guards. |
 
 ### Common Deprecations to Watch For
 - **Template sensors**: `platform: template` under `sensor:` -> use top-level `template:`
@@ -136,7 +136,7 @@ Use the documentation tools proactively:
 
 ### MANDATORY Workflow for Configuration Tasks
 
-**Use `write_config_safe` as the primary tool for writing configuration files.** This tool automatically validates before committing to disk and restores the original file if validation fails.
+**Use `write_config_safe` or `patch_config_safe` for configuration files.** Patch previews require review of the exact supplied edits and source and candidate revisions; apply with both revisions after approval. Both run HA's full check after writing, not in the dry run, and attempt guarded recovery if it fails. Neither reloads HA.
 
 ```
 1. get_config()                                        -> Know the HA version
@@ -198,7 +198,7 @@ Use these prompts for complex tasks:
 
 1. **Check before changing**: Use `get_states` before `call_service` to verify current state
 2. **Always read before writing**: Read the existing file first, then include ALL existing content plus your changes
-3. **Always use write_config_safe**: This is the safest way to write config — it validates, protects against content loss, and auto-restores on failure
+3. **Use write_config_safe or patch_config_safe**: Review the full replacement or exact patch and revision before approval; inspect transaction and recovery results.
 4. **Pre-validate with dry_run**: Use `write_config_safe(path, yaml, dry_run=true)` before presenting config to the user
 4. **Use history for debugging**: Use `get_history` when troubleshooting intermittent issues
 5. **Leverage relationships**: Use `get_entity_details` to find related entities

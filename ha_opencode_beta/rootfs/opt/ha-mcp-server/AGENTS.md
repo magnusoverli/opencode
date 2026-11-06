@@ -248,7 +248,7 @@ Dry-run is the default for renames — always preview before `--apply`. The
 
 | Task | Use |
 |---|---|
-| Create/edit automations, scripts, scenes, templates | YAML + `write_config_safe` |
+| Create/edit automations, scripts, scenes, templates | YAML + `write_config_safe` or reviewed `patch_config_safe` |
 | Check current state, control a device | MCP (`get_home_context`, `call_service`) |
 | Troubleshoot | MCP (`diagnose_entity`, `get_error_log`, `get_supervisor_health`) |
 | Dashboards, areas, helpers, backups, blueprints, people | `hab` |
@@ -257,6 +257,8 @@ Dry-run is the default for renames — always preview before `--apply`. The
 | Inspect a Zigbee device, map the mesh, clean up stale devices | `zigporter` |
 | Device firmware updates | `watch_firmware_update` |
 | Core/OS/Supervisor updates | `get_available_updates`, `update_component` |
+
+For bounded exact-text edits, `patch_config_safe` is also an approved YAML write path. Preview, review the supplied exact replacements and source and candidate revisions, obtain approval, then apply with both revisions. Its preview is not full HA validation. Preserve the existing separately approved reload and verification requirements.
 
 ### Internal directories
 

@@ -74,6 +74,7 @@ const MUTATING_TOOLS = [
   { name: "call_service", arguments: { domain: "light", service: "turn_on" } },
   { name: "fire_event", arguments: { event_type: "test_event" } },
   { name: "write_config_safe", arguments: { file_path: "automations.yaml", content: "[]" } },
+  { name: "patch_config_safe", arguments: { file_path: "automations.yaml", edits: [{ old_text: "a", new_text: "b" }] } },
   { name: "check_config_syntax", arguments: { content: "{}" } },
   { name: "validate_config", arguments: {} },
   { name: "update_component", arguments: { component: "core" } },
@@ -122,6 +123,7 @@ describe("MCP tool-profile enforcement", () => {
     expect(compactNames).toContain("recall_decisions");
     expect(compactNames).not.toContain("call_service");
     expect(compactNames).not.toContain("write_config_safe");
+    expect(compactNames).not.toContain("patch_config_safe");
     expect(compactNames).not.toContain("hab_run");
     expect(compactNames).toContain("esphome_list_devices");
     expect(compactNames).toContain("esphome_troubleshoot");
@@ -142,6 +144,7 @@ describe("MCP tool-profile enforcement", () => {
     const configuration = await request("configuration", { method: "tools/list", params: {} });
     const configurationNames = configuration.tools.map((tool) => tool.name);
     expect(configurationNames).toContain("write_config_safe");
+    expect(configurationNames).toContain("patch_config_safe");
     expect(configurationNames).toContain("esphome_list_devices");
     expect(configurationNames).toContain("esphome_config_read");
     expect(configurationNames).toContain("esphome_config_validate");
