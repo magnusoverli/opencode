@@ -40,7 +40,7 @@ Frequently-changed areas worth double-checking:
 
 ## Writing safely
 
-`write_config_safe` is the sanctioned write path. It validates, backs up, blocks
+`write_config_safe` and `patch_config_safe` are sanctioned write paths. For a bounded exact-text patch, preview it, review the exact replacements and source and candidate revisions, obtain approval, and apply with both revisions. Preview does not run the full HA check; the full check follows the write. Reload requires separate approval. `write_config_safe` validates, backs up, blocks
 writes that would drop list entries or top-level keys or shrink a file
 suspiciously, and attempts verified recovery on failure. Recovery can fail: inspect
 the transaction result and never claim restoration merely because it was attempted.

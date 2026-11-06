@@ -34,6 +34,10 @@ async function fixture(existing = null, state = {}) {
   await client.connect(transport);
   return {
     target,
+    patch: async (args) => {
+      const result = await client.callTool({ name: "patch_config_safe", arguments: { file_path: "packages/synthetic.yaml", ...args } }, undefined, { timeout: 10000 });
+      return result.content.filter(item => item.type === "text").map(item => item.text).join("\n");
+    },
     call: async (args = {}) => {
       let revision = "missing";
       try { revision = createHash("sha256").update(await readFile(target)).digest("hex"); } catch (error) { if (error.code !== "ENOENT") throw error; }
@@ -45,6 +49,36 @@ async function fixture(existing = null, state = {}) {
 }
 
 describe("safe-write MCP integration (synthetic filesystem and HA)", () => {
+  it("previews and applies an exact hash-guarded patch with a verified backup", async () => {
+    const f = await fixture(packageYaml);
+    const edits = [{ old_text: "synthetic_nested", new_text: "synthetic_changed" }];
+    const revision = createHash("sha256").update(packageYaml).digest("hex");
+    const expected_candidate = createHash("sha256").update(packageYaml.replace("synthetic_nested", "synthetic_changed")).digest("hex");
+    expect(await f.patch({ edits })).toContain("PASSED");
+    expect(await readFile(f.target, "utf8")).toBe(packageYaml);
+    expect(await f.patch({ edits, dry_run: false, expected_revision: "0".repeat(64) })).toContain("stale source revision");
+    expect(await f.patch({ edits, dry_run: false, expected_revision: revision, expected_candidate: "0".repeat(64) })).toContain("candidate_revision_mismatch");
+    expect(await f.patch({ edits, dry_run: false, expected_revision: revision, expected_candidate })).toContain("SUCCESS");
+    expect(await readFile(f.target, "utf8")).toBe(packageYaml.replace("synthetic_nested", "synthetic_changed"));
+    const trace = await f.trace();
+    expect(trace.some(event => event.operation === "renameSync" && event.to.endsWith("synthetic.yaml"))).toBe(true);
+    expect(trace.filter(event => event.operation === "check_config")).toHaveLength(1);
+  });
+  it("restores the original after an invalid patch write", async () => {
+    const f = await fixture(packageYaml, { check: "invalid" });
+    const revision = createHash("sha256").update(packageYaml).digest("hex");
+    const expected_candidate = createHash("sha256").update(packageYaml.replace("synthetic_nested", "synthetic_changed")).digest("hex");
+    const result = await f.patch({ edits: [{ old_text: "synthetic_nested", new_text: "synthetic_changed" }], dry_run: false, expected_revision: revision, expected_candidate });
+    expect(result).toContain("restored");
+    expect(await readFile(f.target, "utf8")).toBe(packageYaml);
+  });
+  it("refuses restricted paths and ambiguous matches", async () => {
+    const f = await fixture("a: one\nb: one\n");
+    const edits = [{ old_text: "one", new_text: "two" }];
+    expect(await f.patch({ edits })).toContain("match_not_unique");
+    expect(await f.patch({ file_path: "secrets.yaml", edits })).toContain("restricted path");
+    expect(await readFile(f.target, "utf8")).toBe("a: one\nb: one\n");
+  });
   it("passes a real package dry run with template validation and no filesystem mutations", async () => {
     const f = await fixture();
     const result = await f.call({ dry_run: true, validate_templates: true });

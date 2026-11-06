@@ -78,6 +78,7 @@ import { validateYamlStructure, resolveConfigPath } from "./lib/validation.js";
 import { validateConfigTemplates } from "./lib/template-validation.js";
 import { configApplyGuidance } from "./lib/config-apply.js";
 import { createSafeConfigWriter } from "./lib/safe-config-store.js";
+import { applyConfigTextPatch } from "./lib/config-text-patch.js";
 import { captureHomeAssistantPage } from "./lib/screenshot.js";
 import { extractContentFromHtml, extractConfigurationSection, extractYamlExamples } from "./lib/html-parser.js";
 import {
@@ -2956,6 +2957,25 @@ const TOOLS = [
     },
   },
   
+  {
+    name: "patch_config_safe",
+    title: "Safe Config Patch",
+    description: "Patch an existing YAML file using unique exact-text matches. Preview first; apply only with the reviewed source revision. Reuses safe config validation, atomic replacement and guarded recovery. Full HA validation occurs after writing, not in preview. Never reloads HA.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file_path: { type: "string" },
+        edits: { type: "array", minItems: 1, maxItems: 20, items: { type: "object", properties: { old_text: { type: "string", minLength: 1 }, new_text: { type: "string" } }, required: ["old_text", "new_text"], additionalProperties: false } },
+        expected_revision: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        expected_candidate: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Required when applying: candidate SHA-256 returned by preview." },
+        dry_run: { type: "boolean", default: true },
+        confirm_deletions: { type: "boolean", default: false },
+      },
+      required: ["file_path", "edits"], additionalProperties: false,
+    },
+    annotations: { readOnly: false, idempotent: false, destructive: true },
+  },
+
   // === DECISION NOTES ===
   {
     name: "remember_decision",
@@ -5271,8 +5291,12 @@ async function handleToolCall(request) {
       }
 
       // === SAFE CONFIG WRITER ===
+      case "patch_config_safe":
       case "write_config_safe": {
-        const { file_path, content, dry_run = false, validate_templates = true, confirm_deletions = false } = args;
+        const isPatch = name === "patch_config_safe";
+        const { file_path, validate_templates = true, confirm_deletions = false } = args;
+        const dry_run = args.dry_run ?? isPatch;
+        let content = args.content;
         sendLog("info", "config", { action: "write_config_safe", file_path, dry_run });
         
         // Step 1: Validate and resolve the file path
@@ -5289,12 +5313,36 @@ async function handleToolCall(request) {
             isError: true,
           });
         }
+        if (isPatch) {
+          const relativePath = resolvedPath.slice(HA_CONFIG_DIR.length + 1);
+          const forbidden = new Set(["secrets.yaml", "secrets.yml", ".storage", ".cloud", "deps", "tts", "__pycache__"]);
+          if (!resolvedPath.startsWith(HA_CONFIG_DIR + "/") || !/\.ya?ml$/i.test(relativePath) || relativePath.split("/").some(part => part.startsWith(".") || forbidden.has(part.toLowerCase()))) {
+            return makeCompatibleResponse({ content: [createTextContent("Safe Config Patch - REFUSED: restricted path.")], isError: true });
+          }
+        }
         
         const writer = createSafeConfigWriter();
         let baseline;
         try { baseline = writer.snapshot(resolvedPath); }
         catch {
           return makeCompatibleResponse({ content: [createTextContent("Safe Config Write - REFUSED: source path is unsafe, unavailable or oversized. No file was modified.")], isError: true });
+        }
+        if (isPatch) {
+          if (!baseline.bytes) {
+            return makeCompatibleResponse({ content: [createTextContent("Safe Config Patch - REFUSED: restricted path or missing file.")], isError: true });
+          }
+          if (!dry_run && (!/^[a-f0-9]{64}$/.test(args.expected_revision || "") || args.expected_revision !== baseline.revision)) {
+            return makeCompatibleResponse({ content: [createTextContent("Safe Config Patch - REFUSED: missing or stale source revision.")], isError: true });
+          }
+          try {
+            const source = baseline.bytes.toString("utf8");
+            if (!Buffer.from(source, "utf8").equals(baseline.bytes)) throw new Error("invalid_utf8");
+            content = applyConfigTextPatch(source, args.edits);
+            if (content === source) throw new Error("no_change");
+            if (!dry_run && createHash("sha256").update(content).digest("hex") !== args.expected_candidate) throw new Error("candidate_revision_mismatch");
+          } catch (error) {
+            return makeCompatibleResponse({ content: [createTextContent(`Safe Config Patch - REFUSED: ${error.message}.`)], isError: true });
+          }
         }
         const previousContent = validate_templates ? baseline.bytes?.toString("utf8") ?? null : null;
         const memoKey = createHash("sha256")
@@ -5445,6 +5493,15 @@ async function handleToolCall(request) {
           responseText += `**File:** \`${file_path}\`\n`;
           responseText += `**Mode:** Validation only (no file changes)\n\n`;
           responseText += `**Source Revision:** \`${baseline.revision}\`\nPass this as expected_revision after approval. This preflight does not run full HA validation against the proposed content.\n\n`;
+          if (isPatch) {
+            responseText += `**Patch preview:** ${args.edits.length} exact replacement(s); only the specified text ranges change. Candidate SHA-256: \`${createHash("sha256").update(content).digest("hex")}\`. Patch text is not echoed to avoid exposing sensitive content.\n`;
+            for (const [index, edit] of args.edits.entries()) {
+              const position = baseline.bytes.toString("utf8").indexOf(edit.old_text);
+              const line = baseline.bytes.toString("utf8").slice(0, position).split("\n").length;
+              responseText += `- Edit ${index + 1}: source line ${line}, ${Buffer.byteLength(edit.old_text)} bytes replaced by ${Buffer.byteLength(edit.new_text)} bytes.\n`;
+            }
+            responseText += "\n";
+          }
           
           if (hasBlockingErrors) {
             responseText += `## BLOCKING ERRORS (must fix before writing)\n\n`;
