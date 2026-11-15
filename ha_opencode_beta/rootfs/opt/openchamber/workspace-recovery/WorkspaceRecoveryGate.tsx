@@ -9,6 +9,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { opencodeClient } from '@/lib/opencode/client';
 
 const read: WorkspaceRead = (path, query, signal) => runtimeFetch(path, { query, signal });
 
@@ -31,6 +32,23 @@ export function WorkspaceRecoveryGate({ children }: { children: React.ReactNode 
   const [error, setError] = React.useState('');
   const [failedSelection, setFailedSelection] = React.useState<{ directory: string; runtime: string; sessionId: string | null } | null>(null);
   React.useEffect(() => subscribeRuntimeEndpointChanged(() => setRuntime(getRuntimeKey())), []);
+  React.useEffect(() => {
+    // Mobile cold boot can open a draft before the global session list resolves
+    // a historical URL. Resolve that exact record, never guess its directory
+    // from the current browsing project or alter the stored session.
+    const requested = new URLSearchParams(window.location.search).get('session');
+    if (!requested || (sessionId && sessionId !== requested) ||
+      (sessionId === requested && sessionDirectory)) return;
+    let active = true;
+    void opencodeClient.getSessionUnscoped(requested).then(record => {
+      const selection = useSessionUIStore.getState();
+      if (!active || getRuntimeKey() !== runtime ||
+        new URLSearchParams(window.location.search).get('session') !== requested ||
+        (selection.currentSessionId && selection.currentSessionId !== requested)) return;
+      if (record.directory) selection.setCurrentSession(requested, record.directory);
+    }).catch(() => { /* Missing records and transport errors are not missing-folder evidence. */ });
+    return () => { active = false; };
+  }, [sessionId, sessionDirectory, runtime]);
   React.useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;

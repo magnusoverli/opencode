@@ -14,6 +14,10 @@
     "vscode-jsonrpc": "8.2.1",
     "yaml": "2.9.1"
   },
+  "overrides": {
+    "glob": "14.0.2",
+    "minimatch": "11.0.1"
+  },
   "devDependencies": {
     "@opencode-ai/cli": "0.0.0-beta-18684",
     "opencode-previous": "npm:@opencode/cli@2.0.13",

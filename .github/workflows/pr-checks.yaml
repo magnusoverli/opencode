@@ -20,9 +20,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  contracts:
-    name: Runtime, skill and read-only contracts
+  changes:
+    name: Select affected channels
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.channels.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: channels
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/ci-channels.mjs "$BASE"
+
+  contracts:
+    name: Contracts (${{ matrix.channel }})
+    needs: changes
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
 
@@ -30,96 +48,26 @@ jobs:
         with:
           node-version: 24.15.0
 
-      - name: Install exact V2 beta dependency set for integrated contracts
-        working-directory: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
-        run: npm ci --no-audit --no-fund
+      - name: Channel contracts, audits and root boundaries
+        shell: bash
+        run: bash scripts/ci-checks.sh "${{ matrix.channel }}" 2>&1 | tee "${RUNNER_TEMP}/contracts.log"
+      - name: Retain contract diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contracts-${{ matrix.channel }}
+          path: ${{ runner.temp }}/contracts.log
 
-      - name: Verify matching CLI and plugin pins
-        working-directory: ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
-        run: npm run verify:versions
-
-      - name: Install beta MCP dependencies for the shared Assist authentication boundary
-        working-directory: ha_opencode_beta/rootfs/opt/ha-mcp-server
-        run: npm install --ignore-scripts --no-audit --no-fund
-
-      - name: Audit beta production runtime and screenshot dependencies
-        run: |
-          npm audit --omit=dev --audit-level=low --prefix ha_opencode_beta/rootfs/opt/opencode-v2-homeassistant
-          npm audit --omit=dev --audit-level=low --prefix ha_opencode_beta/rootfs/opt/ha-mcp-server
-
-      - name: Install and audit beta private encryption SDK
-        run: |
-          npm ci --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund --prefix ha_opencode_beta/rootfs/opt/ppq-private-runtime
-          npm audit --omit=dev --audit-level=low --prefix ha_opencode_beta/rootfs/opt/ppq-private-runtime
-
-      - name: Prepare isolated editor contract dependencies
-        run: |
-          editor_deps="${RUNNER_TEMP}/ha-editor-contracts"
-          npm install --prefix "${editor_deps}" --ignore-scripts --no-audit --no-fund \
-            @codemirror/autocomplete@6.20.3 @codemirror/lint@6.9.7 \
-            @codemirror/state@6.7.1 @codemirror/view@6.43.9 \
-            typescript@5.9.3 jsdom@26.1.0 express@5.2.1
-          echo "HA_EDITOR_TEST_DEPS=${editor_deps}" >> "${GITHUB_ENV}"
-          cp ha_opencode_beta/rootfs/opt/openchamber/editor-lsp/editor* "${editor_deps}/"
-          "${editor_deps}/node_modules/.bin/tsc" --noEmit --strict --module esnext \
-            --moduleResolution bundler --target ES2022 --lib ES2022,DOM "${editor_deps}/editor.ts"
-
-      - name: Beta add-on contract tests
-        env:
-          HA_NATIVE_TESTS_REQUIRED: "1"
-          HA_ASSIST_BROWSER_EXECUTABLE: /usr/bin/google-chrome
-        run: node --test "ha_opencode_beta/test/*.test.js"
-
-      - name: Beta external MCP root boundary
-        run: sudo "$(command -v node)" --test ha_opencode_beta/test/opencode-v2-external-mcp.test.js
-
-      - name: Beta native MCP startup persistence root boundary
-        run: sudo "$(command -v node)" --test ha_opencode_beta/test/opencode-v2-mcp-startup.test.js
-
-      - name: Beta durable TUI preference boundary
-        run: sudo "$(command -v node)" --test ha_opencode_beta/test/opencode-v2-tui-state.test.js
-
-      - name: Native provider credential loader boundary
-        run: sudo env HA_NATIVE_TESTS_REQUIRED=1 "$(command -v node)" --test ha_opencode_beta/test/opencode-v2-provider-environment.test.js
-
-      - name: Install exact V2 stable dependency set for integrated contracts
-        working-directory: ha_opencode/rootfs/opt/opencode-v2-homeassistant
-        run: npm ci --no-audit --no-fund && npm run verify:versions
-
-      - name: Install stable MCP dependencies for the shared Assist authentication boundary
-        working-directory: ha_opencode/rootfs/opt/ha-mcp-server
-        run: npm install --ignore-scripts --no-audit --no-fund
-
-      - name: Audit stable production runtime and screenshot dependencies
-        run: |
-          npm audit --omit=dev --audit-level=low --prefix ha_opencode/rootfs/opt/opencode-v2-homeassistant
-          npm audit --omit=dev --audit-level=low --prefix ha_opencode/rootfs/opt/ha-mcp-server
-
-      - name: Install and audit stable private encryption SDK
-        run: |
-          npm ci --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund --prefix ha_opencode/rootfs/opt/ppq-private-runtime
-          npm audit --omit=dev --audit-level=low --prefix ha_opencode/rootfs/opt/ppq-private-runtime
-
-      - name: Stable add-on contract tests
-        env:
-          HA_NATIVE_TESTS_REQUIRED: "1"
-          HA_ASSIST_BROWSER_EXECUTABLE: /usr/bin/google-chrome
-        run: node --test "ha_opencode/test/*.test.js"
-
-      - name: Stable external MCP root boundary
-        run: sudo "$(command -v node)" --test ha_opencode/test/opencode-v2-external-mcp.test.js
-
-      - name: Stable native MCP startup persistence root boundary
-        run: sudo "$(command -v node)" --test ha_opencode/test/opencode-v2-mcp-startup.test.js
-
-      - name: Stable durable TUI preference boundary
-        run: sudo "$(command -v node)" --test ha_opencode/test/opencode-v2-tui-state.test.js
-
-      - name: Stable native provider credential loader boundary
-        run: sudo env HA_NATIVE_TESTS_REQUIRED=1 "$(command -v node)" --test ha_opencode/test/opencode-v2-provider-environment.test.js
-
+  shared:
+    name: Shared channel contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.15.0
       - name: HA-facing MCP discovery and service lifecycle contracts
-        run: node --test scripts/ha-facing-discovery.test.mjs
+        run: node --test scripts/ha-facing-discovery.test.mjs scripts/ci-channels.test.mjs
 
       - name: Assert each channel declares every option its own code reads
         run: bash scripts/check-addon-options.sh ha_opencode ha_opencode_beta
@@ -127,21 +75,15 @@ jobs:
       - name: Run functional shell harnesses
         run: |
           bash scripts/test-channel-separation.sh
-          bash scripts/test-startup-hooks.sh stable
-          bash scripts/test-startup-hooks.sh beta
 
   ha-assist:
     name: HA 2026.10 companion and pinned OpenCode contracts (${{ matrix.channel }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: changes
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - channel: beta
-            addon: ha_opencode_beta
-          - channel: stable
-            addon: ha_opencode
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v5
@@ -163,15 +105,13 @@ jobs:
   mcp-server:
     name: Home Assistant MCP server (${{ matrix.channel }})
     runs-on: ubuntu-latest
+    needs: changes
     strategy:
       fail-fast: false
-      matrix:
-        channel:
-          - ha_opencode
-          - ha_opencode_beta
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     defaults:
       run:
-        working-directory: ${{ matrix.channel }}/rootfs/opt/ha-mcp-server
+        working-directory: ${{ matrix.addon }}/rootfs/opt/ha-mcp-server
     steps:
       - uses: actions/checkout@v6
 

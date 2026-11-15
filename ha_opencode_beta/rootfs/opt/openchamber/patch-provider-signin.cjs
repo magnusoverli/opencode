@@ -13,11 +13,11 @@ function patchProviderSignin(root) {
   }
   const connectBefore = `      const { data } = await sdk().integration.oauth.connect({`;
   if (source.split(connectBefore).length !== 2) throw new Error("Unexpected preview OAuth connection source");
-  const connectAfter = `      // The pinned server's list handler waits for plugin activation; its
+  const connectAfter = `      // The pinned server's plugin list waits for activation; its
       // OAuth handler does not. Warm the SAME scoped client before resolving
       // plugin-owned OAuth methods, without retrying an authorization attempt.
       const client = sdk();
-      await client.integration.list();
+      await client.plugin.list();
       const { data } = await client.integration.oauth.connect({`;
   const after = `    <div className={cn('space-y-4', className)}>
       {integrationId === 'openai' && (

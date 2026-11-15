@@ -289,7 +289,17 @@ try {
   backend = startBackend();
   await wait(async () => (await client.server.info()).version === '2.3.0', 'missing-workspace backend restart');
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 });
+  await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 }).catch(async error => {
+    console.error('Workspace recovery diagnostics:', JSON.stringify({
+      workspaceExists: await import('node:fs').then(fs => fs.existsSync(`${runtime}/workspace`)),
+      view: await page.evaluate(() => ({
+        text: document.body.innerText.slice(-6000),
+        lastDirectory: localStorage.getItem('lastDirectory'),
+        lastSession: localStorage.getItem('oc.lastSession.v1'),
+      })),
+    }));
+    throw error;
+  });
   assert.equal(new URL(page.url()).searchParams.get('session'), id, 'Fixture exercises the stale historical URL too');
   // Upstream refreshes the cache's monotonic updatedAt when restoring a session
   // on reload. Snapshot AFTER that restore, not before it; the session/directory
@@ -344,7 +354,15 @@ try {
   // Reopening the old workspace must offer recovery again, including mobile.
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
   await page.goto(`${url}?session=${encodeURIComponent(id)}`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 });
+  await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 }).catch(async error => {
+    console.error('Mobile recovery diagnostics:', JSON.stringify(await page.evaluate(() => ({
+      text: document.body.innerText.slice(-6000),
+      lastDirectory: localStorage.getItem('lastDirectory'),
+      lastSession: localStorage.getItem('oc.lastSession.v1'),
+      route: location.search,
+    }))));
+    throw error;
+  });
   await page.$eval('#recovery-directory', (input, directory) => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, directory);
     input.dispatchEvent(new Event('input', { bubbles: true }));

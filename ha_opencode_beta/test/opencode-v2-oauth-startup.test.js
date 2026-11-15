@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,12 +19,20 @@ test("pinned runtime resolves OAuth methods after same-location integration acti
     const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
     const binary = fileURLToPath(new URL("../rootfs/opt/opencode-v2-homeassistant/node_modules/@opencode/cli/bin/opencode.exe", import.meta.url));
     server = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
-      cwd: join(root, "project"), stdio: "ignore",
+      cwd: join(root, "project"), stdio: ["ignore", "pipe", "pipe"],
       env: { PATH: process.env.PATH, HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config"),
         XDG_DATA_HOME: join(root, "data"), XDG_STATE_HOME: join(root, "state"), XDG_CACHE_HOME: join(root, "cache"),
         OPENCODE_SERVER_PASSWORD: "synthetic-oauth-test-password", OPENCODE_DISABLE_AUTOUPDATE: "true", OPENCODE_DISABLE_PROJECT_CONFIG: "1" },
     });
-    const client = OpenCode.make({ baseUrl: `http://127.0.0.1:${port}`, headers: {
+    let diagnostics = "";
+    for (const stream of [server.stdout, server.stderr]) stream.on("data", chunk => {
+      diagnostics = (diagnostics + chunk.toString()).slice(-16000);
+    });
+    const client = OpenCode.make({ baseUrl: `http://127.0.0.1:${port}`, fetch: async (...args) => {
+      const response = await fetch(...args);
+      if (!response.ok) diagnostics += `\nHTTP ${response.status} ${new URL(args[0] instanceof Request ? args[0].url : args[0]).pathname}: ${await response.clone().text()}`;
+      return response;
+    }, headers: {
       Authorization: `Basic ${Buffer.from("opencode:synthetic-oauth-test-password").toString("base64")}`,
     } });
     let ready = false;
@@ -34,10 +42,19 @@ test("pinned runtime resolves OAuth methods after same-location integration acti
     }
     assert.ok(ready, "isolated server was not ready");
     const location = { directory: join(root, "cold") };
-    await client.integration.list({ location });
+    await client.plugin.list({ location });
+    const { data: integrations } = await client.integration.list({ location });
+    assert.ok(integrations.some(integration => integration.id === "openai"), "OpenAI integration must be active");
     // Starting an authorization creates a local callback listener and URL only.
     // Never open the URL, exchange a code, use an account or print OAuth state.
-    const { data: attempt } = await client.integration.oauth.connect({ location, integrationID: "openai", methodID: "chatgpt-token-sharing" });
+    const { data: attempt } = await client.integration.oauth.connect({ location, integrationID: "openai", methodID: "chatgpt-token-sharing" }).catch(async error => {
+      // This isolated fixture has no account credentials. Still omit URLs and
+      // authorization/state values from diagnostics.
+      diagnostics += await readFile(join(root, "data", "opencode", "log", "opencode.log"), "utf8").catch(() => "");
+      console.error(diagnostics.slice(-16000).replace(/https?:\/\/[^\s"']+/g, "[URL]")
+        .replace(/(authorization|password|token|state|code)[=:]\s*[^\s,}]+/gi, "$1=[redacted]"));
+      throw error;
+    });
     assert.ok(attempt.attemptID);
     assert.equal(new URL(attempt.url).origin, "https://auth.openai.com");
     await client.integration.oauth.cancel({ location, integrationID: "openai", attemptID: attempt.attemptID });

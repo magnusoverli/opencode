@@ -324,6 +324,25 @@ Bug reports & feature requests
 
 ## 🌟 Contributing
 
+### Reproducing CI
+
+On Linux with Node 24, Python 3, Git, Chrome and Docker available:
+
+```bash
+bash scripts/ci-checks.sh beta contracts
+bash scripts/ci-checks.sh beta image
+```
+
+Use `stable` for the stable channel. The contracts command installs the pinned
+dependencies, audits them, and runs the channel's tests and root-boundary checks
+(using `sudo` when needed). Set `HA_ASSIST_BROWSER_EXECUTABLE` for a different
+Chrome/Chromium path. The image command explicitly builds `boundary-test`;
+an ordinary Docker build does **not** run that stage.
+
+CI selects the affected channels. Shared changes exercise both, in independent
+jobs, so a stable failure does not hide beta results. Contract logs are retained
+as workflow artifacts; native AMD64/ARM64 image checks retain their build records.
+
 We love contributions! Here's how you can help:
 
 1. 🍴 Fork the repository

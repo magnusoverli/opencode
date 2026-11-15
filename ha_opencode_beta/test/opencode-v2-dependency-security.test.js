@@ -8,7 +8,10 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 
-const root = new URL("../rootfs/opt/opencode-v2-homeassistant/", import.meta.url);
+// The shared CI command also runs this consumer/security suite against stable.
+const root = process.env.HA_DEPENDENCY_TEST_ADDON === "ha_opencode"
+  ? new URL("../../ha_opencode/rootfs/opt/opencode-v2-homeassistant/", import.meta.url)
+  : new URL("../rootfs/opt/opencode-v2-homeassistant/", import.meta.url);
 const require = createRequire(new URL("package.json", root));
 
 async function fixture(t) {

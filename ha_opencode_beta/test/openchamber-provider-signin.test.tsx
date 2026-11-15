@@ -49,8 +49,10 @@ const React = {
     });
   },
 };
-const sdk = { integration: {
+const sdk = { plugin: {
   list: async () => { if (activationFails) throw new Error('Synthetic activation failure'); activated = true; return { data: [] }; },
+}, integration: {
+  list: async () => ({ data: [] }),
   oauth: {
   connect: async (input: any) => { if (!activated) throw new Error('OAuth called before plugin activation'); connections.push(input); return { data: attempt }; },
   status: async () => { statusCalls++; return { data: { status, message: 'Synthetic rejection' } }; },
