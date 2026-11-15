@@ -1,9 +1,9 @@
 {
-  "qs": "6.16.0",
+  "qs": "6.16.1",
   "body-parser": "2.4.0",
   "compression": "1.8.2",
   "proxy-addr": "2.0.8",
-  "follow-redirects": "1.16.1",
+  "follow-redirects": "1.16.2",
   "http-proxy-middleware": "3.0.7",
   "picomatch@2": "2.3.2",
   "undici@6": "6.29.1",

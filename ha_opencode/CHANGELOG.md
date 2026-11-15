@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Apply the reviewed glob 14.0.2 / minimatch 11.0.1 dependency fixes already used by beta, addressing the stable runtime's production audit findings.
+- Refresh OpenChamber's qs and follow-redirects fixes to match beta's reviewed dependency pins.
 
 ## 3.3.4
 
