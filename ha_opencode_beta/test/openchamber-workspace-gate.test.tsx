@@ -86,8 +86,8 @@ test('cold historical URL resolves its own workspace instead of the browsing dra
   response = async () => Response.json({ reason: 'not-found' }, { status: 404 });
   render(); await settle();
   const tree = await settle();
-  expect(sessions.currentSessionId).toBe('historical');
-  expect(sessions.currentSessionDirectory).toBe('/missing');
+  expect(sessions.currentSessionId).toBe(null);
+  expect(sessions.currentSessionDirectory).toBe(null);
   expect(tree.props['data-testid']).toBe('workspace-recovery');
   expect(registrations).toBe(0);
 });

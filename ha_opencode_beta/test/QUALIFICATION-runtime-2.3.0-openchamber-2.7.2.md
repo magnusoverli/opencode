@@ -1,5 +1,20 @@
 # Unreleased beta dependency refresh
 
+## CI follow-up
+
+- Shared channel contracts now use `scripts/ci-checks.sh`; beta/stable jobs
+  run independently and changed-file selection has regression coverage.
+- PR Checks passed all ten jobs on `c464e28`, including both channels' audits,
+  full contracts, MCP suites and actual Home Assistant companion checks.
+- OpenCode 2.3.0 requires `plugin.list()` to await activation before OAuth;
+  `integration.list()` alone can return an empty list during cold startup.
+- Mobile routing can reject selection of a historical session whose folder is
+  missing and return to a draft. Recovery now keeps read-only, unscoped URL
+  evidence independently; it does not move or select the stored session.
+- The corrected native amd64 `boundary-test` build passed. Its browser fixture
+  also passed independently with an explicit post-mobile history-location check.
+  AMD64/ARM64 GitHub reruns for the final correction are pending.
+
 Upstream versions checked 2026-11-15:
 
 | Component | Previous beta | Candidate | Evidence |

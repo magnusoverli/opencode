@@ -352,9 +352,19 @@ try {
   assert.equal(afterRecovery.id, id);
   await assert.rejects(access(`${runtime}/workspace`), { code: 'ENOENT' });
   // Reopening the old workspace must offer recovery again, including mobile.
+  const mobileReads = [];
+  page.on('response', async response => {
+    const path = new URL(response.url()).pathname;
+    if (!/session|directory-stat|location/.test(path)) return;
+    const body = await response.json().catch(() => null);
+    mobileReads.push({ path, status: response.status(), id: body?.id,
+      location: body?.location, directory: body?.directory, reason: body?.reason,
+      isDirectory: body?.isDirectory });
+  });
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
   await page.goto(`${url}?session=${encodeURIComponent(id)}`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 }).catch(async error => {
+    console.error('Mobile recovery reads:', JSON.stringify(mobileReads));
     console.error('Mobile recovery diagnostics:', JSON.stringify(await page.evaluate(() => ({
       text: document.body.innerText.slice(-6000),
       lastDirectory: localStorage.getItem('lastDirectory'),
@@ -371,6 +381,8 @@ try {
   await page.waitForSelector('button[data-composer-morph-prompt="true"]', { visible: true, timeout: 30000 });
   await page.tap('button[data-composer-morph-prompt="true"]');
   await page.waitForSelector('[contenteditable="true"]', { visible: true, timeout: 30000 });
+  assert.deepEqual((await client.session.get({ sessionID: id })).location, historical.location,
+    'Mobile recovery preserves the historical session location');
   assert.equal(await page.$('#ha-assist-setup'), null);
   assert.deepEqual(errors, []);
   assert.deepEqual(escaped, []);
