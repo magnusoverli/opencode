@@ -2,7 +2,7 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.5.0b1** upgrades the pins to OpenCode `2.2.5` and OpenChamber `2.5.3`, retaining
+The unreleased beta candidate pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
 private-model discovery. The unrelated post-3.2.3 Zigporter compatibility patch
 is not included. Beta keeps its own app identity and persistent storage; installing
@@ -11,7 +11,7 @@ forwarding and an experimental native Assist/AI data-task adapter. The roadmap
 is tracked in [#45](https://github.com/magnusoverli/opencode/issues/45).
 
 OpenChamber uses immutable commit
-`95af6769797693bf049f4e6a801e373b5220447b`, built with Bun `1.4.4` and the reviewed
+`1a151518c95cc5ff3578bab593d2f96862ff3bb8`, built with Bun `1.4.4` and the reviewed
 security lock. The app retains its Ingress asset/API/terminal-WebAssembly and
 private-backend adaptations, rebases the editor/mobile recovery patches, and uses
 upstream's Git 4 environment policy and streaming-proxy fix.
@@ -767,7 +767,7 @@ native tools. The bridge preserves supplied request metadata but does not invent
 a room/device identity. Native errors should be reported rather than retried
 through broader administrative tools.
 
-Local candidate qualification uses the pinned OpenCode `2.2.5` process, the app's MCP
+Local candidate qualification uses the pinned OpenCode `2.3.0` process, the app's MCP
 registration/forwarding code, and controlled HA/provider fixtures. It covers
 prompt consumption, resource discovery, fresh native context calls, required
 argument validation and read-only policy. Resource reads/cancellation also have
@@ -1193,7 +1193,7 @@ file before an approved manual repair. Never delete the lock merely to retry.
 ### Read-only HAB and Supervisor app operations
 
 The full profile offers `hab_run_read_only` separately from `hab_run`. Its
-reviewed HAB 1.7.2 commands are `dashboard list`, `dashboard get <url_path>`,
+reviewed HAB 1.8.0 commands are `dashboard list`, `dashboard get <url_path>`,
 `helper list [type]` and `helper types`. List flags are limited to `--brief`,
 `--count` and `--limit 1..5000`. Pass literal `args`; unreviewed commands, aliases,
 global overrides, exports and writes are denied before execution. A command's

@@ -4,7 +4,7 @@ const root = process.argv[2];
 if (!root) throw new Error("Provide the pinned OpenChamber source directory");
 const file = path.join(root, "package.json");
 const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
-if (pkg.name !== "openchamber-monorepo" || pkg.version !== "2.5.3") {
+if (pkg.name !== "openchamber-monorepo" || pkg.version !== "2.7.2") {
   throw new Error("Review dependency overrides for this OpenChamber release");
 }
 // 2.5.3 implements Git 4's named import, own-key environment propagation and
@@ -21,9 +21,8 @@ for (const [name, version] of Object.entries(overrides)) {
   if (Object.hasOwn(pkg.overrides || {}, name)) throw new Error(`Upstream already overrides ${name}; review before replacing it`);
   pkg.overrides[name] = version;
 }
-// This upstream trust test creates a fake gh executable but omits the PATH
-// setup its neighboring tests use. Supply that fixture precondition, never a
-// production trust/auth bypass or a skipped assertion. Validate before writes.
+// 2.7.2 supplies the previously patched fixture preconditions upstream.
+// Verify them before writing dependency overrides; do not patch them twice.
 const testFile = path.join(root, "packages/web/server/lib/github/octokit.test.js");
 const testSource = fs.readFileSync(testFile, "utf8");
 const marker = "  test('resolves a trusted enterprise host cli account id to a host-pinned octokit only after the instance is activated', async () => {";
@@ -32,24 +31,19 @@ const start = testSource.indexOf(marker);
 const end = testSource.indexOf("\n  test(", start + marker.length);
 if (end === -1) throw new Error("Review upstream enterprise-account fixture boundary");
 const original = testSource.slice(start, end);
-let fixed = original;
-for (const [before, after] of [
-  ["    const previousFetch = globalThis.fetch;", "    process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;\n    const previousFetch = globalThis.fetch;"],
-  ["      globalThis.fetch = previousFetch;", "      globalThis.fetch = previousFetch;\n      if (previousPath === undefined) delete process.env.PATH;\n      else process.env.PATH = previousPath;"],
+for (const anchor of [
+  'process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;',
+  'if (previousPath === undefined) delete process.env.PATH;',
+  'else process.env.PATH = previousPath;',
 ]) {
-  if (fixed.split(before).length !== 2) throw new Error("Review upstream enterprise-account fixture setup");
-  fixed = fixed.replace(before, after);
+  if (original.split(anchor).length !== 2) throw new Error("Review upstream enterprise-account fixture setup");
 }
-if (original.includes("process.env.PATH =")) throw new Error("Upstream enterprise fixture already supplies PATH; review before patching");
 // Git 2.47 in Debian trixie does not create a remote HEAD during this fetch.
 // Establish the fixture's symbolic-ref precondition explicitly, retaining all
 // branch discovery, pruning and option-like remote security assertions.
 const serviceTestFile = path.join(root, "packages/web/server/lib/git/service.test.js");
-const serviceTestSource = fs.readFileSync(serviceTestFile, "utf8");
-const remoteBefore = "    addOptionLikeRemote(repository, remote);\n    const head = runGit(repository, ['rev-parse', 'HEAD']).trim();";
+const serviceTestSource = fs.readFileSync(serviceTestFile, "utf8").replace(/\r\n/g, "\n");
+const remoteBefore = "    addOptionLikeRemote(repository, remote);\n    runGit(repository, ['symbolic-ref', 'refs/remotes/--mirror/HEAD', 'refs/remotes/--mirror/react']);\n    const head = runGit(repository, ['rev-parse', 'HEAD']).trim();";
 if (serviceTestSource.split(remoteBefore).length !== 2) throw new Error("Review option-like remote HEAD fixture");
-const remoteAfter = "    addOptionLikeRemote(repository, remote);\n    runGit(repository, ['symbolic-ref', `refs/remotes/${OPTION_LIKE_REMOTE}/HEAD`, `refs/remotes/${OPTION_LIKE_REMOTE}/react`]);\n    const head = runGit(repository, ['rev-parse', 'HEAD']).trim();";
 fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
-fs.writeFileSync(testFile, testSource.slice(0, start) + fixed + testSource.slice(end));
-fs.writeFileSync(serviceTestFile, serviceTestSource.replace(remoteBefore, remoteAfter));
 console.log(`Applied ${Object.keys(overrides).length} explicit security dependency pins`);

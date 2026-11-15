@@ -31,7 +31,7 @@ const V2_BIN = join(
   "bin",
   "opencode.exe",
 );
-const TARGET_VERSION = "2.2.5";
+const TARGET_VERSION = "2.3.0";
 const PREVIOUS_VERSION = "0.0.0-beta-18684";
 const PREVIOUS_BIN = join(ADDON_ROOT, "rootfs", "opt", "opencode-v2-homeassistant",
   "node_modules", "@opencode-ai", "cli", "bin", "opencode2.exe");
@@ -631,7 +631,8 @@ with tempfile.TemporaryDirectory() as directory:
     ["2.0.13", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-previous/bin/opencode.exe")],
     ["2.0.22", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-beta-previous/bin/opencode.exe")],
     ["2.0.26", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-upgrade-previous/bin/opencode.exe")],
-    ["2.1.2", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-release-previous/bin/opencode.exe")]]) {
+    ["2.1.2", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-release-previous/bin/opencode.exe")],
+    ["2.2.5", join(ADDON_ROOT, "rootfs/opt/opencode-v2-homeassistant/node_modules/opencode-beta-release-previous/bin/opencode.exe")]]) {
   it(`preserves failed-upgrade input and validated state when upgrading ${version}`, async () => {
     const root = join(sandbox, `upgrade-v2-${version}`);
     const source = join(sandbox, `upgrade-v1-${version}`);

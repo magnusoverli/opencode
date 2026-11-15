@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const patcher = new URL('../rootfs/opt/openchamber/patch-security-dependencies.cjs', import.meta.url);
 const gitTest = 'packages/web/server/lib/git/service.test.js';
@@ -12,7 +13,7 @@ async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'ha-security-source-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const files = {
-    'package.json': JSON.stringify({ name: 'openchamber-monorepo', version: '2.5.3', overrides: {} }),
+    'package.json': JSON.stringify({ name: 'openchamber-monorepo', version: '2.7.2', overrides: {} }),
     'packages/web/server/lib/git/service.js': [
       "import { simpleGit } from 'simple-git';", 'const simpleGitEnvOptions = (env) => {',
       'return { allowEnvironment: Object.keys(env), unsafe };', '!isKeptOutOfGitOverlay(name)',
@@ -21,11 +22,16 @@ async function fixture(t) {
     [oauthTest]: [
       "  test('resolves a trusted enterprise host cli account id to a host-pinned octokit only after the instance is activated', async () => {",
       '    const previousFetch = globalThis.fetch;',
+      '    process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;',
       '    try { expect(resolved).not.toBeNull(); } finally {',
-      '      globalThis.fetch = previousFetch;', '    }', '  });', "  test('next', () => {});",
+      '      globalThis.fetch = previousFetch;',
+      '      if (previousPath === undefined) delete process.env.PATH;',
+      '      else process.env.PATH = previousPath;',
+      '    }', '  });', "  test('next', () => {});",
     ].join('\n'),
     [gitTest]: [
       '    addOptionLikeRemote(repository, remote);',
+      "    runGit(repository, ['symbolic-ref', 'refs/remotes/--mirror/HEAD', 'refs/remotes/--mirror/react']);",
       "    const head = runGit(repository, ['rev-parse', 'HEAD']).trim();",
       "    expect(branches.defaultBranches[OPTION_LIKE_REMOTE]).toBe('react');",
     ].join('\n'),
@@ -36,16 +42,17 @@ async function fixture(t) {
   }
   return { root, files };
 }
-const run = (root) => spawnSync(process.execPath, [patcher.pathname, root], { encoding: 'utf8' });
+const run = (root) => spawnSync(process.execPath, [fileURLToPath(patcher), root], { encoding: 'utf8' });
 
-test('security source patch establishes Git fixture preconditions without removing assertions', async (t) => {
+test('security source patch preserves upstream fixture fixes and assertions', async (t) => {
   const { root, files } = await fixture(t);
   const result = run(root);
   assert.equal(result.status, 0, result.stderr);
   const git = await readFile(join(root, gitTest), 'utf8');
-  assert.ok(git.includes("['symbolic-ref', `refs/remotes/${OPTION_LIKE_REMOTE}/HEAD`, `refs/remotes/${OPTION_LIKE_REMOTE}/react`]"));
+  assert.equal(git, files[gitTest]);
   assert.ok(git.includes("expect(branches.defaultBranches[OPTION_LIKE_REMOTE]).toBe('react')"));
   const oauth = await readFile(join(root, oauthTest), 'utf8');
+  assert.equal(oauth, files[oauthTest]);
   assert.ok(oauth.includes('process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;'));
   assert.ok(oauth.includes('else process.env.PATH = previousPath;'));
   assert.ok(oauth.includes('expect(resolved).not.toBeNull()'));

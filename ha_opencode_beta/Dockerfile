@@ -10,7 +10,7 @@ FROM node:${NODE_VERSION}-trixie-slim AS node-runtime
 # installed. Build with the reviewed security lock, on the target's native runner.
 FROM oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4 AS openchamber-bun
 FROM node-runtime AS openchamber-builder
-ARG OPENCHAMBER_REVISION=95af6769797693bf049f4e6a801e373b5220447b
+ARG OPENCHAMBER_REVISION=1a151518c95cc5ff3578bab593d2f96862ff3bb8
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client python3 g++ make \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=openchamber-bun /usr/local/bin/bun /usr/local/bin/bun
@@ -87,8 +87,8 @@ RUN --mount=type=bind,source=test/openchamber-request-body.mjs,target=/tmp/openc
 FROM --platform=$BUILDPLATFORM golang:1.24-trixie AS hab-builder
 
 ARG BUILD_ARCH
-ARG HAB_VERSION=1.7.2
-ARG HAB_REVISION=0bc138c6ab9f1bbe87914a0ffccbb038c0767e82
+ARG HAB_VERSION=1.8.0
+ARG HAB_REVISION=f200a763798bc2a305c7fe0fad58dc0946e07861
 RUN git clone --depth 1 --branch "${HAB_VERSION}" https://github.com/balloob/home-assistant-build-cli.git /src \
     && test "$(git -C /src rev-parse HEAD)" = "${HAB_REVISION}"
 WORKDIR /src
@@ -110,8 +110,8 @@ ARG NODE_VERSION
 ARG ADDON_CHANNEL=stable
 ARG TTYD_VERSION=1.7.7
 # One pinned V2 runtime and its matching plugin API. No V1 runtime is installed.
-ARG OPENCODE_V2_VERSION=2.2.5
-ARG OPENCHAMBER_VERSION=2.5.3
+ARG OPENCODE_V2_VERSION=2.3.0
+ARG OPENCHAMBER_VERSION=2.7.2
 ARG TINFOIL_VERSION=1.2.1
 ARG TSX_VERSION=4.23.15
 ARG YQ_VERSION=v4.54.1

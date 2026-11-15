@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Update OpenCode CLI/plugin to **2.3.0**, OpenChamber to **2.7.2** (immutable source `1a151518c95cc5ff3578bab593d2f96862ff3bb8`), and HAB to **1.8.0**. Upstream releases checked 2026-11-15.
+- Refresh runtime and OpenChamber dependency locks, retain the Home Assistant adaptations, and use upstream's corrected Git test fixtures.
+- Add the shipped OpenCode **2.2.5** generation to guarded upgrade coverage.
+- Preserve legacy session placement during 2.3.0 conversion before the app's managed-workspace relocation; retain exact history validation.
+
 ## 3.5.0b1
 
 - Reuse native image-check caches for beta release builds and keep version-only labels out of expensive build layers. Existing tests and audits remain enabled.
