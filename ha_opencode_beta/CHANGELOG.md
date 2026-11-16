@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.5.0b4
 
 - **Qualify HA 2026.11 compatibility ([#45](https://github.com/magnusoverli/opencode/issues/45))** — test the companion against HA 2026.11.1 as well as 2026.10, including cached tool context, administrator authorization, failed/concurrent conversations and native MCP read-only filtering. Companion 0.1.0b8 uses HA's **AI tools** wording and explains the broader admin API. Document that HA's read-only option applies only to the configured MCP endpoint; preserve configured-endpoint tool rejections without retrying a keyed API.
 
@@ -11,6 +11,8 @@
 - **Improve preserved-work diagnostics ([#202](https://github.com/magnusoverli/opencode/issues/202), [#207](https://github.com/magnusoverli/opencode/issues/207))** — unknown migration work now reports bounded path/ownership/mode metadata at startup; add CLI-level preservation checks and distinguish filesystem blockers from history-validation errors in recovery guidance. This does not automatically repair unknown filesystem states.
 
 - **Fix ChatGPT callback handoff ([#208](https://github.com/magnusoverli/opencode/issues/208))** — recognize the pinned token-sharing flow's `/api/accounts/authorize` URL as well as legacy `/oauth/authorize`. Correct the regression fixture to exercise the actual newer route, including browser callback submission. Version 3.5.0b3 still misses this handoff; callback state, origin, and destination checks remain enforced.
+
+- Beta-only release. Safe YAML patching has focused Linux fixture coverage for preview/apply, stale revisions, validation failures and guarded recovery; installed Home Assistant acceptance remains pending. Saving YAML does not reload Home Assistant.
 
 ## 3.5.0b3
 
