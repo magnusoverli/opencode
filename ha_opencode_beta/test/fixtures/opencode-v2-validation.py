@@ -822,7 +822,10 @@ with tempfile.TemporaryDirectory(prefix="migration-work-") as temporary:
     (unknown / "private").write_text("private-content-must-not-be-logged")
     for attempt in range(2):
         error = expect_error("unexpected_migration_work", lambda: MIGRATOR.reconcile_private_state(root, active))
-        assert error.details == ("entry=unknown-entry", "type=directory")
+        assert error.details[0] == "entry=unknown-entry"
+        assert "type=directory" in error.details
+        assert "expected=recognized-migration-entry" in error.details
+        assert any(item.startswith("path=") and item.endswith("/work/unknown-entry") for item in error.details)
         assert "private-content" not in str(error.details)
         assert (unknown / "private").read_text() == "private-content-must-not-be-logged"
         assert (generations / active / "retained").read_text() == "existing-history"

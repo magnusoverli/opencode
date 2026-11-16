@@ -1728,12 +1728,13 @@ def reconcile_private_state(root: Path, current: str | None, *, prune_generation
             remove_private_tree(entry)
             continue
         if not GENERATION_RE.fullmatch(entry.name):
-            mode = entry.lstat().st_mode
-            kind = "symlink" if stat.S_ISLNK(mode) else "directory" if stat.S_ISDIR(mode) else "file" if stat.S_ISREG(mode) else "other"
-            # Bounded ASCII basename only: never terminal control sequences,
-            # paths, file contents, or an unbounded injected log message.
+            # Bounded ASCII entry/path metadata only: never terminal control
+            # sequences, symlink targets, file contents or an unbounded log.
             name = re.sub(r"[^A-Za-z0-9._-]", "_", entry.name[:80])
-            raise MigrationError("unexpected_migration_work", details=(f"entry={name}", f"type={kind}"))
+            raise MigrationError(
+                "unexpected_migration_work",
+                details=(f"entry={name}", *path_details(entry, "recognized-migration-entry")),
+            )
         remove_private_tree(entry)
     for entry in generations.iterdir():
         if entry.name == current:

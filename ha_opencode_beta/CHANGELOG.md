@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Qualify combined migration failures ([#211](https://github.com/magnusoverli/opencode/issues/211), [#217](https://github.com/magnusoverli/opencode/issues/217), [#195](https://github.com/magnusoverli/opencode/issues/195))** — extend real-converter coverage to existing/nonexistent workspaces, Git repositories, missing project records and compacted conversations together. Verify that the existing placement repair recovers a failed migration without changing source history, while corrupted placement or compaction content remains rejected.
+- **Improve preserved-work diagnostics ([#202](https://github.com/magnusoverli/opencode/issues/202), [#207](https://github.com/magnusoverli/opencode/issues/207))** — unknown migration work now reports bounded path/ownership/mode metadata at startup; add CLI-level preservation checks and distinguish filesystem blockers from history-validation errors in recovery guidance. This does not automatically repair unknown filesystem states.
+
 - **Fix ChatGPT callback handoff ([#208](https://github.com/magnusoverli/opencode/issues/208))** — recognize the pinned token-sharing flow's `/api/accounts/authorize` URL as well as legacy `/oauth/authorize`. Correct the regression fixture to exercise the actual newer route, including browser callback submission. Version 3.5.0b3 still misses this handoff; callback state, origin, and destination checks remain enforced.
 
 ## 3.5.0b3

@@ -81,6 +81,23 @@ or replied to by this sweep.
 
 ### Follow-up investigation
 
+- Migration-family follow-up: combined fixture now runs the real 2.3.0 converter
+  over four compacted sessions spanning a managed workspace, historical project,
+  existing unowned directory, and Git repository with a missing source project.
+  Disabling placement restoration reproduces `session_projection_mismatch`;
+  reenabling it recovers the same failed migration. Original DB SHA-256 remains
+  unchanged. Independent placement assertions pass; deliberately corrupted
+  project/path and compaction metadata still fail exact validation.
+- #202 now includes bounded path, ownership and mode in its startup error.
+  Eight path tests pass, including CLI startup on the exact reported unknown
+  directory and on a wrong-type work path (#207); neither is removed or replaced.
+  Full projection-validation fixture and combined converter fixture pass.
+- Closure recommendation for the next beta: #211/#217/#195 have repository-level
+  qualification for the identified failure families, pending CI. #202/#207
+  remain unresolved filesystem states, not closure-ready merely because the
+  diagnostics improved. Fresh side-by-side beta installs do not exercise the
+  affected stable app's retained history.
+
 - #208 reporter update (2026-11-16): Pulpfixtion confirmed successful OAuth,
   GPT-6 Luna in Terminal/OpenChamber, and token renewal after manually delivering
   the callback. Identified `/api/accounts/authorize` as the newer authorization

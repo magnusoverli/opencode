@@ -21,6 +21,52 @@ def load(name):
 
 
 class PathDiagnostics(unittest.TestCase):
+    def test_startup_reports_exact_unknown_work_location_and_preserves_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "v2"
+            unknown = root / "work" / "unified_original_interval_v2_validation_compat_2"
+            unknown.mkdir(parents=True)
+            (root / "generations").mkdir()
+            private = unknown / "private"
+            private.write_bytes(b"PRIVATE-CONTENT")
+            before = private.stat()
+            result = subprocess.run(
+                [sys.executable, "-B", str(SOURCE / "opencode-v2-migrate.py"), "prepare",
+                 "--root", str(root), "--source-data", str(Path(temporary) / "source")],
+                text=True, capture_output=True, timeout=5,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("unexpected_migration_work", result.stderr)
+            self.assertIn("path=", result.stderr)
+            self.assertIn(unknown.name, result.stderr)
+            self.assertIn("expected=recognized-migration-entry", result.stderr)
+            for field in ("type=directory", "uid=", "gid=", "mode=", "links="):
+                self.assertIn(field, result.stderr)
+            self.assertNotIn("PRIVATE-CONTENT", result.stdout + result.stderr)
+            self.assertEqual(private.read_bytes(), b"PRIVATE-CONTENT")
+            self.assertEqual(private.stat().st_mtime_ns, before.st_mtime_ns)
+            self.assertFalse((root / "current").exists())
+            self.assertEqual(list((root / "generations").iterdir()), [])
+
+    def test_startup_wrong_work_type_reports_metadata_without_replacing_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "v2"
+            root.mkdir()
+            work = root / "work"
+            work.write_bytes(b"PRIVATE-CONTENT")
+            result = subprocess.run(
+                [sys.executable, "-B", str(SOURCE / "opencode-v2-migrate.py"), "prepare",
+                 "--root", str(root), "--source-data", str(Path(temporary) / "source")],
+                text=True, capture_output=True, timeout=5,
+            )
+            self.assertEqual(result.returncode, 1)
+            for field in ("unsafe_path_type", "expected=directory", "type=file", "uid=", "mode="):
+                self.assertIn(field, result.stderr)
+            self.assertIn(str(work), result.stderr)
+            self.assertNotIn("PRIVATE-CONTENT", result.stdout + result.stderr)
+            self.assertEqual(work.read_bytes(), b"PRIVATE-CONTENT")
+            self.assertFalse((root / "current").exists())
+
     def test_diagnose_does_not_create_missing_roots_or_read_unknown_contents(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "absent"

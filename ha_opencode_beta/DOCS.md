@@ -1158,6 +1158,21 @@ compatible pre-upgrade backup.
 The #195 compaction migration fix is already included. Retry the same app with
 preserved source history; do not delete compaction messages or summaries.
 
+These failures share a startup pipeline, but require different evidence:
+
+| Error | Meaning | Next step |
+| --- | --- | --- |
+| `session_projection_mismatch` with `project_id` or `path` (#211/#217) | Converted conversation placement differs from the preserved source. | The current beta restores source placement before exact validation. Retest against the affected history after a supported upgrade of that same app. |
+| `message_projection_mismatch` involving compaction (#195) | Compaction event shape differs from the validator's expectation. | The included fix preserves compaction summaries and retained context; deletion is not required. Other message mismatches need their own diagnosis. |
+| `unexpected_migration_work` (#202) | An unrecognized object exists in the private migration work directory. | Share the startup line containing entry, bounded path, type, ownership and mode. Leave the object intact. |
+| `unsafe_path_type` (#207) | A required file/directory has a different filesystem type. | Share the failing path and expected/actual type from the startup log. Do not treat this as a permissions-only error. |
+
+A fresh beta installation beside stable does **not** test the failing stable
+history. If the affected installation is stable, wait for a stable promotion or
+an explicitly supported backup-based test procedure; do not manually copy its
+private databases into beta. A later migration error may become visible only
+after an earlier blocker is resolved.
+
 ### Safe-write transactions
 
 `write_config_safe` now requires a reviewed source revision for actual writes:
