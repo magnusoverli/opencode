@@ -956,11 +956,8 @@ describe("openchamber ingress proxy: release parity", () => {
     const stable = fs.readFileSync(STABLE_PROXY_SCRIPT, "utf8");
     const beta = fs.readFileSync(PROXY_SCRIPT, "utf8");
     assert.ok(beta.includes("/^\\/ha-(?:mcp|assist)(?:[/?]|$)/"));
-    // Only the V2 OAuth handoff differs in beta. Keep every shared route,
-    // allowlist, Assist boundary and forwarding byte identical to stable.
-    const shared = source => source.replace(/function armV2OauthBridge\([\s\S]*?\n\/\/ Resolves to "skipped"/, '// Beta-only V2 OAuth handoff\n// Resolves to "skipped"');
-    assert.notEqual(shared(beta), beta, "the OAuth-only comparison boundary must exist");
-    const { withoutBetaStorageScope } = require("../../scripts/ingress-proxy-parity.cjs");
-    assert.equal(shared(withoutBetaStorageScope(beta)), shared(stable.replace(/\r\n/g, "\n")));
+    // 3.5.0 promotes OAuth handoff and channel-scoped browser storage.
+    // Compare every route and boundary, without stripping promoted behavior.
+    assert.equal(beta.replace(/\r\n/g, "\n"), stable.replace(/\r\n/g, "\n"));
   });
 });
