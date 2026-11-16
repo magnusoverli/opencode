@@ -19,7 +19,9 @@ running version rather than recalling it.
 1. `get_config` — which Home Assistant version is this?
 2. `get_integration_docs("<integration>")` — current YAML syntax and examples.
 3. `get_breaking_changes` — when something stopped working after an update.
-4. Read the existing file in full. Every write replaces the whole file.
+4. Read the existing configuration before drafting. A complete-file replacement
+   requires the full original; an exact-text patch requires the affected text and
+   enough surrounding context to review the intended change.
 
 When decision recall is advertised, call `recall_decisions` for the relevant
 `file`, `entity` or `integration` before drafting. Use focused `query` wording
@@ -45,7 +47,8 @@ Frequently-changed areas worth double-checking:
   resource, not a fragment. No separate whole-file `write_config_safe` replacement
   is required for an editor-resource save.
 - **Direct YAML-file edits**, including packages and non-editor includes: use
-  complete-file `write_config_safe`, preserving unrelated content.
+  complete-file `write_config_safe` or reviewed exact-text `patch_config_safe`,
+  preserving unrelated content.
 - Determine ownership first. A filename or file size alone does not establish
   editor ownership. If the required tool is missing or the profile is restricted,
   report the limitation; never bypass it with raw API requests or credential-bearing
@@ -73,7 +76,8 @@ Frequently-changed areas worth double-checking:
 
 ## Writing YAML files safely
 
-`write_config_safe` is the sanctioned direct-file write path. It validates, backs up, blocks
+`write_config_safe` and `patch_config_safe` are the sanctioned direct-file write
+paths. Both use the same pipeline, which validates, backs up, blocks
 writes that would drop list entries or top-level keys or shrink a file
 suspiciously, and attempts verified recovery on failure. Recovery can fail: inspect
 the transaction result and never claim restoration merely because it was attempted.
@@ -90,9 +94,31 @@ the transaction result and never claim restoration merely because it was attempt
    expected_revision=<source revision from step 5>) -> write for real
 ```
 
-**Never write partial content to a config file.** Read first, include everything
-that was already there. `write_config_safe` blocks the worst cases, but the
-draft you show the user must already be complete.
+**Never pass partial content to `write_config_safe`.** Read first, include everything
+that was already there. It blocks the worst cases, but the draft you show the user
+must already be complete. For a bounded change, use the patch workflow instead:
+
+1. Read the affected YAML and surrounding context. Choose unique exact `old_text`
+   matches and their replacement `new_text`; all matches refer to the original
+   file, not the result of earlier edits. Empty replacement text means deletion.
+2. Preview with `patch_config_safe(file_path=path, edits=[...])`. Dry-run is the
+   default. It permits up to 20 non-overlapping edits, each with at most 16 KiB of
+   combined old/new UTF-8 text. The complete candidate must fit the existing
+   1 MiB YAML preflight limit; patching does not bypass parser complexity limits.
+3. Review the exact supplied replacements and the preview's source lines, byte
+   counts, **Source Revision** and **Candidate SHA-256**. The preview metadata
+   is not a rendered diff or proof of full HA validation. Obtain approval.
+4. Apply the same edits with `dry_run: false`, `expected_revision` set to the
+   reviewed source hash, and `expected_candidate` set to the reviewed candidate
+   hash. Do not refresh hashes silently after a conflict.
+5. Inspect the transaction result, read back, then perform only the separately
+   approved reload/restart and verification. Patching never reloads HA.
+
+Patching preserves unrelated bytes, comments and formatting without reserializing
+YAML. It refuses missing files, ambiguous/overlapping matches, invalid UTF-8,
+secrets and hidden/internal paths. Content-loss checks still require
+`confirm_deletions: true` for approved removals they would otherwise block.
+Editor-managed resources still use their supported editor API.
 
 The dry run returns a source revision, not proof of full HA validation of the
 proposed content. Actual writes require that unchanged revision. A conflict needs
@@ -101,7 +127,7 @@ validation runs against live files after atomic replacement. A recovery-required
 or uncertain outcome needs local inspection before retrying. Never delete the
 writer lock or recovery copies to bypass an unresolved transaction.
 
-If the `write_config_safe` tool is not present, the add-on is running a reduced
+If the required safe-write tool is not present, the add-on is running a reduced
 MCP tool profile. Say so rather than falling back to shell redirection.
 
 ## Reading and querying YAML from the shell
@@ -123,7 +149,8 @@ Output and JSON conversion strip tags — `!secret home_latitude` prints as
 through JSON and back**; every `!include`/`!secret` is lost permanently.
 
 Use `yq` for read-only queries or preparing a draft, never in-place writes
-(`yq -i`). Direct file changes must go through complete-file `write_config_safe`.
+(`yq -i`). Direct file changes must go through complete-file `write_config_safe`
+or reviewed exact-text `patch_config_safe`.
 Custom tags stick to overwritten values, and serialization can strip blank
 separator lines: inspect the complete draft and its tags before approval.
 
@@ -231,6 +258,10 @@ automation files**, including packages and non-editor includes.
 9. Report **saved**, **reloaded**, and **load verified** separately, including any
    pending/failed step. Successful loading is not proof of behaviour; suggest a
    separate user-approved functional test.
+
+For a bounded direct-YAML edit, the exact-text patch workflow above may replace
+the complete-file drafting, preview and write steps. Preserve IDs, ownership
+checks, separately approved reload and verification in either case.
 
 For editor-managed resources, follow the editor-resource workflow above rather
 than requiring a second whole-file write. Never guess payload flags or improvise

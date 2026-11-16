@@ -170,7 +170,8 @@ style guide, the safe-write path, and the reload/restart rules.
 Choose the editing route by resource ownership. Editor-managed automations,
 scripts and scenes use their supported editor API through advertised `hab_run`
 commands, preserving the complete individual resource. Direct YAML-file edits,
-including packages/includes, require complete-file `write_config_safe`.
+including packages/includes, use complete-file `write_config_safe` or reviewed
+exact-text `patch_config_safe` for bounded changes to existing YAML.
 Both routes require approval, backup, validation, concurrency checks, unrelated
 content preservation and read-back/activation verification. Obtain consent for
 automatic reloads caused by editor saves; verify native activation instead of
@@ -188,7 +189,7 @@ Real-time interaction with the running instance:
 - `get_history`, `get_logbook`, `get_calendar_events` — historical and calendar data; supplied timestamps must include `Z` or a UTC offset. For every recorded value, use `get_history` with `response_format: "values"`, then pass its exact `meta.continuation` object until `has_more` is false; `numeric_summary` covers the complete response.
 - `get_devices`, `get_areas` — device and area registry
 - `set_device_area`, `set_entity_area` — approved room assignments through Home Assistant's registry API (full profile; use exact IDs from read tools)
-- `write_config_safe`, `validate_config`, `check_config_syntax` — safe config writing with validation, content protection and backup
+- `write_config_safe`, `patch_config_safe`, `validate_config`, `check_config_syntax` — safe config writing with validation, content protection and backup
 - `get_integration_docs`, `get_breaking_changes` — current syntax, before writing any integration configuration
 - `diagnose_entity`, `get_error_log`, `detect_anomalies`, `get_suggestions` — diagnosis
 - `get_supervisor_health`, `get_supervisor_resolution`, `get_backup_posture`, `get_store_audit`, `get_supervisor_metrics`, `get_support_logs` — bounded, credential-redacted system evidence
@@ -256,7 +257,7 @@ Dry-run is the default for renames — always preview before `--apply`. The
 | Task | Use |
 |---|---|
 | Editor-managed automations, scripts, scenes | Supported editor API via advertised `hab_run` commands; complete individual resource |
-| Direct YAML files, packages/includes, templates | Complete-file `write_config_safe` |
+| Direct YAML files, packages/includes, templates | Complete-file `write_config_safe` or reviewed exact-text `patch_config_safe` |
 | Check current state, control a device | MCP (`get_home_context`, `call_service`) |
 | Troubleshoot | MCP (`diagnose_entity`, `get_error_log`, `get_supervisor_health`) |
 | Dashboards, areas, helpers, backups, blueprints, people | `hab` |
@@ -265,6 +266,13 @@ Dry-run is the default for renames — always preview before `--apply`. The
 | Inspect a Zigbee device, map the mesh, clean up stale devices | `zigporter` |
 | Device firmware updates | `watch_firmware_update` |
 | Core/OS/Supervisor updates | `get_available_updates`, `update_component` |
+
+For bounded direct-file changes, preview `patch_config_safe` (dry-run by default),
+review the exact replacements, obtain approval, then apply the same edits with
+both `expected_revision` and `expected_candidate` from that preview. Ambiguous or
+overlapping matches are refused. Preview is not full HA validation; the shared
+writer checks HA after saving and attempts guarded recovery on failure. Neither
+write tool reloads HA. Preserve separately approved reload and verification steps.
 
 ### Internal directories
 

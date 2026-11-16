@@ -60,7 +60,7 @@ const __lsp_dirname = dirname(__lsp_filename);
 // SHARED DEPRECATION PATTERNS (with remote update support)
 // ============================================================================
 
-const GITHUB_PATTERNS_URL = "https://raw.githubusercontent.com/magnusoverli/opencode/main/ha_opencode/rootfs/opt/shared/deprecation-patterns.json";
+const GITHUB_PATTERNS_URL = "https://raw.githubusercontent.com/magnusoverli/opencode/main/ha_opencode_beta/rootfs/opt/shared/deprecation-patterns.json";
 
 /**
  * Load deprecation patterns from the local shared JSON file.

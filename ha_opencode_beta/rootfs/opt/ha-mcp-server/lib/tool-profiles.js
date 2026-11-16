@@ -42,6 +42,7 @@ const CONFIGURATION_TOOL_NAMES = [
   "check_config_syntax",
   "validate_config",
   "write_config_safe",
+  "patch_config_safe",
   "esphome_config_read",
   "esphome_config_validate",
   "esphome_config_migrate",

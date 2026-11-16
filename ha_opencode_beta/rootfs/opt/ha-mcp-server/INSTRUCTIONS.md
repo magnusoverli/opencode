@@ -122,7 +122,7 @@ Use the documentation tools proactively:
 | `get_integration_docs` | **Before writing ANY integration config** |
 | `get_breaking_changes` | When config stopped working, or checking compatibility |
 | `check_config_syntax` | Before presenting YAML to user |
-| `write_config_safe` | **ALWAYS use this to write config files** — blocks accidental content loss (see below) |
+| `write_config_safe` / `patch_config_safe` | Approved direct-YAML write paths; complete-file replacement or bounded exact-text patch, with content-loss checks |
 
 ### Common Deprecations to Watch For
 - **Template sensors**: `platform: template` under `sensor:` -> use top-level `template:`
@@ -136,7 +136,18 @@ Use the documentation tools proactively:
 
 ### MANDATORY Workflow for Configuration Tasks
 
-**Use `write_config_safe` as the primary tool for writing configuration files.** This tool automatically validates before committing to disk and restores the original file if validation fails.
+**Choose by resource ownership:** editor-managed automations, scripts and scenes
+use their supported editor API through advertised `hab_run` commands. Direct YAML
+files use complete-file `write_config_safe` or reviewed `patch_config_safe`.
+Both file tools run local preflight before writing and full HA validation after
+writing, with guarded recovery on failure. Neither reloads HA.
+
+For patches, preview the exact `edits` first (dry-run is the default), review
+the replacements and returned source/candidate hashes, obtain approval, then
+apply the same edits with `dry_run: false`, `expected_revision` and
+`expected_candidate`. No automatic hash refresh on conflict. Preserve the
+separately approved reload and read-back/activation verification workflow.
+For complete-file replacements:
 
 ```
 1. get_config()                                        -> Know the HA version
@@ -146,24 +157,29 @@ Use the documentation tools proactively:
 5. write_config_safe(path, yaml, dry_run=true)         -> Pre-validate everything
 6. If errors: fix and repeat step 5
 7. Show user the validated config and get approval
-8. write_config_safe(path, yaml)                       -> Write for real (validated + backed up)
+8. write_config_safe(file_path=path, content=yaml,
+   expected_revision=<source revision from step 5>)   -> Write for real
 ```
 
-**CRITICAL: Always read the target file BEFORE writing to it.** The draft must include all existing content plus your changes. Never write only the new content — this will overwrite and destroy existing configuration.
+**CRITICAL: Read before editing.** A `write_config_safe` draft must include all
+existing content plus your changes. Never pass a fragment as complete-file
+content. Patches instead require exact source matches and enough surrounding
+context to review the change.
 
 The `write_config_safe` tool performs these checks automatically:
 - **Content protection** — blocks writes that would remove list entries, drop top-level keys, or significantly shrink the file
 - **Deprecation scanning** — 20+ patterns, auto-updated from GitHub between add-on releases
-- **Jinja2 template validation** — sends every template through HA's own engine
+- **Jinja2 template validation** — checks changed templates where possible; unchanged or runtime-dependent templates may be skipped
 - **Structural validation** — checks for missing required keys in automations, scripts, etc.
 - **YAML lint checks** — tabs, comma-separated entity lists, etc.
 - **HA Repair issues** — queries your installation's active repair/deprecation warnings via HA Core's repairs API
 - **HA Alerts** — checks alerts.home-assistant.io for known integration issues affecting your config
 - **Full HA config validation** — calls HA Core's check_config (same as `ha core check`)
-- **Automatic backup/restore** — if validation fails after writing, restores the original file
-- **Backup retention** — `.bak` files are kept as a recovery point even after successful writes
+- **Guarded recovery** — if validation fails after writing, attempts to restore the original file; inspect the transaction result
+- **Backup retention** — unique recovery copies and journals are retained in `.opencode-safe-write-backups`
 
-**If validation fails, the original file is automatically restored. The multi-layered validation pipeline is designed to prevent invalid config from reaching your HA instance.**
+**Recovery can fail.** Only `restored` confirms verified restoration. Inspect
+uncertain outcomes before retrying; do not delete the writer lock to bypass them.
 
 ### How Validation Data Stays Current
 
@@ -197,8 +213,8 @@ Use these prompts for complex tasks:
 ## Best Practices
 
 1. **Check before changing**: Use `get_states` before `call_service` to verify current state
-2. **Always read before writing**: Read the existing file first, then include ALL existing content plus your changes
-3. **Always use write_config_safe**: This is the safest way to write config — it validates, protects against content loss, and auto-restores on failure
+2. **Always read before writing**: Review the existing configuration; complete-file writes must include ALL content, while patches preserve bytes outside the approved exact replacements
+3. **Use the ownership-appropriate route**: Editor API for editor-managed resources; `write_config_safe` or `patch_config_safe` for direct YAML files. Inspect validation and recovery results
 4. **Pre-validate with dry_run**: Use `write_config_safe(path, yaml, dry_run=true)` before presenting config to the user
 4. **Use history for debugging**: Use `get_history` when troubleshooting intermittent issues
 5. **Leverage relationships**: Use `get_entity_details` to find related entities
@@ -252,7 +268,7 @@ for long builds/uploads/logs. JSON streams are NDJSON, not one final envelope.
 ### When to Use hab_run vs Other MCP Tools
 
 - **Use existing MCP tools** for: safe config writing, anomaly detection, entity diagnostics, firmware updates, history queries
-- **Use hab_run** for: dashboard management, area/floor/zone/person/category CRUD, helper creation, todo and notification management, integration control, repair issues, event firing, template rendering, backups, blueprints, search. Automation/script/scene API CRUD is available when specifically needed; configuration edits default to YAML + `write_config_safe`. Check command help and supported payload/file options before using API CRUD; do not improvise JSON quoting or switch paths merely because YAML needs a reload.
+- **Use hab_run** for: dashboard management, area/floor/zone/person/category CRUD, helper creation, todo and notification management, integration control, repair issues, event firing, template rendering, backups, blueprints, search. Editor-managed automations/scripts/scenes use supported editor API commands; direct YAML uses `write_config_safe` or reviewed `patch_config_safe`. Check command help and supported payload/file options; do not improvise JSON quoting or switch paths merely because YAML needs a reload.
 
 ### Common hab_run Commands
 
@@ -400,13 +416,16 @@ The tool returns structured JSON when `--json` is used, or diff/confirmation tex
 
 Load `home-assistant-configuration` for the canonical procedure, including custom
 includes/packages and verification. Use structured MCP arguments, not shell JSON.
+Choose the route by ownership first: editor-managed resources use their supported
+editor API. The following is the complete-file workflow for direct YAML; bounded
+changes may use the reviewed patch workflow above with the same reload rules.
 ```
 1. Read configuration.yaml and follow includes to the actual automation source
 2. Read the complete source; preserve unrelated content and existing IDs
 3. Discover relevant entities/services and draft the minimal change
 4. write_config_safe(file_path=path, content=yaml, dry_run=true) -> Prevalidate
 5. Show the draft; obtain approval for writing and automation.reload
-6. write_config_safe(file_path=path, content=yaml) -> Stop if writing/validation fails
+6. write_config_safe(file_path=path, content=yaml, expected_revision=<from step 4>) -> Stop on failure
 7. call_service(domain="automation", service="reload") -> Only if approved
 8. Check reload result and affected entity with read-only tools; inspect errors if needed
 9. Report saved/reloaded/load-verified separately; suggest a separate functional test
@@ -424,10 +443,10 @@ an add-on restart; do not bypass the profile through shell/API calls.
 2. get_integration_docs(integration="mqtt")  -> Get current syntax
 3. read_file(path)                           -> Read the EXISTING file content
 4. Draft config: include ALL existing content + new changes
-5. write_config_safe(path, yaml, dry_run=true)  -> Pre-validate (deprecations + templates + HA check)
+5. write_config_safe(path, yaml, dry_run=true)  -> Local preflight (not full HA check)
 6. If errors: fix and repeat step 5
 7. Present validated config to user
-8. write_config_safe(path, yaml)             -> Write for real (auto backup + validation)
+8. write_config_safe(file_path=path, content=yaml, expected_revision=<from step 5>) -> Backup, write, HA check
 ```
 
 ### User reports "config stopped working after update"

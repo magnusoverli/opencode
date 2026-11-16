@@ -11,6 +11,9 @@ test("editor-resource guidance does not mandate whole-file replacement or permit
     assert.match(text, /resource ownership/);
     assert.match(text, /complete individual\s+resource/);
     assert.match(text, /complete-file `write_config_safe`/i);
+    assert.match(text, /`patch_config_safe`/);
+    assert.match(text, /expected_revision/);
+    assert.match(text, /expected_candidate/);
     assert.match(text, /automatic reload/);
     assert.match(text, /activation/);
     assert.match(text, /never bypass/i);

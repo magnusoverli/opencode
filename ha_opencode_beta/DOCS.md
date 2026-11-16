@@ -1207,6 +1207,27 @@ refresh. Local checks happen before saving; authoritative full HA validation
 still checks live configuration **after** atomic replacement. A dry-run pass is
 not full HA validation of staged content, and a save does not reload HA.
 
+For a small change to an existing direct-managed YAML file, beta also provides
+`patch_config_safe` in the `configuration` and `full` tool profiles:
+
+1. Read the affected content and surrounding context. Supply `file_path` and
+   `edits: [{old_text: "...", new_text: "..."}]`. Each old text must match exactly
+   once in the original file; edits cannot overlap.
+2. Preview (the default `dry_run: true`). Review the exact replacements alongside
+   the returned line positions, byte counts, **Source Revision** and
+   **Candidate SHA-256**. The preview does not render a diff.
+3. After approval, apply the same edits with `dry_run: false`,
+   `expected_revision` and `expected_candidate` from that preview.
+
+The tool permits up to 20 edits with at most 16 KiB of combined old/new UTF-8
+text per edit, in an existing `.yaml`/`.yml` file. The complete candidate must
+pass the existing 1 MiB YAML preflight and parser complexity limits. It preserves
+unrelated bytes, comments and formatting; secrets and hidden/internal paths are
+refused. It uses the same content-loss checks, atomic writer, backup and recovery
+pipeline as `write_config_safe`. Full HA validation still happens after writing,
+and reload/activation is a separate approved step. Supported editor APIs remain
+the route for editor-managed automations, scripts and scenes.
+
 The writer retains unique 0600 recovery copies and journals in
 `/homeassistant/.opencode-safe-write-backups/`. These may contain sensitive
 configuration: do not paste, commit or expose them. They are not the old reusable
