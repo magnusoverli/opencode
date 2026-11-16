@@ -2,7 +2,7 @@
 // bridge (issue #54). They spawn the proxy directly with fake upstream and OAuth
 // listeners; the devcontainer acceptance harness covers Home Assistant Core Ingress.
 //
-// Run with: node --test ha_opencode/test/openchamber-ingress-proxy.test.js
+// Run with: node --test ha_opencode_beta/test/openchamber-ingress-proxy.test.js
 //
 // This directory is outside rootfs/, so it is not copied into the add-on image.
 
@@ -17,7 +17,6 @@ const path = require("node:path");
 
 const PROXY_SCRIPT = path.join(__dirname, "..", "rootfs", "usr", "local", "bin", "openchamber-ingress-proxy.js");
 const STABLE_PROXY_SCRIPT = path.join(__dirname, "..", "..", "ha_opencode", "rootfs", "usr", "local", "bin", "openchamber-ingress-proxy.js");
-const BETA_PROXY_SCRIPT = path.join(__dirname, "..", "..", "ha_opencode_beta", "rootfs", "usr", "local", "bin", "openchamber-ingress-proxy.js");
 const INGRESS_PATH = "/api/hassio_ingress/abc123";
 
 function freePort() {
@@ -502,7 +501,8 @@ describe("openchamber ingress proxy: V2 OpenAI browser sign-in", () => {
     statusPaths = [];
     authorizeResponse = {
       attemptID: "test-attempt", mode: "auto",
-      url: `https://auth.openai.com/oauth/authorize?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${callbackPort}/auth/callback`)}&state=${state}`,
+      // Pinned ChatGPT token-sharing uses this path, unlike legacy Codex.
+      url: `https://auth.openai.com/api/accounts/authorize?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${callbackPort}/auth/callback`)}&state=${state}`,
       instructions: "This window will close automatically.",
     };
   });
@@ -599,6 +599,7 @@ describe("openchamber ingress proxy: V2 OpenAI browser sign-in", () => {
   for (const port of [1455, 1457]) {
     it(`retains the legacy browser handoff on port ${port}`, async () => {
       const url = new URL(authorizeResponse.url);
+      url.pathname = "/oauth/authorize";
       url.searchParams.set("redirect_uri", `http://localhost:${port}/auth/callback`);
       authorizeResponse.url = url.toString();
       assert.equal((await handoff()).pathname, `${INGRESS_PATH}/__ha_openai_oauth_bridge`);
@@ -622,6 +623,16 @@ describe("openchamber ingress proxy: V2 OpenAI browser sign-in", () => {
     it(`does not arm an unsafe or unexpected upstream redirect: ${redirect}`, async () => {
       const url = new URL(authorizeResponse.url);
       url.searchParams.set("redirect_uri", redirect);
+      authorizeResponse.url = url.toString();
+      assert.deepEqual(JSON.parse((await connect()).body).data, authorizeResponse);
+      assert.equal(hits.length, 0);
+    });
+  }
+
+  for (const path of ["/api/accounts/authorize/other", "/api/accounts/authorize.evil", "/unrecognized"]) {
+    it(`does not arm an unrecognized authorization path: ${path}`, async () => {
+      const url = new URL(authorizeResponse.url);
+      url.pathname = path;
       authorizeResponse.url = url.toString();
       assert.deepEqual(JSON.parse((await connect()).body).data, authorizeResponse);
       assert.equal(hits.length, 0);
@@ -943,13 +954,13 @@ describe("openchamber ingress proxy: disconnected clients", () => {
 describe("openchamber ingress proxy: release parity", () => {
   it("keeps shared forwarding and Assist route protection identical across channels", () => {
     const stable = fs.readFileSync(STABLE_PROXY_SCRIPT, "utf8");
-    const beta = fs.readFileSync(BETA_PROXY_SCRIPT, "utf8");
+    const beta = fs.readFileSync(PROXY_SCRIPT, "utf8");
     assert.ok(beta.includes("/^\\/ha-(?:mcp|assist)(?:[/?]|$)/"));
-    // Promotion includes the dynamic-port OAuth handoff as well as every shared
-    // route, allowlist, Assist boundary and forwarding implementation.
-    // Browser-state isolation is beta-only until promotion; forwarding and
-    // authentication must still be byte-identical.
+    // Only the V2 OAuth handoff differs in beta. Keep every shared route,
+    // allowlist, Assist boundary and forwarding byte identical to stable.
+    const shared = source => source.replace(/function armV2OauthBridge\([\s\S]*?\n\/\/ Resolves to "skipped"/, '// Beta-only V2 OAuth handoff\n// Resolves to "skipped"');
+    assert.notEqual(shared(beta), beta, "the OAuth-only comparison boundary must exist");
     const { withoutBetaStorageScope } = require("../../scripts/ingress-proxy-parity.cjs");
-    assert.equal(withoutBetaStorageScope(beta), stable.replace(/\r\n/g, "\n"));
+    assert.equal(shared(withoutBetaStorageScope(beta)), shared(stable.replace(/\r\n/g, "\n")));
   });
 });

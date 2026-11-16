@@ -139,7 +139,20 @@ Known unresolved reports and publication authorization are separate concerns.
 - Capability reports retain the labelled server catalogue and add a runtime-derived
   current-agent snapshot. Tests cover concurrent sessions, agent changes, expiry,
   bounded storage and unknown context. This is tool-list evidence, not a popup
-  approval receipt. Installed-system acceptance of these follow-ups is pending.
+  approval receipt.
+- Installed **3.5.0b5** follow-up acceptance passed on the stopped Silicon Labs
+  Flasher: display names, revisions, redaction/visibility states, bounded diffs,
+  non-applying previews, review mismatch, replay and stale-source rejection.
+  Genuine managed read-only inspection/previews and apply exclusion passed.
+  The retained read-only plan was applied from Build, then a fresh restoration
+  returned `verbose: true`, `stopped` and the original opaque revision.
+  The operator confirmed the native approval flow. All temporary live changes
+  were restored; no confirmed defects were found.
+- Installed Build reported 71 bundled/72 native offered tools; managed read-only
+  reported 29 bundled/zero native, matching the exposed schemas. Schema edge
+  cases, expiry/restart causality, 256-field limits and concurrent contexts remain
+  automated-only or locally unverified, not installed passes. These newer results
+  supersede the initial pending Supervisor acceptance above.
 
 ### #205: LAN pairing
 

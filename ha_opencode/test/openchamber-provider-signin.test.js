@@ -5,17 +5,20 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { test } = require("node:test");
 const script = path.join(__dirname, "../rootfs/opt/openchamber/patch-provider-signin.cjs");
-const { patchProviderSignin } = require(script);
+const { patchProviderSignin, activationSteps } = require(script);
 
 function fixture(t, newline = "\n") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ha-provider-signin-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const target = path.join(root, "packages/ui/src/components/sections/providers/ProviderOAuthMethods.tsx");
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  // Independent anchor from pinned OpenChamber 2.5.2. The original component's
+  // Independent anchor from pinned OpenChamber 2.5.3. The original component's
   // method labels, SDK calls, polling and cancellation must remain untouched.
   const original = `// upstream authentication stays unchanged
-  return (
+        {attempt.url && (
+          <div className="flex items-center gap-2">
+      const { data } = await sdk().integration.oauth.connect({
+   return (
     <div className={cn('space-y-4', className)}>
       {methods.map((method) => {
         const isActive = activeMethodID === method.id;
@@ -35,7 +38,10 @@ for (const newline of ["\n", "\r\n"]) {
     assert.match(result, /detects approval automatically/);
     assert.match(result, /no restart or Terminal switch/);
     assert.match(result, /OpenCode handles credential storage and refresh/);
-    assert.equal(result.replace(/      \{integrationId === 'openai'[\s\S]*?      \)\}\n/, ""), original);
+    assert.ok(result.includes(activationSteps));
+    const withoutWarmup = result.replace(/      \/\/ Plugin listing can race[\s\S]*?      const \{ data \} = await client.integration.oauth.connect\(\{/, "      const { data } = await sdk().integration.oauth.connect({");
+    const withoutHandoffLink = withoutWarmup.replace(/        \{\/\* HA_SIGNIN_LINK_START \*\/\}[\s\S]*?        \{\/\* HA_SIGNIN_LINK_END \*\/\}\n/, "");
+    assert.equal(withoutHandoffLink.replace(/      \{integrationId === 'openai'[\s\S]*?      \)\}\n/, ""), original);
     assert.throws(() => patchProviderSignin(root), /Unexpected preview provider sign-in source/);
     assert.equal(fs.readFileSync(target, "utf8"), result);
   });
@@ -56,9 +62,29 @@ test("requires an explicit upstream checkout", () => {
   assert.match(result.stderr, /Usage: patch-provider-signin.cjs/);
 });
 
-test("stable builds and exercises the patched provider UI before shipping it", () => {
+test("integration readiness is bounded and never starts authorization itself", async () => {
+  const wait = new (Object.getPrototypeOf(async function () {}).constructor)(
+    "client", "integrationId", "setTimeout", activationSteps);
+  let reads = 0;
+  const client = {
+    plugin: { async list() {} },
+    integration: { async list() { reads++; return { data: [] }; } },
+  };
+  await assert.rejects(wait(client, "openai", (resolve) => resolve()), /still starting/);
+  assert.equal(reads, 50);
+});
+
+test("late OAuth source drift rejects the entire patch before writing guidance", t => {
+  const { root, target, original } = fixture(t);
+  const changed = original.replace("sdk().integration.oauth.connect", "sdk().integration.oauth.start");
+  fs.writeFileSync(target, changed);
+  assert.throws(() => patchProviderSignin(root), /Unexpected preview OAuth connection source/);
+  assert.equal(fs.readFileSync(target, "utf8"), changed);
+});
+
+test("beta builds and exercises the patched provider UI before shipping it", () => {
   const docker = fs.readFileSync(path.join(__dirname, "../Dockerfile"), "utf8");
-  assert.match(docker, /ARG OPENCHAMBER_REVISION=c4919abc1e7a0a3beeaa126666487806bf79cfe0/);
+  assert.match(docker, /ARG OPENCHAMBER_REVISION=1a151518c95cc5ff3578bab593d2f96862ff3bb8/);
   const patch = docker.indexOf("RUN node /tmp/patch-provider-signin.cjs /opt/openchamber-preview");
   assert.ok(patch > docker.indexOf("git checkout --detach FETCH_HEAD"));
   assert.ok(patch < docker.indexOf("bun run --cwd packages/ui type-check"));

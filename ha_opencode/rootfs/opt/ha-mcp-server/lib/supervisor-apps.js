@@ -22,6 +22,12 @@ function appPath(version, operation, slug) {
   switch (operation) {
     case "info":
       return `${prefix}/${collection}/${encodedSlug}/info`;
+    case "options":
+    case "options/validate":
+    case "start":
+    case "stop":
+    case "restart":
+      return `${prefix}/${collection}/${encodedSlug}/${operation}`;
     case "changelog":
       return `${prefix}/store/${collection}/${encodedSlug}/changelog`;
     case "update":
@@ -121,6 +127,19 @@ export function createSupervisorAppsClient({
 
     info(slug) {
       return requestFor("info", slug);
+    },
+
+    validateOptions(slug, options) {
+      return requestFor("options/validate", slug, "POST", options);
+    },
+
+    setOptions(slug, options) {
+      return requestFor("options", slug, "POST", { options });
+    },
+
+    lifecycle(slug, action) {
+      if (!["start", "stop", "restart"].includes(action)) throw new Error("Unsupported app lifecycle operation");
+      return requestFor(action, slug, "POST");
     },
 
     changelog(slug) {

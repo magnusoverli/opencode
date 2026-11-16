@@ -11,6 +11,7 @@ const tools = [
   { name: "get_home_context" },
   { name: "get_integration_docs" },
   { name: "write_config_safe" },
+  { name: "patch_config_safe" },
   { name: "esphome_list_devices" },
   { name: "esphome_troubleshoot" },
   { name: "esphome_config_read" },
@@ -38,6 +39,11 @@ describe("MCP tool profiles", () => {
     expect(isToolAllowedInProfile("recall_decisions", "compact")).toBe(true);
     expect(isToolAllowedInProfile("remember_decision", "compact")).toBe(false);
     expect(isToolAllowedInProfile("supersede_decision", "compact")).toBe(false);
+    for (const profile of ["compact", "configuration", "full"]) {
+      expect(isToolAllowedInProfile("supervisor_app_inspect", profile)).toBe(true);
+      expect(isToolAllowedInProfile("supervisor_app_preview", profile)).toBe(true);
+      expect(isToolAllowedInProfile("supervisor_app_apply", profile)).toBe(profile === "full");
+    }
   });
 
   it("adds safe configuration tools without administrative capabilities", () => {
@@ -45,6 +51,7 @@ describe("MCP tool profiles", () => {
       "get_home_context",
       "get_integration_docs",
       "write_config_safe",
+      "patch_config_safe",
       "esphome_list_devices",
       "esphome_troubleshoot",
       "esphome_config_read",

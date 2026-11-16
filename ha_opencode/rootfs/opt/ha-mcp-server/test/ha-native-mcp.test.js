@@ -382,6 +382,23 @@ describe("native MCP endpoint negotiation", () => {
 
     expect(response).toBeNull();
   });
+
+  it("keeps HA read-only filtering on the configured endpoint without retrying a keyed API", async () => {
+    const denied = { jsonrpc: "2.0", id: 2, error: { code: -32602, message: "Unknown tool" } };
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const message = JSON.parse(options.body);
+      return jsonResponse(message.method === "tools/list"
+        ? { jsonrpc: "2.0", id: 1, result: { tools: [{ name: "Read", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } }] } }
+        : denied);
+    });
+    const forwarder = createNativeMcpForwarder({ fetchImpl, supervisorToken: "fixture",
+      apiId: "homeassistant", endpointMode: "configured" });
+    const list = await forwarder.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    expect(list.result.tools.map(tool => tool.name)).toEqual(["Read"]);
+    expect(await forwarder.send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "Write", arguments: {} } })).toEqual(denied);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.every(([url]) => url === "http://supervisor/core/api/mcp")).toBe(true);
+  });
 });
 
 describe("JSON-RPC message validation", () => {

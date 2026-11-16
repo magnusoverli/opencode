@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 
@@ -65,11 +66,35 @@ def qualify(binary, version):
                 DELETE FROM migration WHERE id = '20260805200742_import_legacy_credentials';
             """)
             expected = {}
+            # Combine the placement failures (#211/#217) with compacted history
+            # (#195). Nonexistent historical workspaces must not inherit the
+            # converter's temporary filesystem placement.
+            existing = root / "existing-workspace"
+            existing.mkdir()
+            repository = root / "existing-repository"
+            repository.mkdir()
+            subprocess.run(["git", "init", "-q", str(repository)], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(repository), "-c", "user.name=Migration Fixture",
+                 "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                 "commit", "--allow-empty", "-qm", "Synthetic migration fixture"],
+                check=True, capture_output=True,
+            )
+            placements = [
+                ("global", "/homeassistant", "/historical/homeassistant"),
+                ("fixture-project", "/historical/project", "/historical/project/subdir"),
+                ("global", str(existing), None),
+                ("missing-project", str(repository), "/historical/orphan/session"),
+            ]
+            connection.execute(
+                "INSERT OR IGNORE INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES (?,?,?,?,?)",
+                ("fixture-project", "/historical/project", 1, 1, "[]"),
+            )
             for index, (auto, retained) in enumerate(((True, True), (True, False), (False, True), (False, False))):
                 session = f"ses_compaction_{index}"
                 connection.execute(
-                    "INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES (?,?,?,?,?,?,?,?)",
-                    (session, "global", session, "/homeassistant", "Compaction fixture", "1", 1, 5),
+                    "INSERT INTO session (id, project_id, slug, directory, path, title, version, time_created, time_updated) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (session, placements[index][0], session, *placements[index][1:], "Compaction fixture", "1", 1, 5),
                 )
                 ids = [f"msg_{index * 10 + offset:012d}aaaaaaaaaaaaaa" for offset in range(1, 5)]
                 user, assistant, compact, summary = ids
@@ -108,6 +133,22 @@ def qualify(binary, version):
 
         before = fingerprint(source_database)
         destination = root / "migration"
+        # Reproduce the pre-fix validator failure using the same real converter,
+        # then retry the failed generation with placement preservation enabled.
+        restore = MIGRATOR.restore_v1_session_placement
+        MIGRATOR.restore_v1_session_placement = lambda *_: None
+        try:
+            try:
+                MIGRATOR.prepare(args(destination))
+            except MIGRATOR.MigrationError as error:
+                assert error.code == "session_projection_mismatch", error.code
+                assert set(error.fields) & {"project_id", "path"}, error.fields
+            else:
+                raise AssertionError("fixture did not reproduce the pre-fix placement failure")
+        finally:
+            MIGRATOR.restore_v1_session_placement = restore
+        assert not (destination / "current").exists()
+        assert fingerprint(source_database) == before
         result = MIGRATOR.prepare(args(destination))
         assert result["status"] == "activated"
         assert result["target"]["session_count"] == 4
@@ -117,6 +158,30 @@ def qualify(binary, version):
         target_database = destination / "generations" / result["generation"] / "data/opencode/opencode.db"
         target = sqlite3.connect(target_database)
         try:
+            expected_placements = [
+                ("ses_compaction_0", MIGRATOR.MANAGED_PROJECT_ID, MIGRATOR.MANAGED_WORKSPACE, placements[0][2]),
+                ("ses_compaction_1", *placements[1]),
+                ("ses_compaction_2", *placements[2]),
+                ("ses_compaction_3", "global", *placements[3][1:]),
+            ]
+            assert target.execute(
+                "SELECT id,project_id,directory,path FROM session_v2 ORDER BY id"
+            ).fetchall() == expected_placements
+            # The validation must still reject placement corruption after the
+            # repair, rather than ignoring the fields that blocked reporters.
+            for field in ("project_id", "path"):
+                original = target.execute(f"SELECT {field} FROM session_v2 WHERE id='ses_compaction_1'").fetchone()[0]
+                target.execute(f"UPDATE session_v2 SET {field}=? WHERE id='ses_compaction_1'", ("corrupted",))
+                target.commit()
+                try:
+                    MIGRATOR.validate_session_projection(source_database, target_database)
+                except MIGRATOR.MigrationError as error:
+                    assert error.code == "session_projection_mismatch", error.code
+                    assert field in error.fields, error.fields
+                else:
+                    raise AssertionError(f"corrupted {field} was accepted")
+                target.execute(f"UPDATE session_v2 SET {field}=? WHERE id='ses_compaction_1'", (original,))
+                target.commit()
             actual = {
                 message: json.loads(raw)
                 for message, raw in target.execute("SELECT id,data FROM session_message WHERE type='compaction'")

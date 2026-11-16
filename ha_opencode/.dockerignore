@@ -17,6 +17,7 @@ rootfs/opt/*/README.md
 !test/v2-boundary-fixture.sh
 !test/hab-cli-fixture.mjs
 !test/v2-openchamber-browser.mjs
+!test/ttyd-reconnect-browser.mjs
 !test/v2-caller-secret-plugin.js
 !test/v2-caller-secret-native.py
 !test/v2-provider-startup-fixture.mjs

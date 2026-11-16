@@ -37,11 +37,31 @@ static void join_path(char output[PATH_MAX], const char *root,
   }
 }
 
+static void diagnostic_path(const char *path) {
+  char bounded[161];
+  size_t length = strnlen(path, sizeof(bounded) - 1);
+  for (size_t i = 0; i < length; i++) {
+    unsigned char c = (unsigned char)path[i];
+    bounded[i] = ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                  (c >= '0' && c <= '9') || c == '/' || c == '.' || c == '_' || c == '-') ? (char)c : '_';
+  }
+  bounded[length] = '\0';
+  dprintf(STDERR_FILENO, "opencode-v2-tui-launch: path=%s ", bounded);
+}
+
 static void require_file(const char *path, uid_t uid, mode_t mode) {
   struct stat info;
-  if (lstat(path, &info) != 0 || !S_ISREG(info.st_mode) ||
+  if (lstat(path, &info) != 0) {
+    int error = errno;
+    diagnostic_path(path);
+    dprintf(STDERR_FILENO, "errno=%d\n", error);
+    fail("required runtime file is missing or inaccessible; inspect startup diagnostics");
+  }
+  if (!S_ISREG(info.st_mode) ||
       info.st_uid != uid || info.st_nlink != 1 ||
       (info.st_mode & 07777) != mode) {
+    diagnostic_path(path);
+    dprintf(STDERR_FILENO, "uid=%u mode=%04o expected_uid=%u expected_mode=%04o\n", info.st_uid, info.st_mode & 07777, uid, mode);
     fail("required runtime file has an unsafe identity");
   }
 }
@@ -49,9 +69,17 @@ static void require_file(const char *path, uid_t uid, mode_t mode) {
 static void require_directory(const char *path, uid_t uid, gid_t gid,
                               mode_t mode) {
   struct stat info;
-  if (lstat(path, &info) != 0 || !S_ISDIR(info.st_mode) ||
+  if (lstat(path, &info) != 0) {
+    int error = errno;
+    diagnostic_path(path);
+    dprintf(STDERR_FILENO, "errno=%d\n", error);
+    fail("required runtime directory is missing or inaccessible");
+  }
+  if (!S_ISDIR(info.st_mode) ||
       info.st_uid != uid || info.st_gid != gid ||
       (info.st_mode & 07777) != mode) {
+    diagnostic_path(path);
+    dprintf(STDERR_FILENO, "uid=%u gid=%u mode=%04o expected_uid=%u expected_gid=%u expected_mode=%04o\n", info.st_uid, info.st_gid, info.st_mode & 07777, uid, gid, mode);
     fail("required runtime directory has an unsafe identity");
   }
 }

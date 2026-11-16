@@ -23,6 +23,9 @@ export const NATIVE_MCP_PROTOCOL_VERSION = "2025-11-25";
  * integration — the setting is a multi-select and Core passes the whole list
  * through — so falling back to it can widen the tool surface rather than narrow
  * it, and pinning `configured` is the way to ask for all of them on purpose.
+ * HA 2026.11's read-only MCP Server setting also applies only to `configured`;
+ * keyed endpoints ignore that setting. Never change endpoint mode to recover
+ * a tool rejected by the configured endpoint.
  */
 export const NATIVE_MCP_ENDPOINT_MODES = ["auto", "keyed", "configured"];
 export const DEFAULT_NATIVE_MCP_ENDPOINT_MODE = "auto";

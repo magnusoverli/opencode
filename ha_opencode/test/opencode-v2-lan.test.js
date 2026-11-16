@@ -81,6 +81,75 @@ test("API frontend authenticates separately and forwards bodies without credenti
   assert.ok(!res.text.includes(password) && !res.text.includes(backendPassword));
 });
 
+test("LAN pairing terminates device auth locally, revokes independently and never forwards tokens", async t => {
+  const { port, calls } = await fixture(t);
+  const issue = async () => JSON.parse((await request(port, { path: "/api/pair", method: "POST" })).text).code;
+  const code = await issue();
+  const redeemed = await request(port, { path: `/auth/connect/${code}`, headers: { authorization: "" } });
+  assert.equal(redeemed.status, 200);
+  const token = JSON.parse(redeemed.text).token;
+  const deviceAuthorization = `Basic ${Buffer.from(`opencode:${token}`).toString("base64")}`;
+  assert.equal((await request(port, { path: `/auth/connect/${code}`, headers: { authorization: "" } })).status, 401);
+  assert.equal(calls.length, 0);
+  const authenticated = await request(port, { headers: { authorization: deviceAuthorization } });
+  assert.equal(authenticated.status, 200);
+  assert.equal(JSON.parse(authenticated.text).authenticated, true);
+  assert.ok(!calls[0].headers.authorization.includes(token));
+  assert.equal((await request(port, { path: "/api/pair", method: "POST", headers: { authorization: deviceAuthorization } })).status, 403);
+  assert.equal((await request(port, { path: "/api/lan/devices", headers: { authorization: deviceAuthorization } })).status, 403);
+  const devices = JSON.parse((await request(port, { path: "/api/lan/devices" })).text).devices;
+  assert.equal(devices.length, 1);
+  assert.ok(!JSON.stringify(devices).includes(token));
+  const other = JSON.parse((await request(port, { path: `/auth/connect/${await issue()}`, headers: { authorization: "" } })).text).token;
+  assert.equal((await request(port, { path: `/api/lan/devices/${devices[0].id}`, method: "DELETE" })).status, 200);
+  assert.equal((await request(port, { headers: { authorization: deviceAuthorization } })).status, 401);
+  assert.equal((await request(port, { headers: { authorization: `Basic ${Buffer.from(`opencode:${other}`).toString("base64")}` } })).status, 200);
+});
+
+test("browser pairing uses a secure local cookie and same-origin mutation checks", async t => {
+  const { port } = await fixture(t);
+  const code = JSON.parse((await request(port, { path: "/api/pair", method: "POST" })).text).code;
+  const redemption = await request(port, { path: `/auth/connect/${code}`, headers: { authorization: "", accept: "text/html" } });
+  assert.equal(redemption.status, 303);
+  const cookie = redemption.headers["set-cookie"][0];
+  assert.match(cookie, /HttpOnly; Secure; SameSite=Lax/);
+  const headers = { authorization: "", cookie: cookie.split(";")[0] };
+  assert.equal((await request(port, { headers })).status, 200);
+  assert.equal((await request(port, { method: "POST", headers })).status, 403);
+  assert.equal((await request(port, { method: "POST", headers: { ...headers, origin } })).status, 200);
+});
+
+test("revoking a LAN device closes its active SSE and WebSocket connections", async t => {
+  const { port, upstream } = await fixture(t);
+  const code = JSON.parse((await request(port, { path: "/api/pair", method: "POST" })).text).code;
+  const token = JSON.parse((await request(port, { path: `/auth/connect/${code}`, headers: { authorization: "" } })).text).token;
+  const auth = `Basic ${Buffer.from(`opencode:${token}`).toString("base64")}`;
+  const devices = JSON.parse((await request(port, { path: "/api/lan/devices" })).text).devices;
+  const stream = await new Promise((resolve, reject) => {
+    const req = http.get({ host: "127.0.0.1", port, path: "/api/event", headers: { ...baseHeaders, authorization: auth } }, resolve);
+    req.on("error", reject);
+  });
+  stream.resume();
+  const streamClosed = new Promise(resolve => { stream.once("close", resolve); stream.on("error", () => {}); });
+  upstream.on("upgrade", (req, socket) => {
+    assert.equal(req.headers.authorization, `Basic ${Buffer.from(`opencode:${backendPassword}`).toString("base64")}`);
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+    socket.on("error", () => {}); socket.on("end", () => socket.end());
+  });
+  const socket = await new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port, path: "/api/pty/fixture/connect", headers: {
+      ...baseHeaders, authorization: auth, connection: "Upgrade", upgrade: "websocket",
+    } });
+    req.on("error", reject); req.on("upgrade", (_res, socket) => resolve(socket));
+    req.on("response", res => { res.resume(); reject(new Error("Device WebSocket was rejected")); }); req.end();
+  });
+  const socketClosed = new Promise(resolve => { socket.once("close", resolve); socket.on("error", () => {}); });
+  socket.resume();
+  assert.equal((await request(port, { path: `/api/lan/devices/${devices[0].id}`, method: "DELETE" })).status, 200);
+  await Promise.all([streamClosed, socketClosed]);
+  assert.equal((await request(port, { headers: { authorization: auth } })).status, 401);
+});
+
 test("rejects wrong LAN credentials, direct HTTP, spoofed authority/origin and internal routes before upstream", async (t) => {
   const { port, calls } = await fixture(t);
   for (const [headers, status] of [

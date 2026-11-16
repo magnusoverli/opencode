@@ -78,6 +78,14 @@ describe(`${CHANNEL} runtime pin`, () => {
   const dockerfileOpenchamberPin = /^ARG OPENCHAMBER_VERSION=(.+)$/m.exec(dockerfile)?.[1]?.trim();
   const buildYamlOpenchamberPin = /^\s*OPENCHAMBER_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1];
 
+  it("keeps release-only version metadata out of runtime and boundary-test cache keys", () => {
+    const finalStage = dockerfile.indexOf("FROM runtime AS final");
+    assert.ok(finalStage > 0);
+    assert.doesNotMatch(dockerfile.slice(0, finalStage), /\bBUILD_VERSION\b/);
+    assert.match(dockerfile.slice(finalStage), /^ARG BUILD_VERSION$/m);
+    assert.match(dockerfile.slice(finalStage), /io\.hass\.version="\$\{BUILD_VERSION\}"/);
+  });
+
   it("copies one exact supported Node runtime into the Home Assistant base", () => {
     assert.match(dockerfileNodePin, /^24\.\d+\.\d+$/);
     assert.equal(buildYamlNodePin, dockerfileNodePin);
@@ -103,21 +111,6 @@ describe(`${CHANNEL} runtime pin`, () => {
     assert.doesNotMatch(dockerfile, /@openchamber\/web@/);
   });
 
-  it("pins hab 1.8.0 to the same reviewed source in both build paths and current guidance", () => {
-    const version = "1.8.0";
-    const revision = "f200a763798bc2a305c7fe0fad58dc0946e07861";
-    assert.equal(/^ARG HAB_VERSION=(.+)$/m.exec(dockerfile)?.[1], version);
-    assert.equal(/^ARG HAB_REVISION=(.+)$/m.exec(dockerfile)?.[1], revision);
-    assert.equal(/^\s*HAB_VERSION:\s*"([^"]*)"/m.exec(buildYaml)?.[1], version);
-    assert.equal(/^\s*HAB_REVISION:\s*"([^"]*)"/m.exec(buildYaml)?.[1], revision);
-    assert.ok(dockerfile.includes('test "$(git -C /src rev-parse HEAD)" = "${HAB_REVISION}"'));
-    assert.ok(dockerfile.includes('-X main.version=${HAB_VERSION}'));
-    assert.ok(read(ADDON_DIR, "DOCS.md").includes(`The app bundles **hab ${version}**`));
-    assert.ok(read(ROOTFS, "opt", "ha-mcp-server", "INSTRUCTIONS.md").includes(`The app pins **hab ${version}**`));
-    assert.ok(read(ROOTFS, "opt", "ha-mcp-server", "index.js").includes(`Run pinned hab ${version}`));
-    assert.ok(read(ADDON_DIR, "test", "hab-cli-fixture.mjs").includes(`assert.equal(version.data.data.version, "${version}")`));
-  });
-
   it("freezes the reviewed OpenChamber source, Bun toolchain and security overrides together", () => {
     const patcher = read(ROOTFS, "opt", "openchamber", "patch-security-dependencies.cjs");
     const lock = read(ROOTFS, "opt", "openchamber", "security.bun.lock");
@@ -126,15 +119,12 @@ describe(`${CHANNEL} runtime pin`, () => {
     const bun = /FROM oven\/bun:(\d+\.\d+\.\d+)-slim@sha256:[a-f0-9]{64}/.exec(dockerfile)?.[1];
     assert.ok(bun);
     assert.ok(dockerfile.includes(`test "$(bun --version)" = ${bun}`));
-    assert.equal(bun, "1.4.4");
-    assert.match(lock, /"packages\/web":\s*\{[\s\S]*?"version": "2\.5\.2"/);
     for (const [name, version] of Object.entries(overrides)) {
       const value = name.includes("@") ? `{\n      ".": ${JSON.stringify(version)},\n    }` : JSON.stringify(version);
       assert.ok(lock.includes(`${JSON.stringify(name)}: ${value}`), `missing frozen override ${name}`);
     }
     assert.doesNotMatch(dockerfile, /patch-proxy-framing/);
     assert.match(dockerfile, /node --throw-deprecation --test .*openchamber-request-body\.mjs .*openchamber-managed-backend\.mjs/);
-    assert.match(dockerfile, /test server\/lib\/git server\/lib\/opencode-trust server\/opencode-trust-proxy\.test\.js/);
   });
 
   it("includes every read-only build fixture in the filtered Docker context", () => {

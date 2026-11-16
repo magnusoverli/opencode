@@ -21,6 +21,17 @@ function routeHaMcp(req, res, { ingressPath, upstreamPath, lan = false }) {
   const directoryPath = assist ? "/run/ha-assist" : "/run/ha-facing-mcp";
   const port = assist ? 8769 : 8767;
   const reject = (status) => {
+    if (!assist && status === 503 && req.method === "GET") {
+      res.writeHead(503, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
+        "content-security-policy": "default-src 'none'; frame-ancestors 'self'; base-uri 'none'",
+        "x-content-type-options": "nosniff" });
+      res.end('<!doctype html><html lang="en"><meta charset="utf-8"><title>Home Assistant MCP setup unavailable</title>'
+        + '<h1>Home Assistant MCP setup is not running</h1>'
+        + '<p>Check that MCP Access is enabled in the OpenCode app configuration. If the app is starting, wait for startup to finish and reload this page.</p>'
+        + '<p>If MCP Access is enabled and this persists, inspect the app logs for the HA-facing MCP service startup error. Existing pairing and conversations are not changed by this page.</p>'
+        + '<p>This setup service is separate from the Home Assistant tools available to the OpenCode agent.</p></html>');
+      return;
+    }
     if (assist && status === 503) {
       res.writeHead(503, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
         "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'", "x-content-type-options": "nosniff" });
@@ -52,8 +63,14 @@ function routeHaMcp(req, res, { ingressPath, upstreamPath, lan = false }) {
       || ((req.method === "POST" || req.headers.origin !== undefined) && req.headers.origin !== origin.origin)
       || !/^\/api\/hassio_ingress\/[A-Za-z0-9_-]+$/.test(ingressPath)
       || req.headers["x-ingress-path"] !== ingressPath
-       || !(assist ? ["/ha-assist/"] : ["/ha-mcp/", "/ha-mcp/authorize"]).includes(pathname)) {
+       || !(assist ? ["/ha-assist/"] : ["/ha-mcp", "/ha-mcp/", "/ha-mcp/authorize"]).includes(pathname)) {
     reject(403); return true;
+  }
+  if (pathname === "/ha-mcp") {
+    if (req.method !== "GET") { reject(403); return true; }
+    res.writeHead(302, { location: ingressPath + "/ha-mcp/", "cache-control": "no-store" });
+    res.end();
+    return true;
   }
   let secret;
   let fd;

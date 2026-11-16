@@ -14,6 +14,9 @@ let registrations = 0;
 let routes: any[] = [];
 let settingsWrites: any[] = [];
 let saveSettings: (changes: any) => Promise<{ ok: boolean }>;
+let resolveSession: (id: string) => Promise<{ directory: string }>;
+let search = '';
+Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { get search() { return search; } } } });
 const directory = { currentDirectory: '/missing', homeDirectory: '/homeassistant', setDirectory: (path: string) => { directory.currentDirectory = path; } };
 const projects = {
   projects: [{ id: 'ha', path: '/homeassistant' }],
@@ -21,6 +24,7 @@ const projects = {
   setActiveProject: () => {},
 };
 const sessions = { currentSessionId: null as string | null, currentSessionDirectory: null as string | null,
+  setCurrentSession: (id: string, path: string) => { sessions.currentSessionId = id; sessions.currentSessionDirectory = path; },
   openNewSessionDraft: (options: any) => { drafts.push(options); sessions.currentSessionId = null; sessions.currentSessionDirectory = null; } };
 const store = (state: any) => Object.assign((select: (state: any) => any) => select(state), { getState: () => state });
 const React = {
@@ -50,6 +54,7 @@ mock.module('@/stores/useDirectoryStore', () => ({ useDirectoryStore: store(dire
 mock.module('@/stores/useProjectsStore', () => ({ useProjectsStore: store(projects) }));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: store({ isSettingsDialogOpen: false, settingsPage: 'settings' }) }));
 mock.module('@/sync/session-ui-store', () => ({ useSessionUIStore: store(sessions) }));
+mock.module('@/lib/opencode/client', () => ({ opencodeClient: { getSessionUnscoped: (id: string) => resolveSession(id) } }));
 const { WorkspaceRecoveryGate } = await import('@/components/auth/WorkspaceRecoveryGate');
 
 const render = () => {
@@ -68,12 +73,34 @@ const choose = (tree: Node) => nodes(tree).find(node => node.type === 'button' &
 function reset() {
   values = []; effects = []; pending = []; drafts = []; registrations = 0; routes = []; settingsWrites = [];
   saveSettings = async () => ({ ok: true });
+  search = ''; resolveSession = async () => ({ directory: '/missing' });
   runtime = 'local'; directory.currentDirectory = '/missing';
   sessions.currentSessionId = null; sessions.currentSessionDirectory = null;
   response = async path => path === '/api/location' ? Response.json({ directory: '/homeassistant' }) :
     directory.currentDirectory === '/missing' ? Response.json({ reason: 'not-found' }, { status: 404 }) : Response.json({ isDirectory: true });
 }
 afterEach(() => { for (const effect of effects) effect?.cleanup?.(); });
+
+test('cold historical URL resolves its own workspace instead of the browsing draft', async () => {
+  reset(); search = '?session=historical'; directory.currentDirectory = '/homeassistant';
+  response = async () => Response.json({ reason: 'not-found' }, { status: 404 });
+  render(); await settle();
+  const tree = await settle();
+  expect(sessions.currentSessionId).toBe(null);
+  expect(sessions.currentSessionDirectory).toBe(null);
+  expect(tree.props['data-testid']).toBe('workspace-recovery');
+  expect(registrations).toBe(0);
+});
+
+test('late historical URL lookup cannot override user navigation', async () => {
+  reset(); search = '?session=historical';
+  let finish!: (record: { directory: string }) => void;
+  resolveSession = () => new Promise(resolve => { finish = resolve; });
+  render(); search = ''; sessions.setCurrentSession('other', '/homeassistant');
+  finish({ directory: '/missing' }); await settle();
+  expect(sessions.currentSessionId).toBe('other');
+  expect(sessions.currentSessionDirectory).toBe('/homeassistant');
+});
 
 test('confirmed missing selection blocks app; unknown transport failure does not', async () => {
   reset(); render();

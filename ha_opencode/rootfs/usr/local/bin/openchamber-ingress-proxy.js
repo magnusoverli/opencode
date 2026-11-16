@@ -5,6 +5,7 @@ const zlib = require("zlib");
 const { randomBytes } = require("crypto");
 const { routeHaMcp } = require("./ha-mcp-ingress.js");
 const { validEditorIngressOrigin } = require("./editor-ingress-origin.js");
+const { installBrowserStorageScope } = require("./openchamber-browser-storage.js");
 const TERMINAL = process.env.HA_INGRESS_UI === "terminal";
 
 const LISTEN_HOST = process.env.OPENCHAMBER_INGRESS_HOST || "0.0.0.0";
@@ -135,8 +136,10 @@ function serviceWorkerResetScript() {
 
 function ingressRuntimeScript(ingressPath) {
   const basePath = ingressPath || "";
+  const storageNamespace = process.env.ADDON_CHANNEL === "beta" ? "ha-opencode-beta" : "ha-opencode-stable";
 
   return `(() => {\n`
+    + `  (${installBrowserStorageScope.toString()})(window, ${JSON.stringify(storageNamespace)});\n`
     + `  const configuredBasePath = ${JSON.stringify(basePath)};\n`
     + `  const match = window.location.pathname.match(/^(\\/api\\/hassio_ingress\\/[^/]+)/);\n`
     + `  const basePath = configuredBasePath || (match ? match[1] : "");\n`
@@ -483,7 +486,7 @@ function armV2OauthBridge(decoded, req, ingressPath) {
   // privileged ports, userinfo, or alternate callback resources are accepted.
   const port = Number(redirect.port);
   if (authorizeUrl.origin !== "https://auth.openai.com" || authorizeUrl.username || authorizeUrl.password
-      || authorizeUrl.pathname !== "/oauth/authorize" || authorizeUrl.searchParams.getAll("redirect_uri").length !== 1
+      || !["/oauth/authorize", "/api/accounts/authorize"].includes(authorizeUrl.pathname) || authorizeUrl.searchParams.getAll("redirect_uri").length !== 1
       || redirect.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(redirect.hostname)
       || !Number.isInteger(port) || port < 1024 || port > 65535 || redirect.username || redirect.password
       || redirect.pathname !== "/auth/callback" || redirect.search || redirect.hash) return null;

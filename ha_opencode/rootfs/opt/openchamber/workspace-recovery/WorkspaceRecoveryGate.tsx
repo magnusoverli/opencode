@@ -9,6 +9,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { opencodeClient } from '@/lib/opencode/client';
 
 const read: WorkspaceRead = (path, query, signal) => runtimeFetch(path, { query, signal });
 
@@ -20,10 +21,15 @@ export function WorkspaceRecoveryGate({ children }: { children: React.ReactNode 
   const sessionDirectory = useSessionUIStore(state => state.currentSessionDirectory);
   // Mobile/settings hydration can restore the project pointer independently of
   // the selected conversation. Check its real scope, not just the browsing path.
-  const directory = sessionId && sessionDirectory ? sessionDirectory : workspaceDirectory;
   const home = useDirectoryStore(state => state.homeDirectory);
   const projects = useProjectsStore(state => state.projects);
   const [runtime, setRuntime] = React.useState(getRuntimeKey);
+  const [linkedSession, setLinkedSession] = React.useState<{ id: string; directory: string; runtime: string } | null>(null);
+  const linkedDirectory = linkedSession?.runtime === runtime &&
+    (!sessionId || sessionId === linkedSession.id) &&
+    new URLSearchParams(window.location.search).get('session') === linkedSession.id
+    ? linkedSession.directory : null;
+  const directory = sessionId && sessionDirectory ? sessionDirectory : linkedDirectory ?? workspaceDirectory;
   const [check, setCheck] = React.useState<{ directory: string; runtime: string; missing: boolean } | null>(null);
   const [attempt, setAttempt] = React.useState(0);
   const [target, setTarget] = React.useState('/homeassistant');
@@ -31,6 +37,25 @@ export function WorkspaceRecoveryGate({ children }: { children: React.ReactNode 
   const [error, setError] = React.useState('');
   const [failedSelection, setFailedSelection] = React.useState<{ directory: string; runtime: string; sessionId: string | null } | null>(null);
   React.useEffect(() => subscribeRuntimeEndpointChanged(() => setRuntime(getRuntimeKey())), []);
+  React.useEffect(() => {
+    // Mobile cold boot can open a draft before the global session list resolves
+    // a historical URL. Resolve that exact record, never guess its directory
+    // from the current browsing project or alter the stored session.
+    const requested = new URLSearchParams(window.location.search).get('session');
+    if (!requested || (sessionId && sessionId !== requested) ||
+      (sessionId === requested && sessionDirectory)) return;
+    let active = true;
+    void opencodeClient.getSessionUnscoped(requested).then(record => {
+      const selection = useSessionUIStore.getState();
+      if (!active || getRuntimeKey() !== runtime ||
+        new URLSearchParams(window.location.search).get('session') !== requested ||
+        (selection.currentSessionId && selection.currentSessionId !== requested)) return;
+      // Upstream selection rejects a missing folder and returns to a draft.
+      // Keep read-only route evidence independently so recovery can still show.
+      if (record.directory) setLinkedSession({ id: requested, directory: record.directory, runtime });
+    }).catch(() => { /* Missing records and transport errors are not missing-folder evidence. */ });
+    return () => { active = false; };
+  }, [sessionId, sessionDirectory, runtime]);
   React.useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -57,10 +82,11 @@ export function WorkspaceRecoveryGate({ children }: { children: React.ReactNode 
     setError('');
     const sameSelection = () => getRuntimeKey() === runtime &&
       useSessionUIStore.getState().currentSessionId === sessionId &&
-      useSessionUIStore.getState().currentSessionDirectory === sessionDirectory;
+      useSessionUIStore.getState().currentSessionDirectory === sessionDirectory &&
+      (!linkedDirectory || new URLSearchParams(window.location.search).get('session') === linkedSession?.id);
     // A selected conversation owns its workspace. Settings hydration can move
     // the independent browsing directory without changing that selection.
-    const hasSessionWorkspace = Boolean(sessionId && sessionDirectory);
+    const hasSessionWorkspace = Boolean((sessionId && sessionDirectory) || linkedDirectory);
     const current = () => sameSelection() && (hasSessionWorkspace ||
       useDirectoryStore.getState().currentDirectory === workspaceDirectory);
     const selectionCurrent = () => sameSelection() && (hasSessionWorkspace ||

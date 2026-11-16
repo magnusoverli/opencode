@@ -24,6 +24,8 @@ const COMPACT_TOOL_NAMES = [
   "get_support_logs",
   "get_store_audit",
   "get_supervisor_metrics",
+  "supervisor_app_inspect",
+  "supervisor_app_preview",
   "render_template",
   "get_calendars",
   "get_calendar_events",
@@ -42,6 +44,7 @@ const CONFIGURATION_TOOL_NAMES = [
   "check_config_syntax",
   "validate_config",
   "write_config_safe",
+  "patch_config_safe",
   "esphome_config_read",
   "esphome_config_validate",
   "esphome_config_migrate",
@@ -59,7 +62,7 @@ export const TOOL_PROFILES = Object.freeze({
   compact: Object.freeze({
     name: "compact",
     title: "Compact diagnostics",
-    description: "Read-only state, history, diagnostics, and focused home context.",
+    description: "State, history, diagnostics, focused home context, and non-applying Supervisor previews.",
     toolNames: new Set(COMPACT_TOOL_NAMES),
   }),
   configuration: Object.freeze({

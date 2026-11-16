@@ -53,6 +53,49 @@ function fixture() {
 }
 
 describe("bounded external MCP configuration", () => {
+  for (const reference of [secret("metrics-token"), "{file:metrics-token}"]) {
+    it(`keeps ${reference} out of upstream config substitution (#216)`, async () => {
+      const value = fixture();
+      value.servers.metrics.environment.METRICS_API_TOKEN = reference;
+      const external = prepareExternalMcpConfig({ external_mcp_config: JSON.stringify(value) });
+      const managed = applyExternalMcpConfig(buildManagedConfig({ pluginEnabled: true }), external);
+      const serialized = JSON.stringify(managed);
+      assert.ok(!serialized.includes("{file:"), "upstream must not resolve plugin-owned files");
+      const options = JSON.parse(serialized).plugins.find(({ package: name }) => name === DEFAULT_PLUGIN_PACKAGE).options;
+      const reads = [];
+      const resolved = await resolveExternalServers(options.externalServers, {
+        readSecret: async (name) => { reads.push(name); return "fixture-value"; },
+      });
+      assert.deepEqual(reads.sort(), ["infrastructure-auth", "metrics-token"]);
+      assert.equal(resolved.metrics.environment.METRICS_API_TOKEN, "fixture-value");
+      assert.equal(resolved.metrics.environment.METRICS_URL, "http://metrics.local");
+    });
+  }
+
+  it("retains bundled/native registration when external validation fails (#216)", async () => {
+    const registered = new Map();
+    const messages = [];
+    const originalError = console.error;
+    console.error = (...items) => messages.push(items.join(" "));
+    try {
+      const value = fixture().servers;
+      value.metrics.environment.METRICS_API_TOKEN = "expanded-sensitive-fixture";
+      const dispose = await createSetup({
+        readSecret: async () => "a".repeat(64),
+        resolveExternal: async () => { assert.fail("invalid input must not reach the resolver"); },
+      })({
+        options: { endpoint: "http://127.0.0.1:8765/mcp", nativeEnabled: true, externalServers: value },
+        mcp: { async transform(callback) { callback(registered); return { async dispose() {} }; } },
+      });
+      assert.deepEqual([...registered.keys()], ["homeassistant", "homeassistant_native"]);
+      assert.equal(messages.length, 1);
+      assert.doesNotMatch(messages[0], /expanded-sensitive-fixture/);
+      await dispose();
+    } finally {
+      console.error = originalError;
+    }
+  });
+
   it("validates servers and translates ordered permissions with fail-safe defaults", () => {
     const prepared = prepareExternalMcpConfig({ external_mcp_config: JSON.stringify(fixture()) });
     assert.deepEqual(Object.keys(prepared.servers), ["infrastructure", "metrics"]);

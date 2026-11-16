@@ -8,8 +8,8 @@ function patchWorkspaceRecovery(root) {
       '            <App apis={runtimeAPIs} />',
       '            <WorkspaceRecoveryGate><App apis={runtimeAPIs} /></WorkspaceRecoveryGate>'],
     ['packages/ui/src/apps/renderMobileApp.tsx',
-      '  const app = <MobileApp apis={resolvedApis} />;',
-      '  const app = isNativeShell ? <MobileApp apis={resolvedApis} /> : <WorkspaceRecoveryGate><MobileApp apis={resolvedApis} /></WorkspaceRecoveryGate>;'],
+      '  const app = <FireworksProvider><MobileApp apis={resolvedApis} /></FireworksProvider>;',
+      '  const mobileApp = <FireworksProvider><MobileApp apis={resolvedApis} /></FireworksProvider>;\n  const app = isNativeShell ? mobileApp : <WorkspaceRecoveryGate>{mobileApp}</WorkspaceRecoveryGate>;'],
   ];
   const files = new Map();
   for (const [file, before, after] of edits) {

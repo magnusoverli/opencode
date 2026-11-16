@@ -1,5 +1,6 @@
 import { Plugin } from "@opencode/plugin";
 import { resolveExternalServers, validateExternalServers } from "./external-mcp.js";
+import { registerAgentCapabilityContext } from "./agent-capability-context.js";
 
 export const PLUGIN_ID = "homeassistant.mcp";
 export const MCP_SERVER_NAME = "homeassistant";
@@ -196,7 +197,9 @@ async function disposeRegistrations(registrations) {
 export function createSetup({ readSecret = readCallerSecret, resolveExternal = resolveExternalServers } = {}) {
   return async function setup(ctx) {
     const input = requireObject(ctx.options);
-    const options = parseOptions(input);
+    // External validation belongs inside its isolation boundary, not on the
+    // bundled/native MCP activation path.
+    const options = parseOptions({ ...input, externalServers: undefined });
     const registrations = [];
     let managedFailed = false;
     if (options.bundledEnabled || options.nativeEnabled) {
@@ -214,9 +217,9 @@ export function createSetup({ readSecret = readCallerSecret, resolveExternal = r
       }
     }
 
-    if (options.externalServers !== undefined) {
+    if (input.externalServers !== undefined) {
       try {
-        const resolved = await resolveExternal(options.externalServers);
+        const resolved = await resolveExternal(validateExternalServers(input.externalServers));
         if (Object.keys(resolved).length > 0) {
           registrations.push(await ctx.mcp.transform((draft) => {
             for (const [name, externalServer] of Object.entries(resolved)) draft.set(name, externalServer);
@@ -228,11 +231,21 @@ export function createSetup({ readSecret = readCallerSecret, resolveExternal = r
     }
 
     if (managedFailed) {
-      const message = "Home Assistant MCP registration failed; check the sidecar status and restart the app";
+      const message = "Home Assistant MCP registration failed; check the sidecar status and restart the beta app";
       // A broken HA boundary must not prevent unrelated external MCPs from
       // loading. Never attach the credential-bearing underlying exception.
       if (registrations.length === 0) throw new Error(message);
       console.error(message);
+    }
+
+    if (options.bundledEnabled && !managedFailed) {
+      try {
+        const registration = await registerAgentCapabilityContext(ctx);
+        if (registration) registrations.push(registration);
+      } catch {
+        // Keep server-only reporting explicit when a host cannot supply context.
+        console.error("Agent-specific capability context is unavailable; reporting the MCP server catalogue only");
+      }
     }
 
     return async () => {

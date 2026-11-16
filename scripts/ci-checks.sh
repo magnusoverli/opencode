@@ -38,11 +38,9 @@ npm install --prefix "$HA_EDITOR_TEST_DEPS" --ignore-scripts --no-audit --no-fun
 cp "$addon/rootfs/opt/openchamber/editor-lsp/"editor* "$HA_EDITOR_TEST_DEPS/"
 "$HA_EDITOR_TEST_DEPS/node_modules/.bin/tsc" --noEmit --strict --module esnext \
   --moduleResolution bundler --target ES2022 --lib ES2022,DOM "$HA_EDITOR_TEST_DEPS/editor.ts"
-# Beta contracts start real Chromium and OpenCode processes. Bound file-level
+# Both channels start real Chromium and OpenCode processes. Bound file-level
 # parallelism so cold browsers do not compete with every native fixture at once.
-test_options=()
-if [ "$channel" = beta ]; then test_options+=(--test-concurrency=2); fi
-node --test "${test_options[@]}" "$addon/test/"*.test.js
+node --test --test-concurrency=2 "$addon/test/"*.test.js
 if [ "$channel" = stable ]; then
   HA_DEPENDENCY_TEST_ADDON=ha_opencode node --test ha_opencode_beta/test/opencode-v2-dependency-security.test.js
 fi

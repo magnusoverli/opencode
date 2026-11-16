@@ -18,7 +18,7 @@ function patchUsageModel(root) {
   // API. Its upstream reader replaces our database/legacy-auth compatibility
   // patch; the image contract verifies refresh, disconnect and failed reads.
   const quota = "packages/web/server/lib/quota/providers/codex.js";
-  edit(quota, "Session expired \\u2014 please re-authenticate with OpenAI",
+  edit(quota, "Session expired — please re-authenticate with OpenAI",
     "OpenAI usage authorization expired. Send a message to refresh your OpenCode sign-in, then refresh Usage. Reconnect OpenAI if chat also fails.");
 
   const config = "packages/ui/src/stores/useConfigStore.ts";

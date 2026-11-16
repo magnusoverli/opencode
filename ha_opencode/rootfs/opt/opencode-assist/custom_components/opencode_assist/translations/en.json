@@ -15,8 +15,8 @@
       "entry_type": "Conversation agent",
       "initiate_flow": {"user": "Add conversation agent", "reconfigure": "Reconfigure conversation agent"},
       "step": {
-        "user": {"title": "Add a conversation agent", "description": "Select only the Home Assistant APIs this agent needs. No APIs are selected by default. Assist respects HA exposure and caller context.", "data": {"model": "Model", "llm_hass_api": "Home Assistant APIs", "prompt": "Instructions"}},
-        "reconfigure": {"title": "Configure conversation agent", "data": {"model": "Model", "llm_hass_api": "Home Assistant APIs", "prompt": "Instructions"}}
+        "user": {"title": "Add a conversation agent", "description": "Select only the AI tools this agent needs. None are selected by default. Device control (Assist) respects exposed entities. On HA 2026.11+, Home Assistant tools require an administrator and are not limited to exposed entities.", "data": {"model": "Model", "llm_hass_api": "AI tools", "prompt": "Instructions"}},
+        "reconfigure": {"title": "Configure conversation agent", "description": "Device control (Assist) respects exposed entities. Home Assistant tools require an administrator and are not limited to exposed entities.", "data": {"model": "Model", "llm_hass_api": "AI tools", "prompt": "Instructions"}}
       },
       "error": {"unsupported_model": "Choose a model with tool support when selecting APIs.", "unknown_api": "A selected API is no longer registered."},
       "abort": {"already_configured": "A conversation agent is already set up for this app connection. Use its Configure button to change its model, instructions or Home Assistant APIs. You can also add one AI data task.", "entry_not_loaded": "Load the app connection first.", "invalid_auth": "Renew the pairing key.", "cannot_connect": "Cannot connect to the app."}

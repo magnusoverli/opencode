@@ -17,7 +17,7 @@ function fixture(t) {
   fs.mkdirSync(path.join(root, 'packages/ui/src/components/auth'), { recursive: true });
   fs.mkdirSync(path.join(root, 'packages/ui/src/lib'), { recursive: true });
   fs.writeFileSync(desktop, 'import App from "./App";\n            <App apis={runtimeAPIs} />\n');
-  fs.writeFileSync(mobile, 'import { MobileApp } from "./MobileApp";\n  const app = <MobileApp apis={resolvedApis} />;\n');
+  fs.writeFileSync(mobile, 'import { MobileApp } from "./MobileApp";\n  const app = <FireworksProvider><MobileApp apis={resolvedApis} /></FireworksProvider>;\n');
   return { root, desktop, mobile };
 }
 
@@ -25,7 +25,9 @@ test('installs the recovery gate on desktop and mobile browser, not native conne
   const { root, desktop, mobile } = fixture(t);
   patchWorkspaceRecovery(root);
   assert.match(fs.readFileSync(desktop, 'utf8'), /<WorkspaceRecoveryGate><App/);
-  assert.match(fs.readFileSync(mobile, 'utf8'), /isNativeShell \? <MobileApp.*: <WorkspaceRecoveryGate>/);
+  const updated = fs.readFileSync(mobile, 'utf8');
+  assert.match(updated, /<FireworksProvider><MobileApp apis=\{resolvedApis\} \/><\/FireworksProvider>/);
+  assert.match(updated, /isNativeShell \? mobileApp : <WorkspaceRecoveryGate>\{mobileApp\}/);
   assert.throws(() => patchWorkspaceRecovery(root), /Unexpected workspace recovery source/);
 });
 
