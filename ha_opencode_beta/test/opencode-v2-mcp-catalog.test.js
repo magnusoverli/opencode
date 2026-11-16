@@ -16,10 +16,12 @@ test("full MCP catalog including hab_run reaches the pinned model tool list (#21
   const root = await mkdtemp(join(tmpdir(), "mcp-catalog-"));
   let backend;
   let requestBody;
+  const requestSummaries = [];
   const provider = createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks));
+    requestSummaries.push({ model: body.model, toolCount: body.tools?.length ?? 0 });
     // Background title generation can issue a separate tool-free request.
     if (body.tools?.some(tool => tool.function?.name?.startsWith("homeassistant_"))) requestBody = body;
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -67,11 +69,21 @@ test("full MCP catalog including hab_run reaches the pinned model tool list (#21
       catch { await sleep(50); }
     }
     assert.ok(ready, "isolated backend must start");
+    const location = { directory: join(root, "project") };
+    let connected = false;
+    for (let i = 0; i < 100; i++) {
+      const { data } = await client.mcp.list({ location });
+      if (data.some(server => server.name === "homeassistant" && server.status.status === "connected")) {
+        connected = true; break;
+      }
+      await sleep(100);
+    }
+    assert.ok(connected, "full-profile MCP must connect before the model request");
     await client.credential.create({ integrationID: "fixture", value: { type: "key", key: "synthetic-provider" } });
-    const session = await client.session.create({ location: { directory: join(root, "project") } });
+    const session = await client.session.create({ location });
     await client.session.prompt({ sessionID: session.id, text: "Return fixture; do not call any tools." });
     for (let i = 0; i < 150 && !requestBody; i++) await sleep(100);
-    assert.ok(requestBody, "mock provider must receive a model request");
+    assert.ok(requestBody, `mock provider must receive a tool-bearing model request: ${JSON.stringify(requestSummaries)}`);
     const received = (requestBody.tools ?? []).map(tool => tool.function.name).filter(name => name.startsWith("homeassistant_")).sort();
     assert.deepEqual(received, advertised, "no advertised full-profile tool may silently disappear");
   } finally {
