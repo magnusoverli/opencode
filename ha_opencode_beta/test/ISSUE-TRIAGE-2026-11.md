@@ -46,9 +46,9 @@ or replied to by this sweep.
 
 | Issue | Fix / verification | Closure status |
 | --- | --- | --- |
-| #216 | Beta normalizes local file references to descriptors before upstream config expansion. External validation is isolated from bundled/native registration. Both reference formats, delayed resolution, invalid external config, and Linux file-identity checks pass. Commit `729c272`; beta image CI passed. Stable backport withdrawn. | Candidate once beta PR checks pass; OAuth startup race currently blocks that workflow. |
-| #215 | Resource-ownership routing now distinguishes editor-resource saves from whole-file YAML replacement; removes the in-place yq exception while retaining consent, backups, validation, revision checks and activation verification. Guidance regression passes. | Candidate after commit and beta CI. |
-| #218 | Established ttyd socket errors now get five delayed reconnect attempts; initial failures, normal closure and explicit disable remain manual. Error-before-close browser fixture fails against old image and passes against patched image, preserving tmux and usable input. | Candidate for the input/reconnect defect after CI; the affected host's underlying network disconnect cause remains unverified. |
+| #216 | Beta normalizes local file references to descriptors before upstream config expansion. External validation is isolated from bundled/native registration. Both reference formats, delayed resolution, invalid external config, and Linux file-identity checks pass. Fix `729c272`, stable backport withdrawn by `08005fd`; verified in `b34272e`. | Ready for closure as fixed in beta; release availability should be stated when closing. |
+| #215 | Resource-ownership routing now distinguishes editor-resource saves from whole-file YAML replacement; removes the in-place yq exception while retaining consent, backups, validation, revision checks and activation verification. Fix `32c109d`; regression and CI pass in `b34272e`. | Ready for closure as fixed in beta; release availability should be stated when closing. |
+| #218 | Established ttyd socket errors now get five delayed reconnect attempts; initial failures, normal closure and explicit disable remain manual. Error-before-close browser fixture fails against old image and passes against patched image, preserving tmux and usable input. Fix `32c109d`; native AMD64/ARM64 CI passes in `b34272e`. | Fix verified for the input/reconnect defect. Recommend affected-host confirmation before closing: underlying recurring disconnect cause remains unverified. |
 | #214 | Full real MCP catalog reaches a mock model through pinned OpenCode, including `hab_run`, with no dropped tools. | Catalog symptom no longer reproduces on beta. Keep open pending separate HA-MCP side-panel verification. |
 | #208 | Reproduced intermittent empty integration catalog after plugin activation. Exact production readiness sequence passed 30 cold starts; UI waits before a single authorization attempt. | Partial fix. Real-account model rejection and handoff acceptance remain unverified; not ready to close. |
 | #209 | Existing beta handoff/guidance tests and new readiness work cover startup, not real-account/browser acceptance. | Keep open pending handoff verification. |
@@ -67,4 +67,14 @@ or replied to by this sweep.
   error-before-close test and existing desktop/mobile workspace recovery.
 - OAuth production readiness sequence: 30 consecutive isolated cold starts passed.
 - Stable tree has no net changes relative to the pre-sweep commit `057a4a5`.
-- Final GitHub PR and native AMD64/ARM64 beta runs are still required.
+- Test harness follow-ups: `94bdd57` bounds beta file concurrency; `b34272e`
+  waits for MCP connection readiness before checking model tool publication.
+  The corrected catalog test passed ten consecutive isolated runs.
+- Verified code commit: `b34272ef84c88e4d2604a94e8948043640c5f747`.
+- GitHub PR Checks: all 10 jobs passed,
+  https://github.com/magnusoverli/opencode/actions/runs/43827876043 .
+- GitHub Beta Image Checks: native AMD64 and ARM64 boundary jobs passed,
+  https://github.com/magnusoverli/opencode/actions/runs/43827876001 .
+- Stable restoration: native AMD64 and ARM64 passed,
+  https://github.com/magnusoverli/opencode/actions/runs/43825420858 .
+- No release was published and no issue was commented on, relabeled or closed.
