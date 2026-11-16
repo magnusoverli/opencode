@@ -101,7 +101,9 @@ export function createSupervisorAppManager({ apps, selfSlug, now = Date.now } = 
     return { preview_id: id, slug: value, action, expires_in: 300,
       review,
       ...(next ? { changes: redact(changes) } : {}),
-      note: "Review supplied values before approval. Application rechecks the source, but Supervisor has no atomic conditional save. No restart is implied by saving options." };
+      note: action === "options"
+        ? "Review supplied values before approval. Application rechecks the source, but Supervisor has no atomic conditional save. No restart is implied by saving options."
+        : `Review and approve the ${action} operation. Application rechecks the source; lifecycle changes may interrupt service. Options are not changed.` };
   }
   async function apply(id, review) {
     const plan = plans.get(id);
@@ -123,6 +125,11 @@ export function createSupervisorAppManager({ apps, selfSlug, now = Date.now } = 
       const verified = plan.action === "options"
         ? JSON.stringify(canonical(after.options)) === JSON.stringify(canonical(plan.next))
         : after.state === (plan.action === "stop" ? "stopped" : "started");
+      if (plan.action !== "options" && !verified && after.state === "startup") {
+        return { status: "in_progress", saved: null, verified: false, active: null,
+          action: plan.action, observed_state: after.state,
+          note: "Supervisor accepted the lifecycle request; the app is still in startup. Inspect its state and logs again for completion. Do not resend the operation." };
+      }
       return { status: verified ? "saved" : "outcome_unknown", saved: verified ? true : null, verified,
         active: plan.action === "options" ? null : verified,
         note: plan.action === "options" ? "Options saved; app restart/application remains separate." : "Observed lifecycle state; inspect app logs for readiness." };

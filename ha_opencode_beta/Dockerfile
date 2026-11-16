@@ -384,6 +384,9 @@ RUN --network=none --mount=type=bind,source=test/hab-cli-fixture.mjs,target=/tmp
 RUN --network=none --mount=type=bind,source=test/v2-openchamber-browser.mjs,target=/tmp/v2-openchamber-browser.mjs,readonly \
     timeout --signal=TERM --kill-after=10s 180s node /tmp/v2-openchamber-browser.mjs
 
+RUN --network=none --mount=type=bind,source=test/ttyd-reconnect-browser.mjs,target=/tmp/ttyd-reconnect-browser.mjs,readonly \
+    timeout --signal=TERM --kill-after=10s 60s node /tmp/ttyd-reconnect-browser.mjs
+
 RUN --mount=type=bind,source=test/v2-boundary-fixture.sh,target=/tmp/v2-boundary-fixture.sh,readonly \
     --mount=type=bind,source=test/v2-caller-secret-plugin.js,target=/tmp/v2-caller-secret-plugin.js,readonly \
     --mount=type=bind,source=test/v2-caller-secret-native.py,target=/tmp/v2-caller-secret-native.py,readonly \

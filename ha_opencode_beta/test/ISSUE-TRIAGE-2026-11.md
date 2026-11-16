@@ -47,3 +47,24 @@ or replied to by this sweep.
 | Issue | Fix / verification | Closure status |
 | --- | --- | --- |
 | #216 | Beta normalizes local file references to descriptors before upstream config expansion. External validation is isolated from bundled/native registration. Both reference formats, delayed resolution, invalid external config, and Linux file-identity checks pass. Commit `729c272`; beta image CI passed. Stable backport withdrawn. | Candidate once beta PR checks pass; OAuth startup race currently blocks that workflow. |
+| #215 | Resource-ownership routing now distinguishes editor-resource saves from whole-file YAML replacement; removes the in-place yq exception while retaining consent, backups, validation, revision checks and activation verification. Guidance regression passes. | Candidate after commit and beta CI. |
+| #218 | Established ttyd socket errors now get five delayed reconnect attempts; initial failures, normal closure and explicit disable remain manual. Error-before-close browser fixture fails against old image and passes against patched image, preserving tmux and usable input. | Candidate for the input/reconnect defect after CI; the affected host's underlying network disconnect cause remains unverified. |
+| #214 | Full real MCP catalog reaches a mock model through pinned OpenCode, including `hab_run`, with no dropped tools. | Catalog symptom no longer reproduces on beta. Keep open pending separate HA-MCP side-panel verification. |
+| #208 | Reproduced intermittent empty integration catalog after plugin activation. Exact production readiness sequence passed 30 cold starts; UI waits before a single authorization attempt. | Partial fix. Real-account model rejection and handoff acceptance remain unverified; not ready to close. |
+| #209 | Existing beta handoff/guidance tests and new readiness work cover startup, not real-account/browser acceptance. | Keep open pending handoff verification. |
+| #199 | Acknowledged lifecycle requests observed in startup return in_progress, not completion; no replay. Preview text is action-specific. Store audit pages all 117 fixture entries and preserves redaction. 24 Supervisor tests and pagination regression pass. | Partial fix; cross-app first-run state and remaining reported UX defects need review. New capability requests remain excluded. |
+| #205 | Existing HTTP tests verify Basic device auth, browser cookie redemption, independent revocation and stream closure (14 tests passed). Docs now specify Accept negotiation, cookie name, unsupported token transports and device-management endpoints. | Repository/API fix candidate after CI. Native-client acceptance remains unverified. |
+| #197, #206 | Existing beta targeted TUI repair passes the root Linux identity/preference suite. No stable backport. | Existing beta fix candidates; affected-host acceptance has not been collected. |
+| #211, #217 | Existing beta private-copy placement restoration passes real pinned conversion with exact session/message/watermark projection checks. | Existing beta fix candidates; retained user databases were not supplied. |
+| #195 | Compaction migration is covered by the native boundary image fixture, which passed. | Existing fix candidate. |
+| #207, #202 | Beta diagnostics identify path/type metadata and preserve unknown files. No evidence establishes a safe repair for the reported installation. | Blocked on affected-path/provenance evidence; do not close. |
+| #203 | Reporter selected compact; the shipped read-only HAB gateway is explicitly full-profile. Their external ha-readonly server is installation-specific. | Feature request / profile mismatch; no reproducible beta defect established. |
+
+### Current batch verification
+
+- Full Linux MCP suite: 48 files passed, 801 tests passed, 3 skipped.
+- Native AMD64 boundary-test image passed, including the new real ttyd browser
+  error-before-close test and existing desktop/mobile workspace recovery.
+- OAuth production readiness sequence: 30 consecutive isolated cold starts passed.
+- Stable tree has no net changes relative to the pre-sweep commit `057a4a5`.
+- Final GitHub PR and native AMD64/ARM64 beta runs are still required.

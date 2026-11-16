@@ -81,6 +81,28 @@ describe("Supervisor app previews and verified application", () => {
     expect(f.apps.lifecycle).toHaveBeenCalledWith("other", "stop");
     expect(f.apps.setOptions).not.toHaveBeenCalled();
   });
+  it("reports acknowledged startup as in progress without claiming completion or retrying (#199)", async () => {
+    const f = fixture(); const data = await f.manager.inspect("other");
+    const plan = await f.manager.preview({ slug: "other", expected_revision: data.revision, action: "restart" });
+    expect(plan.note).toContain("restart operation");
+    expect(plan.note).not.toContain("No restart is implied");
+    f.apps.lifecycle.mockImplementation(async () => { f.change(info => { info.state = "startup"; }); });
+    const result = await f.manager.apply(plan.preview_id, plan.review);
+    expect(result).toMatchObject({ status: "in_progress", saved: null, verified: false, active: null, observed_state: "startup" });
+    expect(f.apps.lifecycle).toHaveBeenCalledTimes(1);
+    expect((await f.manager.apply(plan.preview_id, plan.review)).status).toBe("preview_unavailable");
+    f.change(info => { info.state = "started"; });
+    expect((await f.manager.inspect("other")).state).toBe("started");
+    expect(f.apps.setOptions).not.toHaveBeenCalled();
+  });
+  it("does not label failed or unknown lifecycle outcomes as in progress", async () => {
+    for (const state of ["error", "stopped"]) {
+      const f = fixture(); const data = await f.manager.inspect("other");
+      const plan = await f.manager.preview({ slug: "other", expected_revision: data.revision, action: "restart" });
+      f.apps.lifecycle.mockImplementation(async () => { f.change(info => { info.state = state; }); });
+      expect((await f.manager.apply(plan.preview_id, plan.review)).status).toBe("outcome_unknown");
+    }
+  });
   it("expires previews and does not accept guessed or cross-instance IDs", async () => {
     const f = fixture(); let clock = 1;
     const manager = createSupervisorAppManager({ apps: f.apps, selfSlug: async () => "our_app", now: () => clock });

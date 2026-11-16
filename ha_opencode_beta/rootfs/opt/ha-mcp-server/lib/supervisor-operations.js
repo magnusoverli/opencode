@@ -233,25 +233,34 @@ export function sanitizeRepositorySource(value) {
 }
 
 /** Return a bounded software-source audit without app descriptions or raw URLs. */
-export function projectStoreAudit(store, { limit = DEFAULT_LIST_LIMIT } = {}) {
+export function projectStoreAudit(store, { limit = DEFAULT_LIST_LIMIT, offset = 0 } = {}) {
   const cappedLimit = clampInteger(limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
+  const start = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
   const apps = asArray(store?.addons);
   const repositories = asArray(store?.repositories);
   const orderedApps = apps.slice().sort((left, right) => {
     const priority = Number(Boolean(right?.update_available)) - Number(Boolean(left?.update_available));
     if (priority) return priority;
-    return String(left?.name || left?.slug || "").localeCompare(String(right?.name || right?.slug || ""));
+    return String(left?.name || left?.slug || "").localeCompare(String(right?.name || right?.slug || ""))
+      || String(left?.slug || "").localeCompare(String(right?.slug || ""));
+  });
+  const orderedRepositories = repositories.slice().sort((a, b) => String(a?.slug || "").localeCompare(String(b?.slug || "")));
+  const page = items => ({
+    offset: start,
+    returned: Math.min(Math.max(0, items.length - start), cappedLimit),
+    truncated: items.length > start + cappedLimit,
+    next_offset: items.length > start + cappedLimit ? start + cappedLimit : null,
   });
 
   return {
+    next_offset: Math.max(apps.length, repositories.length) > start + cappedLimit ? start + cappedLimit : null,
     apps: {
       total: apps.length,
       installed: apps.filter((app) => app?.installed).length,
       updates_available: apps.filter((app) => app?.update_available).length,
       unavailable: apps.filter((app) => app?.available === false).length,
-      returned: Math.min(orderedApps.length, cappedLimit),
-      truncated: orderedApps.length > cappedLimit,
-      items: orderedApps.slice(0, cappedLimit).map((app) => ({
+      ...page(orderedApps),
+      items: orderedApps.slice(start, start + cappedLimit).map((app) => ({
         slug: safeText(app?.slug, 120),
         name: safeText(app?.name, 160),
         repository: safeText(app?.repository, 120),
@@ -265,9 +274,8 @@ export function projectStoreAudit(store, { limit = DEFAULT_LIST_LIMIT } = {}) {
     },
     repositories: {
       total: repositories.length,
-      returned: Math.min(repositories.length, cappedLimit),
-      truncated: repositories.length > cappedLimit,
-      items: repositories.slice(0, cappedLimit).map((repository) => ({
+      ...page(orderedRepositories),
+      items: orderedRepositories.slice(start, start + cappedLimit).map((repository) => ({
         slug: safeText(repository?.slug, 120),
         name: safeText(repository?.name, 160),
         maintainer: safeText(repository?.maintainer, 160),

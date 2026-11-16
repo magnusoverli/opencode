@@ -9,6 +9,10 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
 import { OpenCode } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/@opencode/client/dist/promise/index.js";
+import signinPatch from "../rootfs/opt/openchamber/patch-provider-signin.cjs";
+
+const waitForIntegration = new (Object.getPrototypeOf(async function () {}).constructor)(
+  "client", "integrationId", signinPatch.activationSteps);
 
 test("pinned runtime resolves OAuth methods after same-location integration activation without an account", { timeout: 25000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "oauth-activation-"));
@@ -40,10 +44,20 @@ test("pinned runtime resolves OAuth methods after same-location integration acti
       try { await client.server.info({ signal: AbortSignal.timeout(500) }); ready = true; break; }
       catch { await sleep(50); }
     }
+    const reportDiagnostics = async () => {
+      diagnostics += await readFile(join(root, "data", "opencode", "log", "opencode.log"), "utf8").catch(() => "");
+      console.error(diagnostics.slice(-16000).replace(/https?:\/\/[^\s"']+/g, "[URL]")
+        .replace(/(authorization|password|token|state|code)[=:]\s*[^\s,}]+/gi, "$1=[redacted]"));
+    };
+    if (!ready) await reportDiagnostics();
     assert.ok(ready, "isolated server was not ready");
     const location = { directory: join(root, "cold") };
-    await client.plugin.list({ location });
+    await waitForIntegration({
+      plugin: { list: () => client.plugin.list({ location }) },
+      integration: { list: () => client.integration.list({ location }) },
+    }, "openai");
     const { data: integrations } = await client.integration.list({ location });
+    if (!integrations.some(integration => integration.id === "openai")) await reportDiagnostics();
     assert.ok(integrations.some(integration => integration.id === "openai"), "OpenAI integration must be active");
     // Starting an authorization creates a local callback listener and URL only.
     // Never open the URL, exchange a code, use an account or print OAuth state.

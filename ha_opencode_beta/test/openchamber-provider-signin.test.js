@@ -5,7 +5,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { test } = require("node:test");
 const script = path.join(__dirname, "../rootfs/opt/openchamber/patch-provider-signin.cjs");
-const { patchProviderSignin } = require(script);
+const { patchProviderSignin, activationSteps } = require(script);
 
 function fixture(t, newline = "\n") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ha-provider-signin-"));
@@ -36,8 +36,8 @@ for (const newline of ["\n", "\r\n"]) {
     assert.match(result, /detects approval automatically/);
     assert.match(result, /no restart or Terminal switch/);
     assert.match(result, /OpenCode handles credential storage and refresh/);
-    assert.match(result, /await client\.plugin\.list\(\);\n      const \{ data \} = await client\.integration\.oauth\.connect/);
-    const withoutWarmup = result.replace(/      \/\/ The pinned server's plugin list[\s\S]*?      const \{ data \} = await client.integration.oauth.connect\(\{/, "      const { data } = await sdk().integration.oauth.connect({");
+    assert.ok(result.includes(activationSteps));
+    const withoutWarmup = result.replace(/      \/\/ Plugin listing can race[\s\S]*?      const \{ data \} = await client.integration.oauth.connect\(\{/, "      const { data } = await sdk().integration.oauth.connect({");
     assert.equal(withoutWarmup.replace(/      \{integrationId === 'openai'[\s\S]*?      \)\}\n/, ""), original);
     assert.throws(() => patchProviderSignin(root), /Unexpected preview provider sign-in source/);
     assert.equal(fs.readFileSync(target, "utf8"), result);
@@ -57,6 +57,18 @@ test("requires an explicit upstream checkout", () => {
   const result = spawnSync(process.execPath, [script], { encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Usage: patch-provider-signin.cjs/);
+});
+
+test("integration readiness is bounded and never starts authorization itself", async () => {
+  const wait = new (Object.getPrototypeOf(async function () {}).constructor)(
+    "client", "integrationId", "setTimeout", activationSteps);
+  let reads = 0;
+  const client = {
+    plugin: { async list() {} },
+    integration: { async list() { reads++; return { data: [] }; } },
+  };
+  await assert.rejects(wait(client, "openai", (resolve) => resolve()), /still starting/);
+  assert.equal(reads, 50);
 });
 
 test("late OAuth source drift rejects the entire patch before writing guidance", t => {

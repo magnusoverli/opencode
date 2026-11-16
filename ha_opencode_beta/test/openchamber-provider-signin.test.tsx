@@ -18,6 +18,7 @@ let successes: string[] = [];
 let attempt: any;
 let activated = false;
 let activationFails = false;
+let emptyIntegrationReads = 0;
 const same = (a: any[], b: any[]) => a.length === b.length && a.every((value, i) => value === b[i]);
 const React = {
   useMemo: (fn: any, deps: any[]) => {
@@ -52,7 +53,7 @@ const React = {
 const sdk = { plugin: {
   list: async () => { if (activationFails) throw new Error('Synthetic activation failure'); activated = true; return { data: [] }; },
 }, integration: {
-  list: async () => ({ data: [] }),
+  list: async () => ({ data: emptyIntegrationReads-- > 0 ? [] : [{ id: 'openai' }] }),
   oauth: {
   connect: async (input: any) => { if (!activated) throw new Error('OAuth called before plugin activation'); connections.push(input); return { data: attempt }; },
   status: async () => { statusCalls++; return { data: { status, message: 'Synthetic rejection' } }; },
@@ -102,7 +103,7 @@ function reset() {
   values = []; effects = []; pending = []; index = 0;
   connected = 0; statusCalls = 0; status = 'pending'; opens = []; copies = [];
   cancellations = []; connections = []; successes = [];
-  activated = false; activationFails = false;
+  activated = false; activationFails = false; emptyIntegrationReads = 0;
   attempt = { attemptID: 'fixture-attempt', mode: 'auto', url: 'https://auth.openai.com/codex/device', instructions: 'Enter code: ABCD-12345' };
 }
 afterEach(() => { for (const effect of effects) effect?.cleanup?.(); });
@@ -175,4 +176,13 @@ test('activation failure never starts or retries an OAuth authorization attempt'
   expect(connections).toEqual([]);
   expect(opens).toEqual([]);
   expect(connected).toBe(0);
+});
+
+test('waits for integration publication after plugin activation without retrying authorization', async () => {
+  reset(); emptyIntegrationReads = 2;
+  begin('Sign in with ChatGPT'); await settle();
+  expect(connections).toEqual([]);
+  await Bun.sleep(300); await settle();
+  expect(connections).toHaveLength(1);
+  expect(opens).toHaveLength(1);
 });

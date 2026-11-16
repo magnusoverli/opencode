@@ -3235,7 +3235,7 @@ const TOOLS = [
   {
     name: "get_store_audit",
     title: "Get Store Audit",
-    description: "Return a bounded read-only audit of Supervisor store apps and repositories. Repository credentials, query strings, and fragments are removed.",
+    description: "Return a bounded read-only audit of Supervisor store apps and repositories. Follow next_offset with the same limit until null for a complete audit. Each page is a fresh read; restart if the store changes. Repository credentials, query strings, and fragments are removed.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3243,8 +3243,9 @@ const TOOLS = [
           type: "integer",
           minimum: 1,
           maximum: SUPERVISOR_MAX_LIST_LIMIT,
-          description: `Maximum apps and repositories to return (default ${SUPERVISOR_DEFAULT_LIST_LIMIT}).`,
+          description: `Maximum apps and repositories to return per page (default ${SUPERVISOR_DEFAULT_LIST_LIMIT}).`,
         },
+        offset: { type: "integer", minimum: 0, description: "Zero-based page offset; use the previous result's next_offset." },
       },
       additionalProperties: false,
     },
@@ -5807,13 +5808,15 @@ async function handleToolCall(request) {
 
       case "get_store_audit": {
         const limit = clampSupervisorLimit(args?.limit, SUPERVISOR_DEFAULT_LIST_LIMIT, SUPERVISOR_MAX_LIST_LIMIT);
-        sendLog("debug", "supervisor-read", { action: "get_store_audit", limit });
-        const data = projectStoreAudit(await callSupervisor("/store"), { limit });
+        const offset = args?.offset ?? 0;
+        if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("offset must be a nonnegative safe integer");
+        sendLog("debug", "supervisor-read", { action: "get_store_audit", limit, offset });
+        const data = projectStoreAudit(await callSupervisor("/store"), { limit, offset });
         return makeCompatibleResponse({
           content: [createCompactJsonContent(
             "Returned bounded Supervisor store and repository audit",
             data,
-            { source: "supervisor", limit, repository_credentials_omitted: true },
+            { source: "supervisor", limit, offset, repository_credentials_omitted: true },
             { audience: ["assistant"], priority: 0.8 },
           )],
         });

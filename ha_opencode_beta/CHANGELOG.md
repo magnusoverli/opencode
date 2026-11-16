@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Preserve external MCP file references through upstream configuration loading and isolate invalid external definitions from bundled HA MCP activation (#216).
+- Recover established terminal WebSocket errors with bounded reconnect backoff, retaining tmux sessions and input; add a real-browser error-before-close regression (#218).
+- Wait for integration publication before starting one OAuth attempt, covering the remaining cold-start race (#208).
+- Separate editor-managed resource saves from whole-file YAML safe writes and remove the contradictory in-place editing exception (#215).
+- Report acknowledged Supervisor restarts still in startup as in progress, make preview text action-specific, and paginate store audits beyond 100 entries (#199).
+- Clarify LAN pairing's JSON/browser exchange and device revocation contract (#205); verify that the full advertised MCP catalog, including HAB, reaches the pinned runtime's model request (#214).
+
 ## 3.5.0b2
 
 - Await plugin activation before starting provider OAuth on OpenCode 2.3.0, and resolve historical session URLs during mobile workspace recovery without moving stored history.

@@ -1225,12 +1225,19 @@ administrator authenticated with the separate LAN password can request
 `POST /api/pair`; the returned code expires in five minutes and is single-use.
 Native clients redeem `GET /auth/connect/<code>` to obtain a private token, then
 use Basic authentication with username `opencode` and that token as the password.
-Browser redemption sets a Secure/HttpOnly/SameSite cookie terminating at the LAN
-proxy. Cookies and device tokens are never sent to the private backend.
+Without `Accept: text/html`, redemption returns JSON `{"token":"..."}`.
+With `Accept: text/html`, it returns a 303 redirect to `/api/info` and sets the
+`opencode_session` cookie (Secure, HttpOnly, SameSite=Lax). That cookie is also
+accepted on subsequent requests; cookie-authenticated mutations require the
+same-origin checks described above. Bearer tokens, `X-Opencode-Token`, query-string
+tokens and a cookie named `session` are not supported. Authentication terminates
+at the LAN proxy; cookies and device tokens never reach the private backend.
 
 Each device token expires after 30 days and is separately revocable. With the
 administrator LAN credentials, `GET /api/lan/devices` lists opaque device IDs and
 timestamps; `DELETE /api/lan/devices/<id>` revokes one and closes its proxy sockets.
+These are HTTP administration endpoints, not UI-only operations.
+`/api/credential` manages provider credentials, not paired devices.
 Device tokens cannot issue pairings or manage the device inventory. App restart
 or LAN password rotation revokes every device; history/provider credentials remain
 untouched. Store codes/tokens privately, never in logs, Git, URLs containing

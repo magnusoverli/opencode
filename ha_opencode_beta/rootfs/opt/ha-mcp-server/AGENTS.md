@@ -167,10 +167,17 @@ dashboards. These files are designed for editing. Load
 `home-assistant-configuration` before changing one — it carries the mandatory
 style guide, the safe-write path, and the reload/restart rules.
 
-Automation edits are complete only after the approved safe write, approved
-`automation.reload` via `call_service`, and read-only load verification. Report
-saved/reloaded/verified separately. If reload is unapproved or unavailable in the
-current tool profile, report it as pending; never bypass the profile via shell.
+Choose the editing route by resource ownership. Editor-managed automations,
+scripts and scenes use their supported editor API through advertised `hab_run`
+commands, preserving the complete individual resource. Direct YAML-file edits,
+including packages/includes, require complete-file `write_config_safe`.
+Both routes require approval, backup, validation, concurrency checks, unrelated
+content preservation and read-back/activation verification. Obtain consent for
+automatic reloads caused by editor saves; verify native activation instead of
+blindly adding a domain-wide reload. Direct automation YAML writes require the
+approved `automation.reload` via `call_service`. Report saved/reloaded/verified
+separately. If the required tool or reload approval is unavailable, report the
+pending step; never bypass the profile via shell or raw APIs.
 
 ### 2. MCP tools (runtime API)
 
@@ -248,7 +255,8 @@ Dry-run is the default for renames — always preview before `--apply`. The
 
 | Task | Use |
 |---|---|
-| Create/edit automations, scripts, scenes, templates | YAML + `write_config_safe` |
+| Editor-managed automations, scripts, scenes | Supported editor API via advertised `hab_run` commands; complete individual resource |
+| Direct YAML files, packages/includes, templates | Complete-file `write_config_safe` |
 | Check current state, control a device | MCP (`get_home_context`, `call_service`) |
 | Troubleshoot | MCP (`diagnose_entity`, `get_error_log`, `get_supervisor_health`) |
 | Dashboards, areas, helpers, backups, blueprints, people | `hab` |
