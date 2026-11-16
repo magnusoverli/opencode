@@ -98,7 +98,8 @@ test("pinned runtime reports reader tools and transfers a preview to Build with 
     }));
     const reservation = createServer(); reservation.listen(0, "127.0.0.1"); await once(reservation, "listening");
     const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
-    backend = spawn(join(runtime, "node_modules/@opencode/cli/bin", process.platform === "win32" ? "opencode.exe" : "opencode"),
+    // The pinned npm package installs bin/opencode.exe on every platform.
+    backend = spawn(join(runtime, "node_modules/@opencode/cli/bin/opencode.exe"),
       ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
         cwd: join(root, "project"), stdio: "ignore",
         env: { PATH: process.env.PATH, HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config"),

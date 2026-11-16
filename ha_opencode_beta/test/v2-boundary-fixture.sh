@@ -108,6 +108,7 @@ cp /tmp/v2-caller-secret-plugin.js "${RUNTIME_ROOT}/reload-plugin/index.js"
 # Bun canonicalizes query-string imports of file modules. Distinct physical
 # copies exercise independent module generations through the public host API.
 cp /opt/opencode-v2-homeassistant/external-mcp.js "${RUNTIME_ROOT}/reload-plugin/external-mcp.js"
+cp /opt/opencode-v2-homeassistant/agent-capability-context.js "${RUNTIME_ROOT}/reload-plugin/agent-capability-context.js"
 for generation in 0 1 2; do
     cp /opt/opencode-v2-homeassistant/plugin.js "${RUNTIME_ROOT}/reload-plugin/generation-${generation}.js"
 done
