@@ -1257,17 +1257,39 @@ fields are redacted; results can still contain private home configuration.
 Permission this tool independently in custom agents. Compact/configuration
 profiles and the managed read-only agent are not broadened by this addition.
 
-Supervisor management is also full-profile only:
+Supervisor inspection and previews are available in all profiles and to the
+managed read-only agent. Application remains full-profile only:
 
-- `supervisor_app_inspect` returns an opaque revision and redacted options. All
-  option strings are withheld, including strings with unfamiliar credential names.
-- `supervisor_app_preview` validates a revision-bound object merge without saving.
-  Omitted nested fields remain intact. Credential edits, array replacement and
-  deletions require the app's Configuration tab. Lifecycle previews support
-  `start`, `stop` and `restart`; current-app mutations are blocked.
-- `supervisor_app_apply` requires native permission approval plus the exact
-  preview ID and review object. Previews are single-use, expire after five
-  minutes, and disappear on restart. Saving options does not restart the app.
+| Tool | Behavior |
+| --- | --- |
+| `supervisor_app_inspect` | Returns display name (slug fallback), state, opaque revision and redacted options. `option_states` distinguishes visible, withheld and unset fields. |
+| `supervisor_app_preview` | Validates a revision-bound object merge and returns a field-level before/after `diff` inside the bound `review`. Lifecycle previews describe current and expected state. Creates an expiring in-memory plan, without saving options or changing lifecycle. |
+| `supervisor_app_apply` | Requires an apply-capable agent, full profile, native permission approval, and the exact preview ID and review object. Rechecks the source and verifies readback. |
+
+Only `log_level` strings whose Supervisor select schema contains exclusively
+standard log levels are visible. Free-form strings (including `ignore_pattern`),
+other enumerations, arrays and credential fields stay withheld. A withheld change
+is marked in the diff without exposing either value; an unset field is distinct
+from a withheld one. Inspection state lists are capped at 256 fields and report
+truncation; proposals exceeding 256 changed fields are rejected for smaller review.
+Omitted nested fields remain intact. Credential edits, array replacement and
+deletions require the app's Configuration tab. Lifecycle previews support
+`start`, `stop` and `restart`; current-app changes are blocked.
+
+To apply a read-only agent's proposal, switch to an apply-capable agent (normally
+Build) in the full profile, review the same proposal and approve application.
+A preview grants no permission. Previews are single-use, expire after five
+minutes, and disappear on app/MCP-server restart. A profile change requiring
+restart therefore needs fresh inspection and preview. Saving options does not
+restart the target app.
+
+`get_agent_capabilities` labels `mcp` as the configured server catalogue, rather
+than claiming that every listed tool is available to the caller. The bundled
+OpenCode plugin adds `mcp.current_agent` from a fresh matching model-context
+snapshot: agent ID, observed time and separate bundled/native tool lists.
+Direct MCP clients or calls without matching context report `unknown`.
+The snapshot describes tools offered to that agent, not guaranteed execution,
+per-call authorization or evidence of a permission-popup click.
 
 Supervisor has no atomic conditional-save contract. The tool rechecks state and
 validates before mutation, then verifies readback. An uncertain result is not

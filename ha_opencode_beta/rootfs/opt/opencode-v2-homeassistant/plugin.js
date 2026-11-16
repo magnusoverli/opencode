@@ -1,5 +1,6 @@
 import { Plugin } from "@opencode/plugin";
 import { resolveExternalServers, validateExternalServers } from "./external-mcp.js";
+import { registerAgentCapabilityContext } from "./agent-capability-context.js";
 
 export const PLUGIN_ID = "homeassistant.mcp";
 export const MCP_SERVER_NAME = "homeassistant";
@@ -235,6 +236,16 @@ export function createSetup({ readSecret = readCallerSecret, resolveExternal = r
       // loading. Never attach the credential-bearing underlying exception.
       if (registrations.length === 0) throw new Error(message);
       console.error(message);
+    }
+
+    if (options.bundledEnabled && !managedFailed) {
+      try {
+        const registration = await registerAgentCapabilityContext(ctx);
+        if (registration) registrations.push(registration);
+      } catch {
+        // Keep server-only reporting explicit when a host cannot supply context.
+        console.error("Agent-specific capability context is unavailable; reporting the MCP server catalogue only");
+      }
     }
 
     return async () => {

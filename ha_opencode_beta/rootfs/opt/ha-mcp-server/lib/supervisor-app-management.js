@@ -3,8 +3,8 @@
  * Previews are process-local, single-use and expire on restart or after 5 min.
  */
 import { createHmac, randomBytes } from "node:crypto";
+import { sensitiveOption, redactOptions, inspectOptionStates, optionDiff } from "./supervisor-option-view.js";
 
-const sensitive = /password|passwd|token|secret|api[_-]?key|authorization|cookie|private[_-]?key/i;
 const object = value => value && typeof value === "object" && !Array.isArray(value);
 function canonical(value, depth = 0) {
   if (depth > 32) throw new Error("App options exceed the supported nesting bound.");
@@ -15,15 +15,6 @@ function canonical(value, depth = 0) {
   }
   return value;
 }
-function redact(value, depth = 0) {
-  if (depth > 32) return "<depth limit>";
-  // Arbitrary app schemas may use unrecognizable credential names. Withhold all
-  // option strings, not just fields conventionally named password or token.
-  if (typeof value === "string") return "<redacted string>";
-  if (Array.isArray(value)) return value.map(item => redact(item, depth + 1));
-  if (object(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redact(item, depth + 1)]));
-  return value;
-}
 function merge(base, changes, schema) {
   const result = structuredClone(base);
   for (const [key, value] of Object.entries(changes)) {
@@ -31,7 +22,7 @@ function merge(base, changes, schema) {
     // not the manifest's raw {key: 'str'|'password'|...} mapping.
     const field = Array.isArray(schema) ? schema.find(node => node?.name === key) : undefined;
     if (!field) throw new Error("Unrecognized app option; use the app Configuration tab.");
-    if (sensitive.test(key) || field.format === "password") throw new Error("Edit credential options manually in the app Configuration tab.");
+    if (sensitiveOption.test(key) || field.format === "password") throw new Error("Edit credential options manually in the app Configuration tab.");
     if (field.multiple === true) throw new Error("Array options require manual configuration.");
     if (object(value)) {
       if (field.type !== "schema" || !Array.isArray(field.schema)) throw new Error("Expected a scalar option, not an object merge.");
@@ -72,9 +63,14 @@ export function createSupervisorAppManager({ apps, selfSlug, now = Date.now } = 
   }
   async function inspect(value) {
     const info = await read(value);
-    return { slug: value, state: info.state, version: info.version, revision: revision(info), options: redact(info.options),
+    return { slug: value, name: appName(info), state: info.state, version: info.version, revision: revision(info), options: redactOptions(info.options, info.schema),
       option_keys: (info.schema ?? []).slice(0, 256).map(node => node.name),
-      note: "All option strings are withheld. Omitted fields are preserved; credentials, arrays and deletions require manual editing." };
+      option_states: inspectOptionStates(info.options, info.schema),
+      note: "Only schema-constrained standard log_level strings are visible. Other strings and composite array values are withheld; option_states distinguishes unset from withheld. Omitted fields are preserved; credentials, arrays and deletions require manual editing." };
+  }
+  function appName(info) {
+    return typeof info.name === "string" && info.name.trim()
+      ? info.name.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 200) : info.slug;
   }
   async function valid(value, options) {
     let result;
@@ -86,21 +82,24 @@ export function createSupervisorAppManager({ apps, selfSlug, now = Date.now } = 
     const info = await read(value);
     if (expected_revision !== revision(info)) throw new Error("App inspection is stale; inspect again before proposing changes.");
     if (!["options", "start", "stop", "restart"].includes(action)) throw new Error("Unsupported app operation.");
-    let next;
+    let next, diff;
     if (action === "options") {
       if (!object(changes) || !Object.keys(changes).length || JSON.stringify(changes).length > 65536) throw new Error("Provide a bounded object of option changes.");
       canonical(changes);
       next = merge(info.options, changes, info.schema);
+      diff = optionDiff(info.options, next, changes, info.schema);
       await valid(value, next);
     } else if (changes !== undefined) throw new Error("Lifecycle operations do not accept option changes.");
     for (const [id, plan] of plans) if (plan.expires <= now()) plans.delete(id);
     if (plans.size >= 100) throw new Error("Too many pending app previews; wait for expiry.");
     const id = randomBytes(24).toString("hex");
-    const review = { slug: value, action, ...(next ? { changes: redact(changes) } : {}) };
+    const review = { slug: value, name: appName(info), action,
+      ...(next ? { changes: redactOptions(changes, info.schema), diff }
+        : { before_state: info.state, expected_state: action === "stop" ? "stopped" : "started" }) };
     plans.set(id, { slug: value, action, revision: revision(info), next, review, expires: now() + 300000 });
-    return { preview_id: id, slug: value, action, expires_in: 300,
+    return { preview_id: id, slug: value, name: appName(info), action, expires_in: 300,
       review,
-      ...(next ? { changes: redact(changes) } : {}),
+      ...(next ? { changes: review.changes, diff } : {}),
       note: action === "options"
         ? "Review supplied values before approval. Application rechecks the source, but Supervisor has no atomic conditional save. No restart is implied by saving options."
         : `Review and approve the ${action} operation. Application rechecks the source; lifecycle changes may interrupt service. Options are not changed.` };

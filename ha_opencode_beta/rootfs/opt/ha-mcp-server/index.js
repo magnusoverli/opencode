@@ -2609,7 +2609,7 @@ const TOOLS = [
   {
     name: "get_agent_capabilities",
     title: "Get Agent Capability Status",
-    description: "Report Home Assistant agent capabilities, discover registered native LLM API IDs and names (HA 2026.9+), check the saved API selection, and probe native MCP endpoints. Registry discovery is read-only and separate from endpoint readiness and bridge enablement. Use this to find a custom API ID or diagnose native MCP setup.",
+    description: "Report the configured MCP server catalogue and Home Assistant native API readiness. mcp.current_agent is a runtime-observed agent tool snapshot when available, otherwise unknown; catalogue membership is not agent permission or approval. Discover registered native LLM API IDs and names (HA 2026.9+), check the saved selection, and probe native MCP endpoints. Registry discovery is read-only and separate from endpoint readiness and bridge enablement.",
     inputSchema: EMPTY_INPUT_SCHEMA,
     annotations: {
       readOnly: true,
@@ -3872,14 +3872,14 @@ const TOOLS = [
   {
     name: "supervisor_app_inspect",
     title: "Inspect Supervisor App",
-    description: "Read app state and redacted configuration with an opaque inspection revision (full profile). All option strings are withheld. Use get_support_logs(source='addon', addon_slug=...) for bounded redacted logs. No app configuration or lifecycle changes are made.",
+    description: "Read app name, state and redacted configuration with an opaque inspection revision (all profiles). Only schema-constrained standard log_level strings are visible; other strings are withheld. option_states distinguishes unset from withheld. Use get_support_logs(source='addon', addon_slug=...) for bounded redacted logs. No app configuration or lifecycle changes are made.",
     inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"], additionalProperties: false },
     annotations: { readOnly: true, idempotent: true },
   },
   {
     name: "supervisor_app_preview",
     title: "Preview Supervisor App Change",
-    description: "Create a five-minute, single-use preview from supervisor_app_inspect's revision. For action=options provide an object merge in changes; omitted fields and nested secrets remain intact. Credentials, arrays and deletions require manual app configuration. Other actions: start, stop, restart. Supervisor validates full options without saving. Current-app mutations are blocked. Show the proposal and obtain approval before supervisor_app_apply. A preview grants no permission.",
+    description: "Create a five-minute, single-use preview from supervisor_app_inspect's revision (all profiles, including read-only agent). Returns a redacted field-level before/after diff in review. For action=options provide an object merge in changes; omitted fields and nested secrets remain intact. Credentials, arrays and deletions require manual configuration. Other actions: start, stop, restart. Validates without saving; creates only an expiring in-memory plan. Current-app changes are blocked. A preview grants no permission: switch to an apply-capable agent in full profile, review and obtain approval before supervisor_app_apply.",
     inputSchema: { type: "object", properties: {
       slug: { type: "string" }, expected_revision: { type: "string", pattern: "^[a-f0-9]{64}$" },
       action: { type: "string", enum: ["options", "start", "stop", "restart"] },

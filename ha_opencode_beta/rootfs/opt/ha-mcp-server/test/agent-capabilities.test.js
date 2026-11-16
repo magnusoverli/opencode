@@ -42,6 +42,8 @@ describe("buildAgentCapabilities", () => {
     expect(capabilities.home_assistant.native_mcp.assist_endpoint_status).toBe("available");
     expect(capabilities.home_assistant.native_ai_components.loaded).toContain("ollama");
     expect(capabilities.mcp.tools).toBe(2);
+    expect(capabilities.mcp.scope).toBe("configured_server_catalogue");
+    expect(capabilities.mcp.current_agent.status).toBe("unknown");
     expect(capabilities.mcp.tool_profile.name).toBe("full");
     expect(capabilities.home_assistant.native_mcp.bridge.status).toBe("enabled_and_reachable");
     expect(capabilities.mcp.resources).toBe(1);

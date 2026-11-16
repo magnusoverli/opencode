@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Improve Supervisor app review ([#199](https://github.com/magnusoverli/opencode/issues/199))** — show app display names, allow inspection and non-applying previews from all profiles and the managed read-only agent, and bind bounded before/after diffs to reviewed plans. Distinguish unset from withheld options; reveal only schema-constrained standard `log_level` strings. Apply still requires the full profile, an apply-capable agent and native permission approval.
+- **Correct capability reporting ([#199](https://github.com/magnusoverli/opencode/issues/199))** — label the MCP server catalogue explicitly and add a bounded, agent-specific tool snapshot from OpenCode's model context. Missing/stale context stays unknown; tool availability does not claim per-call authorization or popup approval.
+
 ## 3.5.0b4
 
 - **Qualify HA 2026.11 compatibility ([#45](https://github.com/magnusoverli/opencode/issues/45))** — test the companion against HA 2026.11.1 as well as 2026.10, including cached tool context, administrator authorization, failed/concurrent conversations and native MCP read-only filtering. Companion 0.1.0b8 uses HA's **AI tools** wording and explains the broader admin API. Document that HA's read-only option applies only to the configured MCP endpoint; preserve configured-endpoint tool rejections without retrying a keyed API.

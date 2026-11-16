@@ -38,6 +38,18 @@ function supervisorResponse(request, response) {
   const job = jobFixtures.find((item) => request.url === `/jobs/${item.uuid}`);
   if (job) return sendJson(response, job);
   switch (request.url.split("?")[0]) {
+    case "/v2/apps":
+      return sendJson(response, { apps: [] });
+    case "/v2/apps/self/info":
+      return sendJson(response, { slug: "opencode" });
+    case "/v2/apps/other/info":
+      return sendJson(response, { slug: "other", name: "Example App", state: "started", version: "1",
+        options: { enabled: false, log_level: "info", secret: "private-option" },
+        schema: [{ name: "enabled", type: "boolean" },
+          { name: "log_level", type: "select", options: ["info", "debug"] },
+          { name: "secret", type: "string", format: "password" }] });
+    case "/v2/apps/other/options/validate":
+      return sendJson(response, { valid: true });
     case "/supervisor/info":
       return sendJson(response, { version: "2026.07.5", healthy: true, supported: true, ip_address: "192.168.5.33" });
     case "/host/info":
@@ -192,7 +204,7 @@ function callMcpSequence(profile, calls) {
       callback(value);
     };
     const sendNext = () => {
-      const call = calls[current];
+      const call = typeof calls[current] === "function" ? calls[current](results) : calls[current];
       child.stdin.write(`${JSON.stringify({
         jsonrpc: "2.0",
         id: current + 2,
@@ -241,6 +253,29 @@ function parsePayload(result) {
 }
 
 describe("Supervisor operations MCP tools", () => {
+  for (const profile of ["compact", "configuration"]) {
+    it(`executes inspection and preview in ${profile} but rejects apply before Supervisor`, async () => {
+      const before = requests.length;
+      const [inspection, preview, application] = await callMcpSequence(profile, [
+        { name: "supervisor_app_inspect", arguments: { slug: "other" } },
+        results => ({ name: "supervisor_app_preview", arguments: { slug: "other",
+          expected_revision: parsePayload(results[0]).revision,
+          changes: { enabled: true, log_level: "debug" } } }),
+        results => ({ name: "supervisor_app_apply", arguments: {
+          preview_id: parsePayload(results[1]).preview_id, review: parsePayload(results[1]).review } }),
+      ]);
+      expect(parsePayload(inspection).name).toBe("Example App");
+      expect(parsePayload(preview).diff).toContainEqual({
+        path: ["log_level"], before: { state: "visible", value: "info" }, after: { state: "visible", value: "debug" },
+      });
+      expect(application.isError).toBe(true);
+      expect(JSON.stringify(application)).toContain("profile");
+      expect(JSON.stringify([inspection, preview])).not.toContain("private-option");
+      const reached = requests.slice(before);
+      expect(reached).toContain("/v2/apps/other/options/validate");
+      expect(reached.some(url => /\/(options|start|stop|restart)$/.test(url))).toBe(false);
+    }, TIMEOUT_MS + 5_000);
+  }
   it("serves the six read-only tools in the compact profile", async () => {
     const compact = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [SERVER], {

@@ -93,8 +93,6 @@ const MUTATING_TOOLS = [
   { name: "esphome_pairing", arguments: { action: "status" } },
   { name: "hab_run", arguments: { args: ["entity", "list"] } },
   { name: "hab_run_read_only", arguments: { args: ["helper", "list"] } },
-  { name: "supervisor_app_inspect", arguments: { slug: "other" } },
-  { name: "supervisor_app_preview", arguments: { slug: "other", expected_revision: "0".repeat(64), changes: { enabled: true } } },
   { name: "supervisor_app_apply", arguments: { preview_id: "0".repeat(48), review: {} } },
   { name: "zigporter_run", arguments: { args: ["list-devices"] } },
   { name: "screenshot_url", arguments: { url: "http://homeassistant.local:8123/" } },
@@ -124,6 +122,9 @@ describe("MCP tool-profile enforcement", () => {
     expect(compactNames).not.toContain("call_service");
     expect(compactNames).not.toContain("write_config_safe");
     expect(compactNames).not.toContain("patch_config_safe");
+    expect(compactNames).toContain("supervisor_app_inspect");
+    expect(compactNames).toContain("supervisor_app_preview");
+    expect(compactNames).not.toContain("supervisor_app_apply");
     expect(compactNames).not.toContain("hab_run");
     expect(compactNames).toContain("esphome_list_devices");
     expect(compactNames).toContain("esphome_troubleshoot");
@@ -145,6 +146,9 @@ describe("MCP tool-profile enforcement", () => {
     const configurationNames = configuration.tools.map((tool) => tool.name);
     expect(configurationNames).toContain("write_config_safe");
     expect(configurationNames).toContain("patch_config_safe");
+    expect(configurationNames).toContain("supervisor_app_inspect");
+    expect(configurationNames).toContain("supervisor_app_preview");
+    expect(configurationNames).not.toContain("supervisor_app_apply");
     expect(configurationNames).toContain("esphome_list_devices");
     expect(configurationNames).toContain("esphome_config_read");
     expect(configurationNames).toContain("esphome_config_validate");

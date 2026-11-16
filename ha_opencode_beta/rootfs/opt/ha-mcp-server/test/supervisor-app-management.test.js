@@ -21,6 +21,111 @@ function fixture() {
 }
 
 describe("Supervisor app previews and verified application", () => {
+  it("reports names and explicit unset/withheld states with narrowly visible log levels", async () => {
+    const f = fixture();
+    f.change(info => {
+      info.options.log_level = "info";
+      info.options.ignore_pattern = "PRIVATE";
+      info.schema.push(
+        { name: "log_level", type: "select", options: ["debug", "info", "warning"] },
+        { name: "ignore_pattern", type: "string" },
+        { name: "optional", type: "string", optional: true },
+      );
+    });
+    const data = await f.manager.inspect("other");
+    expect(data.name).toBe("Example");
+    expect(data.options.log_level).toBe("info");
+    expect(data.options.ignore_pattern).toBe("<withheld>");
+    expect(data.option_states.entries).toContainEqual({ path: ["optional"], state: "unset" });
+    expect(data.option_states.entries).toContainEqual({ path: ["ignore_pattern"], state: "withheld" });
+    expect(data.option_states.entries).toContainEqual({ path: ["log_level"], state: "visible", value: "info" });
+    expect(JSON.stringify(data)).not.toContain("PRIVATE");
+    f.change(info => { delete info.name; });
+    expect((await f.manager.inspect("other")).name).toBe("other");
+  });
+  it("does not trust arbitrary enums, free text, password formats or sensitive ancestors", async () => {
+    const f = fixture();
+    for (const field of [
+      { type: "string" }, { type: "select", options: ["PRIVATE", "info"] },
+      { type: "select", options: ["info"], format: "password" },
+      { type: "select", options: ["info"], multiple: true },
+      { type: "select", options: ["debug"] },
+    ]) {
+      f.change(info => {
+        info.options.log_level = "info";
+        info.schema = [{ name: "log_level", ...field }];
+      });
+      expect((await f.manager.inspect("other")).options.log_level).toBe("<withheld>");
+    }
+    f.change(info => {
+      info.options = { token: 1234, password: { log_level: "info" }, array: ["PRIVATE"] };
+      info.schema = [];
+    });
+    const inspected = await f.manager.inspect("other");
+    expect(inspected.options).toEqual({ token: "<withheld>", password: "<withheld>", array: "<withheld>" });
+    expect(JSON.stringify(inspected)).not.toMatch(/1234|PRIVATE/);
+  });
+  it("binds a redacted before/after diff to review while preserving hidden values", async () => {
+    const f = fixture();
+    f.change(info => {
+      info.options.log_level = "info";
+      info.options.ignore_pattern = "PRIVATE_BEFORE";
+      info.schema.push(
+        { name: "log_level", type: "select", options: ["debug", "info"] },
+        { name: "ignore_pattern", type: "string" },
+        { name: "limit", type: "integer", optional: true },
+      );
+    });
+    const inspected = await f.manager.inspect("other");
+    const plan = await f.manager.preview({ slug: "other", expected_revision: inspected.revision,
+      changes: { enabled: true, log_level: "debug", ignore_pattern: "PRIVATE_AFTER", limit: 5, nested: { count: 2 } } });
+    expect(plan.diff).toEqual([
+      { path: ["enabled"], before: { state: "visible", value: false }, after: { state: "visible", value: true } },
+      { path: ["log_level"], before: { state: "visible", value: "info" }, after: { state: "visible", value: "debug" } },
+      { path: ["ignore_pattern"], before: { state: "withheld" }, after: { state: "withheld" } },
+      { path: ["limit"], before: { state: "unset" }, after: { state: "visible", value: 5 } },
+      { path: ["nested", "count"], before: { state: "visible", value: 1 }, after: { state: "visible", value: 2 } },
+    ]);
+    expect(plan.review.diff).toEqual(plan.diff);
+    expect(JSON.stringify(plan)).not.toContain("PRIVATE");
+    expect(f.apps.setOptions).not.toHaveBeenCalled();
+    expect(f.apps.lifecycle).not.toHaveBeenCalled();
+    const changed = structuredClone(plan.review);
+    changed.diff[0].after.value = false;
+    expect((await f.manager.apply(plan.preview_id, changed)).status).toBe("review_mismatch");
+    expect(f.apps.setOptions).not.toHaveBeenCalled();
+    const retry = await f.manager.preview({ slug: "other", expected_revision: inspected.revision, changes: { log_level: "debug" } });
+    expect((await f.manager.apply(retry.preview_id, retry.review)).status).toBe("saved");
+    expect(f.apps.setOptions.mock.calls[0][1].ignore_pattern).toBe("PRIVATE_BEFORE");
+  });
+  it("bounds inspection and refuses a diff that cannot be fully reviewed", async () => {
+    const f = fixture();
+    f.change(info => {
+      info.options = Object.fromEntries(Array.from({ length: 257 }, (_, i) => [`field${i}`, false]));
+      info.schema = Object.keys(info.options).map(name => ({ name, type: "boolean" }));
+    });
+    const inspected = await f.manager.inspect("other");
+    expect(inspected.option_states.entries).toHaveLength(256);
+    expect(inspected.option_states.truncated).toBe(true);
+    const changes = Object.fromEntries(Array.from({ length: 257 }, (_, i) => [`field${i}`, true]));
+    await expect(f.manager.preview({ slug: "other", expected_revision: inspected.revision, changes })).rejects.toThrow("smaller change");
+    expect(f.apps.setOptions).not.toHaveBeenCalled();
+    expect(f.apps.validateOptions).not.toHaveBeenCalled();
+  });
+  it("includes an empty-object addition but omits unchanged scalar values from the diff", async () => {
+    const f = fixture();
+    f.change(info => {
+      info.schema.push({ name: "optional", type: "schema", schema: [] });
+    });
+    const inspected = await f.manager.inspect("other");
+    const plan = await f.manager.preview({ slug: "other", expected_revision: inspected.revision,
+      changes: { optional: {}, enabled: false } });
+    expect(plan.diff).toEqual([
+      { path: ["optional"], before: { state: "unset" }, after: { state: "withheld" } },
+    ]);
+    expect((await f.manager.apply(plan.preview_id, plan.review)).status).toBe("saved");
+    expect(f.apps.setOptions.mock.calls[0][1].optional).toEqual({});
+  });
   it("returns redacted options and opaque revisions, not secret-derived plain hashes", async () => {
     const f = fixture(); const data = await f.manager.inspect("other");
     expect(JSON.stringify(data)).not.toContain("PRIVATE");
@@ -77,6 +182,7 @@ describe("Supervisor app previews and verified application", () => {
   it("supports confirmed lifecycle actions with no implicit option save", async () => {
     const f = fixture(); const data = await f.manager.inspect("other");
     const plan = await f.manager.preview({ slug: "other", expected_revision: data.revision, action: "stop" });
+    expect(plan.review).toMatchObject({ name: "Example", before_state: "started", expected_state: "stopped" });
     expect((await f.manager.apply(plan.preview_id, plan.review)).verified).toBe(true);
     expect(f.apps.lifecycle).toHaveBeenCalledWith("other", "stop");
     expect(f.apps.setOptions).not.toHaveBeenCalled();

@@ -148,6 +148,9 @@ describe("OpenCode V2 managed configuration", () => {
     );
     assert.ok(mcpRules.slice(1, -1).every((rule) => rule.effect === "allow" && rule.resource === "*"));
     assert.ok(mcpRules.some((rule) => rule.action === "homeassistant_recall_decisions" && rule.effect === "allow"));
+    for (const name of ["supervisor_app_inspect", "supervisor_app_preview"]) {
+      assert.ok(mcpRules.some(rule => rule.action === `homeassistant_${name}` && rule.effect === "allow"));
+    }
     assert.deepEqual(mcpRules.at(-1), {
       action: "homeassistant_native_*",
       resource: "*",
@@ -155,6 +158,7 @@ describe("OpenCode V2 managed configuration", () => {
     });
     for (const action of [
       "homeassistant_call_service",
+      "homeassistant_supervisor_app_apply",
       "homeassistant_write_config_safe",
       "homeassistant_remember_decision",
       "homeassistant_supersede_decision",

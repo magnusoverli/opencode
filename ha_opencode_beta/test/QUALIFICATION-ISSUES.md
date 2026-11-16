@@ -113,8 +113,9 @@ Known unresolved reports and publication authorization are separate concerns.
   schema mappings. Tests use independently checked descriptors including nested
   schemas and password formats. Validation accepts a bare full options body;
   save accepts `{options: ...}`. Neither provides atomic If-Match.
-- Added redacted inspection and keyed opaque revisions; all option strings are
-  withheld. Object merges preserve omitted nested credentials. Credential edits,
+- Added redacted inspection and keyed opaque revisions. Only schema-constrained
+  standard `log_level` strings are visible; other strings are withheld.
+  Object merges preserve omitted nested credentials. Credential edits,
   arrays and deletion are deliberately unsupported in this first surface.
 - Previews expire after five minutes/restart. Application requires the exact
   preview/review, revalidates and rechecks source state, consumes the preview
@@ -128,6 +129,17 @@ Known unresolved reports and publication authorization are separate concerns.
   unavailable. Shared adapter extensions are only those required for this feature.
 - Synthetic tests pass; actual Supervisor API/permission-dialog acceptance remains
   unverified. Do not claim atomic concurrency control or full application readiness.
+- Follow-up batches 1–3 add display names, bounded before/after reviews and explicit
+  unset/withheld states. Compact and configuration MCP transport tests execute
+  inspection/preview and confirm apply is rejected before reaching Supervisor.
+- The pinned **2.3.0** runtime fixture exercises the production MCP plugin, model
+  tools and managed read-only permissions: inspection/preview execute, attempted
+  apply cannot reach MCP, and switching to Build preserves the plan while requiring
+  a separate native permission request before application.
+- Capability reports retain the labelled server catalogue and add a runtime-derived
+  current-agent snapshot. Tests cover concurrent sessions, agent changes, expiry,
+  bounded storage and unknown context. This is tool-list evidence, not a popup
+  approval receipt. Installed-system acceptance of these follow-ups is pending.
 
 ### #205: LAN pairing
 

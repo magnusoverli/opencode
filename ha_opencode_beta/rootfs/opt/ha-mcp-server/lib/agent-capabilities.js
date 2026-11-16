@@ -292,6 +292,12 @@ export function buildAgentCapabilities({
       },
     },
     mcp: {
+      scope: "configured_server_catalogue",
+      note: "This catalogue describes the configured MCP server, not the current agent's permissions or loaded model tools. Use current_agent when supplied by the OpenCode runtime; otherwise active-agent availability is unknown.",
+      current_agent: {
+        status: "unknown",
+        note: "The MCP server has no trusted active-agent context. Server tools may be hidden by client permissions; a listed tool is not proof that this agent can call it.",
+      },
       tools: tools.length,
       all_tools: allToolCount,
       tool_profile: {

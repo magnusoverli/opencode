@@ -39,6 +39,11 @@ describe("MCP tool profiles", () => {
     expect(isToolAllowedInProfile("recall_decisions", "compact")).toBe(true);
     expect(isToolAllowedInProfile("remember_decision", "compact")).toBe(false);
     expect(isToolAllowedInProfile("supersede_decision", "compact")).toBe(false);
+    for (const profile of ["compact", "configuration", "full"]) {
+      expect(isToolAllowedInProfile("supervisor_app_inspect", profile)).toBe(true);
+      expect(isToolAllowedInProfile("supervisor_app_preview", profile)).toBe(true);
+      expect(isToolAllowedInProfile("supervisor_app_apply", profile)).toBe(profile === "full");
+    }
   });
 
   it("adds safe configuration tools without administrative capabilities", () => {
