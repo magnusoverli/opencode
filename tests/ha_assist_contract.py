@@ -1,6 +1,7 @@
 """Run inside the pinned HA image; uses actual HA classes and no live HA instance."""
 
 import asyncio
+import contextvars
 import json
 import os
 import tempfile
@@ -55,6 +56,123 @@ class FixtureAPI(llm.API):
 
 
 class ContractTests(unittest.IsolatedAsyncioTestCase):
+    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    async def test_november_cached_tools_keep_current_caller_context(self):
+        entity = self.entity()
+        log, calls = self.log(tools=True)
+        api = log.llm_api
+        log.llm_api = None
+        first = llm.LLMContext(platform="opencode_assist", context=Context(user_id="trusted-user"),
+            language="en", assistant="conversation", device_id="trusted-device", agent_id=entity.entity_id)
+        second = llm.LLMContext(platform="opencode_assist", context=Context(user_id="trusted-user"),
+            language="en", assistant="conversation", device_id="trusted-device", agent_id=entity.entity_id)
+        with patch.object(llm, "async_get_api", AsyncMock(return_value=api)) as get_api, \
+             patch.object(self.hass, "auth", SimpleNamespace(async_get_user=AsyncMock(return_value=None)), create=True):
+            await log.async_provide_llm_data(first, ["fixture"], "First instructions")
+            prompt = log.content[0].content
+            await log.async_provide_llm_data(second, ["fixture"], "Changed instructions")
+        get_api.assert_awaited_once()
+        self.assertEqual(log.content[0].content, prompt)
+        async def stream(payload):
+            self.assertIn("First instructions", payload["system"])
+            yield {"type": "request", "id": "a" * 36}
+            yield {"type": "tool_call", "id": "call1", "name": "FixtureRead", "arguments": {"name": "Fixture"}}
+            yield {"type": "text", "text": "Done"}
+            yield {"type": "done"}
+        self.client.stream = stream
+        await entity.async_run_chat(log)
+        self.assertIs(calls[0][1].context, second.context)
+
+    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    async def test_november_admin_api_refuses_nonadmin_before_tools(self):
+        entity = self.entity()
+        entity.subentry = ConfigSubentry(data=MappingProxyType({"model": "fixture/coding", "llm_hass_api": ["fixture-admin"]}),
+            subentry_type="conversation", title="Admin fixture", unique_id=None)
+        log, _ = self.log()
+        api = FixtureAPI(hass=self.hass, id="fixture-admin", name="Admin", requires_admin=True)
+        self.addCleanup(llm.async_register_api(self.hass, api))
+        context = llm.LLMContext(platform="opencode_assist", context=Context(user_id="user"),
+            language="en", assistant="conversation", device_id=None)
+        user = SimpleNamespace(as_llm_context=Mock(return_value=context), extra_system_prompt=None)
+        with patch.object(self.hass, "auth", SimpleNamespace(async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))), create=True), \
+             patch.object(api, "async_get_api_instance", AsyncMock()) as instance, \
+             patch.object(entity, "async_run_chat", AsyncMock()) as run_chat:
+            result = await entity._async_handle_message(user, log)
+            self.assertEqual(result.response.error_code.value, "unknown")
+            instance.assert_not_awaited()
+            run_chat.assert_not_awaited()
+
+    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    async def test_november_merged_tool_names_roundtrip_through_companion(self):
+        entity = self.entity()
+        log, first_calls = self.log(tools=True)
+        first = log.llm_api.api
+        second = FixtureAPI(hass=self.hass, id="second", name="Second")
+        second_calls = []
+        context = log.llm_api.llm_context
+        with patch.object(first, "async_get_api_instance", AsyncMock(return_value=log.llm_api)), \
+             patch.object(second, "async_get_api_instance", AsyncMock(return_value=llm.APIInstance(
+                 second, "Second instructions", context, [FixtureTool(second_calls)]))):
+            log.llm_api = await llm.MergedAPI([first, second]).async_get_api_instance(context)
+        async def stream(payload):
+            self.assertEqual([tool["name"] for tool in payload["tools"]], ["fixture__FixtureRead", "second__FixtureRead"])
+            yield {"type": "request", "id": "a" * 36}
+            yield {"type": "tool_call", "id": "call1", "name": "second__FixtureRead", "arguments": {"name": "Fixture"}}
+            yield {"type": "text", "text": "Done"}
+            yield {"type": "done"}
+        self.client.stream = stream
+        await entity.async_run_chat(log)
+        self.assertEqual(first_calls, [])
+        self.assertEqual(len(second_calls), 1)
+        self.assertIs(second_calls[0][1].context, context.context)
+        _, messages = history_payload(log)
+        result = next(message for message in messages if message["role"] == "tool")
+        self.assertEqual(result["content"][0]["name"], "second__FixtureRead")
+
+    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    async def test_november_native_mcp_readonly_filters_listing_and_dispatch(self):
+        from homeassistant.components.mcp_server.server import async_get_api_instance
+        log, calls = self.log(tools=True)
+        read = FixtureTool(calls)
+        read.annotations = llm.ToolAnnotations(read_only=True)
+        write = FixtureTool(calls)
+        write.name = "FixtureWrite"
+        write.annotations = llm.ToolAnnotations(read_only=False)
+        def instance(*_):
+            return llm.APIInstance(log.llm_api.api, "Fixture", log.llm_api.llm_context, [read, write])
+        with patch.object(llm, "async_get_api", AsyncMock(side_effect=instance)):
+            configured = await async_get_api_instance(self.hass, ["fixture"], log.llm_api.llm_context, True)
+            keyed = await async_get_api_instance(self.hass, "fixture", log.llm_api.llm_context, False)
+        self.assertEqual([tool.name for tool in configured.tools], ["FixtureRead"])
+        self.assertEqual([tool.name for tool in keyed.tools], ["FixtureRead", "FixtureWrite"])
+        with self.assertRaisesRegex(HomeAssistantError, 'Tool "FixtureWrite" not found'):
+            await configured.async_call_tool(llm.ToolInput(id="blocked", tool_name="FixtureWrite", tool_args={"name": "Fixture"}))
+        self.assertEqual(calls, [])
+
+    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    async def test_november_failed_turn_retained_and_parallel_turn_rejected(self):
+        from homeassistant.components.conversation.chat_log import async_get_chat_log, ConversationBusyError
+        entity = self.entity()
+        session = SimpleNamespace(conversation_id="november-fixture", async_on_cleanup=Mock())
+        user = SimpleNamespace(agent_id=entity.entity_id, text="Original question")
+        async def competing_turn():
+            with async_get_chat_log(self.hass, session, user):
+                self.fail("Concurrent turn must be rejected")
+        async def stream(_payload):
+            raise HomeAssistantError("Synthetic provider unavailable")
+            yield  # Keep the same async-generator contract as the real client.
+        self.client.stream = stream
+        with self.assertRaisesRegex(HomeAssistantError, "Synthetic provider unavailable"):
+            with async_get_chat_log(self.hass, session, user) as log:
+                with self.assertRaises(ConversationBusyError):
+                    await asyncio.create_task(competing_turn(), context=contextvars.Context())
+                await entity.async_run_chat(log)
+        with async_get_chat_log(self.hass, session) as retained:
+            self.assertTrue(any(item.role == "user" and item.content == user.text for item in retained.content))
+            self.assertGreater(len(retained.content), 2)
+            system, messages = history_payload(retained)
+            self.assertTrue(any(message["role"] == "user" for message in messages))
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.hass = HomeAssistant(self.temp.name)

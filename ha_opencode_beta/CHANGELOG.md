@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Qualify HA 2026.11 compatibility ([#45](https://github.com/magnusoverli/opencode/issues/45))** — test the companion against HA 2026.11.1 as well as 2026.10, including cached tool context, administrator authorization, failed/concurrent conversations and native MCP read-only filtering. Companion 0.1.0b8 uses HA's **AI tools** wording and explains the broader admin API. Document that HA's read-only option applies only to the configured MCP endpoint; preserve configured-endpoint tool rejections without retrying a keyed API.
+
 - **Qualify combined migration failures ([#211](https://github.com/magnusoverli/opencode/issues/211), [#217](https://github.com/magnusoverli/opencode/issues/217), [#195](https://github.com/magnusoverli/opencode/issues/195))** — extend real-converter coverage to existing/nonexistent workspaces, Git repositories, missing project records and compacted conversations together. Verify that the existing placement repair recovers a failed migration without changing source history, while corrupted placement or compaction content remains rejected.
 - **Improve preserved-work diagnostics ([#202](https://github.com/magnusoverli/opencode/issues/202), [#207](https://github.com/magnusoverli/opencode/issues/207))** — unknown migration work now reports bounded path/ownership/mode metadata at startup; add CLI-level preservation checks and distinguish filesystem blockers from history-validation errors in recovery guidance. This does not automatically repair unknown filesystem states.
 

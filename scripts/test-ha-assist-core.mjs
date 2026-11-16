@@ -40,14 +40,19 @@ try {
     coreHost: "127.0.0.1", corePort: 0, ipcPort: 0 });
   // Host networking reaches only this fixture's loopback listener. No real HA
   // config, secrets or provider credentials are mounted into the test container.
-  const child = spawn("docker", ["run", "--rm", "--network", "host", "--entrypoint", "python",
-    "-e", "PYTHONPATH=/work", "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", `ASSIST_FIXTURE_URL=http://127.0.0.1:${service.core.address().port}`,
-    "-e", `ASSIST_FIXTURE_BOOTSTRAP=${bootstrap.current().bootstrap}`,
-    "-e", `ASSIST_FIXTURE_NOTIFICATION=${notification}`,
-    "-v", `${root}${addon}/rootfs/opt/opencode-assist/custom_components:/work/custom_components:ro`, "-v", `${root}tests/ha_assist_contract.py:/work/ha_assist_contract.py:ro`, "-w", "/work",
-    "ghcr.io/home-assistant/home-assistant:2026.10.0b0", "ha_assist_contract.py"], { stdio: "inherit" });
-  const [code] = await once(child, "exit");
-  process.exitCode = code ?? 1;
+  const versions = channel === "beta" ? ["2026.10.0b0", "2026.11.1"] : ["2026.10.0b0"];
+  for (const version of versions) {
+    console.log(`Testing ${channel} companion against HA ${version}`);
+    const child = spawn("docker", ["run", "--rm", "--network", "host", "--entrypoint", "python",
+      "-e", "PYTHONPATH=/work", "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", `ASSIST_FIXTURE_URL=http://127.0.0.1:${service.core.address().port}`,
+      "-e", `HA_ASSIST_TEST_VERSION=${version}`,
+      "-e", `ASSIST_FIXTURE_BOOTSTRAP=${bootstrap.current().bootstrap}`,
+      "-e", `ASSIST_FIXTURE_NOTIFICATION=${notification}`,
+      "-v", `${root}${addon}/rootfs/opt/opencode-assist/custom_components:/work/custom_components:ro`, "-v", `${root}tests/ha_assist_contract.py:/work/ha_assist_contract.py:ro`, "-w", "/work",
+      `ghcr.io/home-assistant/home-assistant:${version}`, "ha_assist_contract.py"], { stdio: "inherit" });
+    const [code] = await once(child, "exit");
+    assert.equal(code, 0, `HA ${version} companion contracts failed`);
+  }
   await service.close();
   assert.equal((await fixture.client.session.list()).data.length, 0);
 } finally {

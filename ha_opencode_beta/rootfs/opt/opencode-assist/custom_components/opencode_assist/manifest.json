@@ -1,7 +1,7 @@
 {
   "domain": "opencode_assist",
   "name": "OpenCode Assist",
-  "version": "0.1.0b7",
+  "version": "0.1.0b8",
   "codeowners": ["@magnusoverli"],
   "config_flow": true,
   "dependencies": ["conversation", "llm", "ai_task"],

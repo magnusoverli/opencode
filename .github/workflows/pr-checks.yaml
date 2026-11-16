@@ -77,9 +77,9 @@ jobs:
           bash scripts/test-channel-separation.sh
 
   ha-assist:
-    name: HA 2026.10 companion and pinned OpenCode contracts (${{ matrix.channel }})
+    name: HA companion and pinned OpenCode contracts (${{ matrix.channel }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     needs: changes
     strategy:
       fail-fast: false

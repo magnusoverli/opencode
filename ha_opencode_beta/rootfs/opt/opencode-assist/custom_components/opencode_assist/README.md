@@ -1,8 +1,10 @@
 # OpenCode Assist companion (experimental)
 
-Targets **Home Assistant 2026.10 with Supervisor**. Companion **0.1.0b7** in beta **3.2.0b6**
-ships the add-on's icon/logo through HA's local `brand/` support and limits each
-app connection to one conversation agent and one AI data task.
+Targets **Home Assistant 2026.10–2026.11 with Supervisor**, with automated contracts
+against **2026.10.0b0** and **2026.11.1**. Companion **0.1.0b8** uses HA's **AI tools**
+wording and explains the broader administrator API. It ships the add-on's icon/logo
+through HA's local `brand/` support and limits each app connection to one
+conversation agent and one AI data task.
 Existing entities remain configurable; duplicate setup shows guidance instead
 of adding another entity of the same type.
 
@@ -20,7 +22,10 @@ of adding another entity of the same type.
    bootstrap; HA generates and exchanges a scoped key automatically. Nothing
    needs copying. **Add integration → OpenCode Assist** finds the same app.
 4. HA opens model/API selection as the next step. Choose a model and, for
-   conversations, the HA APIs to expose. No APIs are selected automatically.
+   conversations, the **AI tools** to expose. No APIs are selected automatically.
+   **Device control** (`assist`) respects exposed entities; HA 2026.11's
+   **Home Assistant** (`homeassistant`) tools require an administrator and are
+   not limited to exposed entities. HA checks the conversation caller's permissions.
    Select the conversation entity in your Assist pipeline or the AI task entity
    for `ai_task.generate_data`.
 
@@ -29,7 +34,7 @@ Assist**, then select **Add conversation agent** or **Add AI data task**. These
 buttons also appear in the existing app connection's overflow menu. **Add app
 connection** creates a separate app connection; it is not the add-entity action.
 Both entity types share the existing pairing, and each has its own model settings.
-Use an existing entity's **Configure** button to change its settings. HA 2026.10
+Use an existing entity's **Configure** button to change its settings. HA 2026.10–2026.11
 uses the same supported-type declaration for Add and Configure, so the Add buttons
 remain visible even after a type has been added; duplicate creation is rejected.
 Removing a service lets you add that type again. Existing duplicate entities from
@@ -90,6 +95,13 @@ They fail if the model returns invalid structured output; this adapter does not
 claim provider-enforced JSON generation. Attachments, images and binary outputs
 are not advertised. Selected custom HA APIs retain their own authorization
 semantics; selecting a broader API does not acquire Assist's exposure boundary.
+
+On HA 2026.11, HA can cache the selected tools and system prompt for a conversation.
+Use tools for current state and start a new conversation after changing exposure
+or instructions. HA rejects concurrent turns on the same conversation and retains
+failed turns in its history; the adapter preserves HA's history and current caller
+context. HA's MCP Server **Read-only** setting does not filter this companion's
+directly selected AI tools.
 
 Requests are bounded to two minutes, eight concurrent generations, 128 selected
 tools, 32 tool calls, 256 history messages and a 512 KiB request body. Oversized

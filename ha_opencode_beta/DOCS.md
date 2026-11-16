@@ -53,7 +53,8 @@ OpenCode Assist** uses the same Supervisor discovery flow.
 
 **3.2.0b6** removes the redundant Assist setup header from both Ingress interfaces.
 Use Home Assistant's discovered integration or **Add integration** for setup.
-Companion **0.1.0b7** also includes the add-on icon and logo, served locally by HA.
+Companion **0.1.0b8** includes the add-on icon and logo, served locally by HA, and
+clarifies the **AI tools** selection for HA 2026.11.
 Restart **Home Assistant Core** after the app updates the companion, then refresh
 the integration page to load the branding.
 
@@ -611,10 +612,28 @@ OpenCode's own bundled `homeassistant` MCP supplies configuration, validation, d
 | Entry in HA's MCP card | Endpoint | How it relates to this app |
 | --- | --- | --- |
 | **Your MCP API** | `/api/mcp` | Combines HA's selected LLM APIs. Choose `home_assistant` under **Native tool selection** (new-install default). |
-| **Assist** | `/api/mcp/assist` | Choose `assist` for focused home-control and context tools; explicit choices are retained. |
+| **Device control** (previously **Assist**) | `/api/mcp/assist` | Choose `assist` for focused home-control and context tools; explicit choices are retained. |
+| **Home Assistant** (HA 2026.11+) | `/api/mcp/homeassistant` | Admin-only tools, not limited to exposed entities. Choose `custom` with API ID `homeassistant` only when this broader access is intended. |
 | **Home Assistant Read-Only** (when enabled and connected) | `/api/mcp/mcp-<app-slug>` | This app's read-only tools made available through HA. Created by **Expose read-only MCP to Home Assistant**, the opposite-direction connection; not the native bridge's default target. |
 
-On new HA 2026.10 MCP Server setups, **Your MCP API** exposes all registered LLM APIs by default, including APIs added later; older setups retain their selections. It can include the app's read-only API as well. A larger catalogue can mean more tools and overlap, but does not automatically grant unrestricted HA administration. Choose `assist` for focused home control or `home_assistant` for HA's combined selection. Save and restart after changes. See [Expose Read-Only MCP to Home Assistant](#expose-read-only-mcp-to-home-assistant) for the reverse connection.
+On new HA 2026.10 MCP Server setups, **Your MCP API** exposes all registered LLM APIs by default, including APIs added later; older setups retain their selections. It can include the app's read-only API as well. On HA 2026.11+, the new `homeassistant` API provides administrative tools outside the exposed-entity boundary. The native bridge authenticates as Supervisor's admin system user, so review the selected APIs in HA rather than assuming admin-only tools will be unavailable. Choose `assist` for focused home control or `home_assistant` for HA's combined selection. Save and restart the app after changing its native selection. See [Expose Read-Only MCP to Home Assistant](#expose-read-only-mcp-to-home-assistant) for the reverse connection.
+
+**Names matter:** the app setting `home_assistant` means the configured `/api/mcp`
+endpoint. HA's API ID `homeassistant` (no underscore) means the separate admin API.
+
+**HA 2026.11 read-only mode:** enable **Read-only** in HA's MCP Server options and
+use the app's `home_assistant` selection to retain that filtering. HA omits
+non-read-only tools from `/api/mcp` and rejects attempts to call them. This option
+does **not** apply to keyed URLs such as `/api/mcp/assist` or
+`/api/mcp/homeassistant`, nor to OpenCode's bundled tools or shell. Selecting
+`assist` is not a read-only mode: it can control exposed devices.
+
+**Conversation behavior on HA 2026.11:** for an Assist agent using HA tools, HA
+reuses the system prompt and tool catalog within the same conversation. Use tools
+for current state; time/state values embedded in instruction templates may remain
+at their initial values. Changes to exposure may need a new conversation. HA
+rejects overlapping turns on the same conversation and retains failed messages;
+wait for the current turn to finish rather than resending actions blindly.
 
 Home Assistant has a native `llm` integration and native MCP endpoints for registered LLM APIs. PR [home-assistant/developers.home-assistant#3236](https://github.com/home-assistant/developers.home-assistant/pull/3236) documents the contract: every registered LLM API is exposed at `/api/mcp/<API ID>` once Home Assistant's MCP Server integration is set up. The built-in Assist API uses the API ID `assist`.
 
