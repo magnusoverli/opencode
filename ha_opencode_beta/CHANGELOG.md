@@ -1,18 +1,16 @@
 # Changelog
 
-## Unreleased
+## 3.5.0b3
 
-- Redirect trusted MCP setup navigation to its canonical path and explain unavailable setup-service states without changing access checks (#214).
-
-- Isolate beta browser preferences from stable when both run under the same Home Assistant origin. Existing unscoped browser preferences remain preserved; beta starts its own workspace/model/session selection (#199).
-- Add a direct-click OpenAI sign-in handoff link and inline callback instructions when browsers block the automatic tab (#209).
-
-- Preserve external MCP file references through upstream configuration loading and isolate invalid external definitions from bundled HA MCP activation (#216).
-- Recover established terminal WebSocket errors with bounded reconnect backoff, retaining tmux sessions and input; add a real-browser error-before-close regression (#218).
-- Wait for integration publication before starting one OAuth attempt, covering the remaining cold-start race (#208).
-- Separate editor-managed resource saves from whole-file YAML safe writes and remove the contradictory in-place editing exception (#215).
-- Report acknowledged Supervisor restarts still in startup as in progress, make preview text action-specific, and paginate store audits beyond 100 entries (#199).
-- Clarify LAN pairing's JSON/browser exchange and device revocation contract (#205); verify that the full advertised MCP catalog, including HAB, reaches the pinned runtime's model request (#214).
+- **Separate stable/beta browser state ([#199](https://github.com/magnusoverli/opencode/issues/199))** — isolate beta browser preferences when both apps share the Home Assistant origin. Existing unscoped preferences remain preserved; beta starts its own workspace/model/session selection.
+- **Make OpenAI handoff easier to find ([#209](https://github.com/magnusoverli/opencode/issues/209), [#208](https://github.com/magnusoverli/opencode/issues/208))** — add a direct-click sign-in handoff link and callback instructions when browsers block the automatic tab. Wait for integration publication before starting one OAuth attempt, fixing the remaining cold-start race.
+- **Preserve external MCP references ([#216](https://github.com/magnusoverli/opencode/issues/216))** — retain file references through upstream configuration loading and isolate invalid external definitions from bundled HA MCP activation.
+- **Recover terminal connections ([#218](https://github.com/magnusoverli/opencode/issues/218))** — retry established WebSocket errors with bounded backoff while retaining tmux sessions and input. Includes a real-browser error-before-close regression; this does not identify the original cause of recurring disconnects.
+- **Correct editing guidance ([#215](https://github.com/magnusoverli/opencode/issues/215))** — distinguish editor-managed resource saves from whole-file YAML safe writes and remove the contradictory in-place editing exception.
+- **Correct Supervisor results ([#199](https://github.com/magnusoverli/opencode/issues/199))** — report acknowledged restarts still in startup as in progress, make preview text action-specific, and paginate store audits beyond 100 entries.
+- **Improve MCP setup diagnostics ([#214](https://github.com/magnusoverli/opencode/issues/214))** — redirect trusted setup navigation to its canonical path and explain unavailable-service states without changing access checks. An end-to-end regression verifies that every advertised MCP tool, including HAB, reaches the pinned runtime's model request. The reported generic HA side-panel failure remains under investigation.
+- **Clarify LAN pairing ([#205](https://github.com/magnusoverli/opencode/issues/205))** — document the JSON/browser exchange and device revocation contract.
+- **Still under investigation:** ChatGPT account/model rejection ([#208](https://github.com/magnusoverli/opencode/issues/208)) and migration blockers involving unknown work or unsafe paths ([#202](https://github.com/magnusoverli/opencode/issues/202), [#207](https://github.com/magnusoverli/opencode/issues/207)). Existing data-preserving diagnostics remain in place; this release does not claim to repair those states.
 
 ## 3.5.0b2
 
