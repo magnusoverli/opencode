@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Redirect trusted MCP setup navigation to its canonical path and explain unavailable setup-service states without changing access checks (#214).
+
 - Isolate beta browser preferences from stable when both run under the same Home Assistant origin. Existing unscoped browser preferences remain preserved; beta starts its own workspace/model/session selection (#199).
 - Add a direct-click OpenAI sign-in handoff link and inline callback instructions when browsers block the automatic tab (#209).
 

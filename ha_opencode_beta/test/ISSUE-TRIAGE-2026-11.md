@@ -90,7 +90,9 @@ or replied to by this sweep.
   reviewed beta-only storage bootstrap.
 - #209: automatic tab opening happens after asynchronous authorization and can be
   blocked by browsers. Added a direct-click handoff link with callback instructions.
-  Patcher tests pass; patched UI/image verification is pending.
+  Patcher tests and the patched UI/native AMD64 boundary build pass.
+  Committed with storage isolation as `0e14ea9`; all ten PR jobs passed:
+  https://github.com/magnusoverli/opencode/actions/runs/43834309806 .
 - #208: pinned OpenCode 2.3.0 already applies ChatGPT-specific model filtering.
   The reports establish account-level model rejection but do not establish a safe
   replacement catalog. Keep that symptom open; the handoff usability fix also
@@ -99,3 +101,19 @@ or replied to by this sweep.
   it is not rendered from the agent's advertised tool schemas. The reported
   generic HA side-panel error lacks HTTP/status evidence identifying a failure.
   Tool-catalog regression remains green; no speculative routing/auth relaxation.
+- #214 follow-up: reproduced trusted bare `/ha-mcp` navigation returning 403.
+  Added canonical redirect after the existing trust checks; POST/LAN/untrusted
+  requests remain rejected. Missing setup service now returns actionable HTML
+  with HTTP 503 rather than an unexplained text response. Two new regressions
+  and the existing Assist ingress regression pass in Linux. This improves two
+  reproducible setup failures, but does not establish the cause of the reporter's
+  generic HA side-panel error.
+- #208 follow-up: pinned OpenChamber `useConfigStore.ts` excludes models whose
+  `enabled` field is false before building picker providers. No demonstrated
+  filter bypass justifies a UI catalog rewrite. Account-specific entitlement
+  and rejection of runtime-advertised models remain unresolved.
+- #202/#207 follow-up: reran all six Linux path-diagnostic/preservation tests,
+  including the exact unknown directory reported in #202. All passed. Existing
+  diagnostics neither read unknown contents nor follow symlinks. No new
+  evidence identifies the provenance of that directory or the failing path in
+  #207; automatic cleanup or permission repair remains unjustified.
