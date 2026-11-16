@@ -2,6 +2,8 @@
 
 Reviewed all 21 open issues and every comment on 2026-11-16. This is a local
 engineering ledger; no issue comments, replies, labels or closures are requested.
+All fixes target beta only. Stable receives them through eventual beta promotion,
+not backports. Stable changes from the first sweep commit are reverted.
 Feature requests are excluded, but concrete defects in their follow-up comments
 remain in scope. Passing automated checks do not establish affected-host or
 real-account acceptance.
@@ -10,7 +12,7 @@ real-account acceptance.
 | --- | --- | --- |
 | #219 | Feature | Exclude installation-specific editing-policy delegation. |
 | #218 | Bug | Investigate ttyd ingress disconnect/reconnect and input recovery. |
-| #217 | Bug, duplicate family | V1 session path preservation; current beta has private-copy placement restoration, stable needs review. |
+| #217 | Bug, duplicate family | V1 session path preservation; current beta has private-copy placement restoration; verify reported cases. |
 | #216 | Bug | External MCP file references expanded before validation; isolate external failures from bundled MCP. |
 | #215 | Guidance defect | Separate existing editor-API operations from direct YAML safe writes; remove contradictory in-place editing advice. |
 | #214 | Bug | Reproduce real MCP discovery of `hab_run`; compare advertised and registered tools. |
@@ -19,7 +21,7 @@ real-account acceptance.
 | #209 | Bug / usability | OAuth callback handoff discoverability and browser launch behavior. |
 | #208 | Bug | Activation race fixed in current beta and verified without an account; investigate missing handoff and account-specific model rejection separately. |
 | #207 | Needs evidence | Beta has path/type diagnostics. No affected filesystem evidence establishes which unsafe path can be repaired; retain safety checks and data. |
-| #206 | Bug, duplicate family | TUI state ownership; targeted repair and diagnostics already in beta, stable needs review. |
+| #206 | Bug, duplicate family | TUI state ownership; targeted repair and diagnostics already in beta; verify regression coverage. |
 | #205 | Compatibility / documentation defect | Verify native pairing exchange/auth contract and documented device listing/revocation. Exclude tunnel feature. |
 | #203 | Feature with follow-up | Exclude expanding tool access. Check existing read-only tool discovery and profile guidance against reported compact configuration. |
 | #202 | Needs evidence | Unknown migration artifact is named, but provenance/content is not established; preserve it, review diagnostics and recovery guidance. |
@@ -44,4 +46,4 @@ or replied to by this sweep.
 
 | Issue | Fix / verification | Closure status |
 | --- | --- | --- |
-| #216 | Stable and beta normalize local file references to descriptors before upstream config expansion. External validation is isolated from bundled/native registration. Both reference formats, delayed resolution, invalid external config, and Linux file-identity checks pass: 64 tests, zero skips in the root container. | Candidate after commit and affected CI passes. |
+| #216 | Beta normalizes local file references to descriptors before upstream config expansion. External validation is isolated from bundled/native registration. Both reference formats, delayed resolution, invalid external config, and Linux file-identity checks pass. Commit `729c272`; beta image CI passed. Stable backport withdrawn. | Candidate once beta PR checks pass; OAuth startup race currently blocks that workflow. |

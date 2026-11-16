@@ -54,20 +54,6 @@ function valueReference(value, label, { credential = false } = {}) {
   return value;
 }
 
-function localSecretReference(value, label) {
-  if (typeof value === "string") {
-    valueReference(value, label, { credential: true });
-    // OpenCode expands {file:...} anywhere in its config before plugin setup.
-    // Persist a descriptor instead; only our bounded resolver reads the file.
-    return { secret_file: secretName(value) };
-  }
-  fields(value, ["secret_file"], label);
-  if (typeof value.secret_file !== "string" || !SECRET_NAME.test(value.secret_file)) {
-    invalid(`${label}.secret_file is invalid`);
-  }
-  return { secret_file: value.secret_file };
-}
-
 function timeout(value, label) {
   if (value === undefined) return undefined;
   fields(value, ["startup", "catalog", "execution"], label);
@@ -148,7 +134,7 @@ function localServer(value, label) {
     if (Object.keys(value.environment).length > 64) invalid(`${label}.environment exceeds 64 entries`);
     for (const [name, item] of Object.entries(value.environment)) {
       if (!ENVIRONMENT_NAME.test(name) || RESERVED_LOCAL_ENVIRONMENT.test(name)) invalid(`${label}.environment contains an invalid or reserved name`);
-      environment[name] = localSecretReference(item, `${label}.environment`);
+      environment[name] = valueReference(item, `${label}.environment`, { credential: true });
     }
   }
   const literalEnvironment = {};
@@ -312,7 +298,8 @@ export async function readExternalMcpSecret(name, { root = EXTERNAL_MCP_SECRET_R
 }
 
 async function resolveValue(value, readSecret) {
-  return readSecret(value.secret_file);
+  const name = secretName(value);
+  return name ? readSecret(name) : value;
 }
 
 async function resolveHeaderValue(value, readSecret) {
