@@ -30,8 +30,9 @@ This is a Home Assistant **Supervisor add-on** (called an **app** in newer Home
 Assistant versions), not a standalone Home Assistant Core/Container integration.
 It supports **amd64** and **aarch64/ARM64**.
 
+Stable **3.5.0** includes OpenCode **2.3.0**, OpenChamber **2.7.2** and HAB **1.8.0**.
 Upgrading an existing installation? Back up first and read the
-[3.3 upgrade notes](ha_opencode/DOCS.md#upgrading-to-33), including stable history
+[3.5.0 upgrade notes](ha_opencode/DOCS.md#upgrading-to-350), including stable history
 preservation and backup-based rollback. Coming from 2.x? Follow the
 [2.x upgrade guide](ha_opencode/DOCS.md#upgrading-from-2x).
 
@@ -64,8 +65,8 @@ Start the add-on, then click **Open Web UI** (or use the sidebar entry). By defa
 
 ### 4. Connect an AI Provider
 
-In the terminal, run `opencode`, then `/connect` and follow the provider's sign-in
-prompts. Run `/models` to choose a model. In OpenChamber, use its provider/model
+The web terminal opens OpenCode automatically. Enter `/connect` and follow the
+provider's sign-in prompts, then `/models` to choose a model. In OpenChamber, use its provider/model
 settings instead. Anthropic, OpenAI, Google and other cloud or local providers
 are supported; credentials, subscriptions and usage charges depend on the provider.
 
@@ -110,7 +111,7 @@ Once connected, ask OpenCode things like:
 Use natural language to modify your Home Assistant configuration. No more searching documentation - just ask!
 
 #### 🎨 **Two Interface Modes**
-Choose a web **terminal** with 10 themes or the graphical **OpenChamber** web UI through Home Assistant Ingress. Both share one backend and history. Optional LAN frontends require separate authentication and a trusted HTTPS reverse proxy; mapping a port alone is not enough. See [LAN setup](ha_opencode/DOCS.md#lan-server-mode).
+Choose a web **terminal** with 10 themes or the graphical **OpenChamber** web UI through Home Assistant Ingress. Both share one backend and history within a channel. Optional LAN frontends require separate authentication and a trusted HTTPS reverse proxy; mapping a port alone is not enough. The OpenCode LAN API also supports [device pairing and individual revocation](ha_opencode/DOCS.md#lan-device-pairing). See [LAN setup](ha_opencode/DOCS.md#lan-server-mode).
 
 #### 🔌 **Provider Agnostic**
 Works with **Anthropic, OpenAI, Google**, other cloud providers and OpenAI-compatible local servers. Available models and authentication methods depend on the bundled runtime and provider.
@@ -121,11 +122,17 @@ Opt-in PPQ support uses an attested encrypted transport for eligible private mod
 #### 🎚️ **Scoped MCP Tool Profiles**
 Choose `compact`, `configuration`, or `full` (`full` is the default) to reduce the bundled MCP tool surface and prompt size. Hidden tools are rejected, but profiles do not restrict shell or filesystem access. See [tool profiles](ha_opencode/DOCS.md#mcp-tool-profiles).
 
+#### 🔎 **Read-Only Investigations**
+Select `home-assistant-read-only` through `/agents` for file reads, compact diagnostics and non-applying Supervisor previews. Its managed policy denies edits, shell commands and native HA tools. Applying a reviewed app plan requires an apply-capable agent such as Build and the `full` profile. See [read-only sessions](ha_opencode/DOCS.md#read-only-session).
+
 </td>
 <td width="50%">
 
 #### 🔧 **Deep MCP Integration**
-Bundled tools, resources and guided prompts cover state and service calls, history, config validation, calendars, decision notes, updates, ESPHome, Supervisor diagnostics and CLI gateways. Availability depends on your tool profile and enabled features; inspect it with `ha-mcp tools` or `get_agent_capabilities`.
+Bundled tools, resources and guided prompts cover state and service calls, history, config validation, calendars, decision notes, updates, ESPHome, Supervisor diagnostics and CLI gateways. `ha-mcp tools` lists the server's advertised tools; `get_agent_capabilities` also reports the current agent's offered tools when a fresh runtime snapshot is available. Tool availability does not itself grant permission to execute a call.
+
+#### 🎛️ **Supervisor App Review**
+Inspect apps by display name, review redacted options and before/after changes, and preview option or lifecycle operations without applying them. Applying a single-use, five-minute plan requires the `full` profile, an apply-capable agent and native permission approval. See [Supervisor app management](ha_opencode/DOCS.md#supervisor-app-review-and-capability-reporting).
 
 #### 🧠 **Home Context**
 Sessions start knowing your installation instead of rediscovering it. A generated briefing describes your setup, `AGENTS.local.md` holds your own standing instructions that survive updates, and decision notes — recorded only with your approval — carry the reasoning behind your configuration between sessions. Inspect it all with `ha-context`.
@@ -134,10 +141,10 @@ Sessions start knowing your installation instead of rediscovering it. A generate
 Home Assistant YAML diagnostics, completions, hover and definitions are available through agent tools, with live diagnostics/completion in OpenChamber's Ingress editor. Whole-file YAML formatting is opt-in. See [language assistance](ha_opencode/DOCS.md#v2-yaml-language-assistance-and-formatting).
 
 #### 🛡️ **Safe Config Writing**
-The `write_config_safe` MCP tool provides validation, backups, rollback attempts and content-loss checks. Native file edits and specified in-place shell commands ask for approval by default, but do not automatically use that pipeline.
+Use `write_config_safe` for complete YAML files or `patch_config_safe` for reviewed exact-text changes that preserve surrounding content. Both use revision checks, atomic replacement, recovery copies and post-save HA validation. Editor-managed automations, scripts and scenes use their supported editor APIs. See [reviewed YAML transactions](ha_opencode/DOCS.md#reviewed-yaml-transactions).
 
 #### 🏗️ **hab CLI Integration**
-Includes the [Home Assistant Builder CLI](https://github.com/balloob/home-assistant-build-cli) by [@balloob](https://github.com/balloob) for dashboards, registries, helpers, backups and administration. Agents use the authenticated `hab_run` MCP gateway in the `full` profile; their shell does not inherit Supervisor credentials.
+Includes the [Home Assistant Builder CLI](https://github.com/balloob/home-assistant-build-cli) by [@balloob](https://github.com/balloob) for dashboards, registries, helpers, backups and administration. Agents use the authenticated `hab_run` MCP gateway in the `full` profile; their shell does not inherit Supervisor credentials. A separately permissioned `hab_run_read_only` gateway enforces a limited dashboard/helper read subset, also in `full`.
 
 #### 🧩 **Startup Hooks**
 An opt-in, persistent place for your own scripts to run at add-on startup. Scripts run as root; keep customizations in the supported [startup hooks directory](ha_opencode/DOCS.md#startup-hooks-beta), not the disposable container filesystem.
@@ -198,7 +205,11 @@ that support tool calling and fit your hardware, privacy needs and budget:
 The add-on does not include a paid model subscription. Upstream may offer free
 models, but availability, limits and terms can change; do not assume every model
 offered through OpenCode is free or keyless. Check the provider's current pricing
-and [OpenCode's provider documentation](https://opencode.ai/v2/docs/providers).
+and [OpenCode's provider documentation](https://opencode.ai/docs/providers).
+
+For browser-based provider sign-in in OpenChamber, follow the
+[sign-in handoff guide](ha_opencode/DOCS.md#connecting-a-provider-with-browser-sign-in).
+For a separate local inference server, see the [custom-provider examples](ha_opencode/DOCS.md#custom-providers-and-configuration-beta).
 
 Your prompts and tool results are sent to the selected model provider. Local
 models need a separately running inference server; the add-on itself is not one.
@@ -211,11 +222,14 @@ models need a separately running inference server; the add-on itself is not one.
 
 It also mounts Home Assistant add-on development folders (`/addons` and `/addon_configs`) so OpenCode can help with custom add-ons. Treat `/addon_configs` as sensitive because it may contain configuration data for other add-ons.
 
-The bundled **`write_config_safe` MCP tool** provides a multi-layered validation
-pipeline. These checks apply to writes through that tool, **not every file write**:
+The bundled **`write_config_safe` and `patch_config_safe` MCP tools** share a
+validation and recovery pipeline. These checks apply to writes through those
+tools, **not every file write**:
 
+- 🔎 **Review before applying** — preview first, then approve the proposed content. Whole-file writes require the preview's source revision; patches also require its candidate hash. Stale revisions are rejected
+- 🔐 **Coordinated writes** — atomic replacement and a shared writer lock protect cooperating app writers. Unrelated external editors are not covered by an atomic compare-and-swap
 - 🔍 **HA config validation** — after writing, the tool runs HA Core's config check; a failed or unavailable check is not reported as a successful save
-- ↩️ **Backup and rollback** — existing files get a `.bak` copy; on failed validation the tool attempts to restore the original, or remove an invalid new file. Recovery can fail, so inspect the result and keep independent backups
+- ↩️ **Backup and recovery** — unique recovery copies and journals are retained in `/homeassistant/.opencode-safe-write-backups/`. On failed validation, the tool attempts to restore the original or remove an invalid new file. Only `restored` confirms verified restoration; an uncertain outcome requires inspection. Keep independent backups
 - 🧪 **Jinja2 template pre-validation** — checks changed templates through HA's engine where possible; unchanged or runtime-dependent templates can be skipped
 - 📋 **Deprecation scanning** — checks for outdated syntax and cross-checks your instance's HA Repairs warnings
 - ✂️ **Guardrails against accidental data loss** — large deletions (missing list entries, removed top-level keys, or a file shrinking by more than half) are blocked unless explicitly confirmed
@@ -224,9 +238,9 @@ pipeline. These checks apply to writes through that tool, **not every file write
 
 **Other guardrails and their limits:**
 
-- ✅ **Direct-edit approval** — native file edits and configured shell patterns (`yq -i`, `sed -i`, `tee`, `rm`, `mv`) ask by default. These rules do not detect every possible shell write, and approval does not run safe-write validation. The safe-write tool has no separate native edit prompt; agent instructions still require your consent
-- 🔒 **Sensitive-file read protection** — the normal agent's read tool denies `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, and `*.key`/`*.pem` by default. This is not a shell sandbox: allowed shell commands run as container root and can bypass read-tool restrictions. See [protection scope](ha_opencode/DOCS.md#sensitive-file-protection)
-- 🔄 **Saved is not active** — saving YAML does not reload Home Assistant. Apply an approved domain reload or restart as appropriate, then verify loading. The `configuration` profile omits service calls, so reload remains a manual step. See [editing automations](ha_opencode/DOCS.md#editing-automations-saved-versus-active)
+- ✅ **Direct-edit approval** — native file edits and configured shell patterns (`yq -i`, `sed -i`, `tee`, `rm`, `mv`) ask by default. These rules do not detect every possible shell write, and approval does not run safe-write validation. The YAML write tools have no separate managed native edit prompt; agent instructions still require your consent. Supervisor app apply has its own mandatory native permission prompt
+- 🔒 **Sensitive-file read protection** — the normal agent's read tool denies `secrets.yaml`, `.storage/`, `.cloud/`, `ssl/`, `*.key`/`*.pem`, and safe-write recovery files by default. This is not a shell sandbox: allowed shell commands run as container root and can bypass read-tool restrictions. See [protection scope](ha_opencode/DOCS.md#sensitive-file-protection)
+- 🔄 **Saved is not active** — neither YAML write tool reloads Home Assistant. Apply an approved domain reload or restart as appropriate, then verify loading. The `configuration` profile omits service calls, so reload remains a manual step. Editor-API saves can activate automatically; consent must cover that behavior. See [editing automations](ha_opencode/DOCS.md#editing-automations-saved-versus-active)
 
 **Additional best practices:**
 
@@ -251,9 +265,9 @@ Home Assistant's native `llm` platform and keyed MCP endpoints are available fro
   reverse connection, sharing the add-on's read-only tools with HA. See
   [read-only sharing](ha_opencode/DOCS.md#expose-read-only-mcp-to-home-assistant).
 - **OpenCode Assist** (`ha_assist_enabled`) is an **experimental**, default-off
-  companion for **HA 2026.10 with Supervisor**. Enable it and restart the add-on,
+  companion for **HA 2026.10–2026.11 with Supervisor**. Enable it and restart the add-on,
   then restart **Home Assistant Core** to load the companion and configure the
-  discovered integration. Choose a model and APIs explicitly. Voice also needs
+  discovered integration. Choose a model and **AI tools** explicitly. Voice also needs
   separate speech engines; full supervised voice-pipeline and crash-recovery
   qualification remain open. See [Assist setup](ha_opencode/DOCS.md#experimental-native-assist-and-ai-data-tasks).
 
@@ -264,6 +278,11 @@ selections are available. `/api/mcp` follows HA's selected APIs and can expand
 when **Expose all LLM APIs** is on. The add-on does not enable or reconfigure HA's
 MCP Server. No URL or token needs copying. Review
 [migration and rollback guidance](ha_opencode/DOCS.md#upgrade-policy-assist-to-ha-configured-mcp).
+
+On HA 2026.11, the MCP Server's **Read-only** setting applies to the configured
+`/api/mcp` endpoint, not independently selected `/api/mcp/<ID>` endpoints or the
+Assist companion's directly selected AI tools. Review the selected API's access
+scope; administrator tools are not limited to entities exposed to Assist.
 
 Bundled, native and external MCP connections activate independently. A connected
 status alone does not prove native tools have loaded: verify a suitable read-only
@@ -304,7 +323,7 @@ Upstream OpenCode community; use this repository's issues for add-on problems
 <td align="center" width="33%">
 
 ### 📖 Documentation
-[OpenCode V2 Docs](https://opencode.ai/v2/docs/)
+[OpenCode V2 Docs](https://opencode.ai/docs/)
 
 Upstream guides; add-on-specific setup is in [our documentation][docs]
 
@@ -326,7 +345,8 @@ Bug reports & feature requests
 
 ### Reproducing CI
 
-On Linux with Node 24, Python 3, Git, Chrome and Docker available:
+On Linux with Bash, Node 24/npm, Python 3, Git, a C compiler (`cc`), Chrome and
+Docker available:
 
 ```bash
 bash scripts/ci-checks.sh beta contracts
@@ -338,6 +358,8 @@ dependencies, audits them, and runs the channel's tests and root-boundary checks
 (using `sudo` when needed). Set `HA_ASSIST_BROWSER_EXECUTABLE` for a different
 Chrome/Chromium path. The image command explicitly builds `boundary-test`;
 an ordinary Docker build does **not** run that stage.
+Use an LF checkout for Linux builds: hash-checked compatibility files and
+fixtures must retain their committed bytes.
 
 CI selects the affected channels. Shared changes exercise both, in independent
 jobs, so a stable failure does not hide beta results. Contract logs are retained
