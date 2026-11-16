@@ -19,8 +19,6 @@ All notable changes to this project will be documented in this file.
 - **Qualify HA 2026.11 integration** alongside 2026.10, including conversation context, administrator authorization and native MCP read-only filtering. Companion **0.1.0b8** uses HA's **AI tools** wording ([#45](https://github.com/magnusoverli/opencode/issues/45)). HA's read-only MCP setting applies to the configured endpoint, not separately selected keyed APIs.
 - **Refresh reviewed security dependencies** — carry forward glob 14.0.2/minimatch 11.0.1 and OpenChamber's qs, follow-redirects, body-parser, undici and Zod fixes with frozen locks and scoped production audits.
 
-**Acceptance:** installed beta testing confirmed the deprecation fix, core safe-patch transactions, Supervisor review protections, genuine read-only inspection/previews, Build handoff, native permission prompts and restoration. No confirmed defects were found in those runs; temporary changes were restored. Stable upgrade/rollback, real-account model entitlement and physical-client pairing are distinct checks. Unknown-work/unsafe-path reports (#202/#207) and the generic HA side-panel report in #214 are not claimed universally resolved.
-
 ## 3.3.4
 
 **Before updating:** back up the stable app, its options and Home Assistant configuration. If 3.3.3 stopped at `v2_upgrade_records_changed`, update the same stable app to retry with the preserved data; do not delete databases or migration journals. Restore a pre-upgrade backup to roll back instead of downgrading against upgraded data.
