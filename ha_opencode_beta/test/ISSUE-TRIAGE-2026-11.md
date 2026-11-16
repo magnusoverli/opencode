@@ -81,6 +81,16 @@ or replied to by this sweep.
 
 ### Follow-up investigation
 
+- #208 reporter update (2026-11-16): Pulpfixtion confirmed successful OAuth,
+  GPT-6 Luna in Terminal/OpenChamber, and token renewal after manually delivering
+  the callback. Identified `/api/accounts/authorize` as the newer authorization
+  route. Verified against pinned OpenCode 2.3.0 `plugin/provider/chatgpt.ts`.
+  Our proxy allowed only `/oauth/authorize`; the newer-flow fixture incorrectly
+  used that legacy URL. Corrected fixture fails before the narrow path fix and
+  passes afterward. Linux rendered-browser callback submission passes too.
+  This defect remains in released b3; the fix is currently unreleased. Other
+  reporters' model-specific failures remain distinct and unconfirmed resolved.
+
 - #199: confirmed unscoped OpenChamber browser keys share the HA origin across
   stable/beta. Beta now scopes local/session storage and storage events by channel.
   Old keys remain untouched; no ambiguous cross-channel preferences are imported.

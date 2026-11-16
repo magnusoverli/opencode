@@ -486,7 +486,7 @@ function armV2OauthBridge(decoded, req, ingressPath) {
   // privileged ports, userinfo, or alternate callback resources are accepted.
   const port = Number(redirect.port);
   if (authorizeUrl.origin !== "https://auth.openai.com" || authorizeUrl.username || authorizeUrl.password
-      || authorizeUrl.pathname !== "/oauth/authorize" || authorizeUrl.searchParams.getAll("redirect_uri").length !== 1
+      || !["/oauth/authorize", "/api/accounts/authorize"].includes(authorizeUrl.pathname) || authorizeUrl.searchParams.getAll("redirect_uri").length !== 1
       || redirect.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(redirect.hostname)
       || !Number.isInteger(port) || port < 1024 || port > 65535 || redirect.username || redirect.password
       || redirect.pathname !== "/auth/callback" || redirect.search || redirect.hash) return null;

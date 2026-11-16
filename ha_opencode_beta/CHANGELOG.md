@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Fix ChatGPT callback handoff ([#208](https://github.com/magnusoverli/opencode/issues/208))** — recognize the pinned token-sharing flow's `/api/accounts/authorize` URL as well as legacy `/oauth/authorize`. Correct the regression fixture to exercise the actual newer route, including browser callback submission. Version 3.5.0b3 still misses this handoff; callback state, origin, and destination checks remain enforced.
+
 ## 3.5.0b3
 
 - **Separate stable/beta browser state ([#199](https://github.com/magnusoverli/opencode/issues/199))** — isolate beta browser preferences when both apps share the Home Assistant origin. Existing unscoped preferences remain preserved; beta starts its own workspace/model/session selection.

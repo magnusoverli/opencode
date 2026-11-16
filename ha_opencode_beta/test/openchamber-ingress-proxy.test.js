@@ -501,7 +501,8 @@ describe("openchamber ingress proxy: V2 OpenAI browser sign-in", () => {
     statusPaths = [];
     authorizeResponse = {
       attemptID: "test-attempt", mode: "auto",
-      url: `https://auth.openai.com/oauth/authorize?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${callbackPort}/auth/callback`)}&state=${state}`,
+      // Pinned ChatGPT token-sharing uses this path, unlike legacy Codex.
+      url: `https://auth.openai.com/api/accounts/authorize?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${callbackPort}/auth/callback`)}&state=${state}`,
       instructions: "This window will close automatically.",
     };
   });
@@ -598,6 +599,7 @@ describe("openchamber ingress proxy: V2 OpenAI browser sign-in", () => {
   for (const port of [1455, 1457]) {
     it(`retains the legacy browser handoff on port ${port}`, async () => {
       const url = new URL(authorizeResponse.url);
+      url.pathname = "/oauth/authorize";
       url.searchParams.set("redirect_uri", `http://localhost:${port}/auth/callback`);
       authorizeResponse.url = url.toString();
       assert.equal((await handoff()).pathname, `${INGRESS_PATH}/__ha_openai_oauth_bridge`);
@@ -621,6 +623,16 @@ describe("openchamber ingress proxy: V2 OpenAI browser sign-in", () => {
     it(`does not arm an unsafe or unexpected upstream redirect: ${redirect}`, async () => {
       const url = new URL(authorizeResponse.url);
       url.searchParams.set("redirect_uri", redirect);
+      authorizeResponse.url = url.toString();
+      assert.deepEqual(JSON.parse((await connect()).body).data, authorizeResponse);
+      assert.equal(hits.length, 0);
+    });
+  }
+
+  for (const path of ["/api/accounts/authorize/other", "/api/accounts/authorize.evil", "/unrecognized"]) {
+    it(`does not arm an unrecognized authorization path: ${path}`, async () => {
+      const url = new URL(authorizeResponse.url);
+      url.pathname = path;
       authorizeResponse.url = url.toString();
       assert.deepEqual(JSON.parse((await connect()).body).data, authorizeResponse);
       assert.equal(hits.length, 0);
