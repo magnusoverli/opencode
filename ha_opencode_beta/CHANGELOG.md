@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 3.5.0b5
 
 - **Improve Supervisor app review ([#199](https://github.com/magnusoverli/opencode/issues/199))** — show app display names, allow inspection and non-applying previews from all profiles and the managed read-only agent, and bind bounded before/after diffs to reviewed plans. Distinguish unset from withheld options; reveal only schema-constrained standard `log_level` strings. Apply still requires the full profile, an apply-capable agent and native permission approval.
 - **Correct capability reporting ([#199](https://github.com/magnusoverli/opencode/issues/199))** — label the MCP server catalogue explicitly and add a bounded, agent-specific tool snapshot from OpenCode's model context. Missing/stale context stays unknown; tool availability does not claim per-call authorization or popup approval.
+
+- Beta-only release. Focused local checks passed (135 tests, one Linux-only skip), including the pinned OpenCode 2.3.0 read-only preview → Build approval handoff. Installed-system acceptance of these additions remains pending.
 
 ## 3.5.0b4
 
