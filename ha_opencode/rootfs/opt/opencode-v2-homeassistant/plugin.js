@@ -196,7 +196,9 @@ async function disposeRegistrations(registrations) {
 export function createSetup({ readSecret = readCallerSecret, resolveExternal = resolveExternalServers } = {}) {
   return async function setup(ctx) {
     const input = requireObject(ctx.options);
-    const options = parseOptions(input);
+    // External validation belongs inside its isolation boundary, not on the
+    // bundled/native MCP activation path.
+    const options = parseOptions({ ...input, externalServers: undefined });
     const registrations = [];
     let managedFailed = false;
     if (options.bundledEnabled || options.nativeEnabled) {
@@ -214,9 +216,9 @@ export function createSetup({ readSecret = readCallerSecret, resolveExternal = r
       }
     }
 
-    if (options.externalServers !== undefined) {
+    if (input.externalServers !== undefined) {
       try {
-        const resolved = await resolveExternal(options.externalServers);
+        const resolved = await resolveExternal(validateExternalServers(input.externalServers));
         if (Object.keys(resolved).length > 0) {
           registrations.push(await ctx.mcp.transform((draft) => {
             for (const [name, externalServer] of Object.entries(resolved)) draft.set(name, externalServer);
