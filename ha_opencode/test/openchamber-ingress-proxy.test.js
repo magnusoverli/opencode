@@ -947,6 +947,9 @@ describe("openchamber ingress proxy: release parity", () => {
     assert.ok(beta.includes("/^\\/ha-(?:mcp|assist)(?:[/?]|$)/"));
     // Promotion includes the dynamic-port OAuth handoff as well as every shared
     // route, allowlist, Assist boundary and forwarding implementation.
-    assert.equal(beta, stable);
+    // Browser-state isolation is beta-only until promotion; forwarding and
+    // authentication must still be byte-identical.
+    const { withoutBetaStorageScope } = require("../../scripts/ingress-proxy-parity.cjs");
+    assert.equal(withoutBetaStorageScope(beta), stable.replace(/\r\n/g, "\n"));
   });
 });

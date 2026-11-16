@@ -27,4 +27,17 @@ function withoutBetaEditorRoute(source) {
   return source;
 }
 
-module.exports = { withoutBetaEditorRoute };
+function withoutBetaStorageScope(source) {
+  source = source.replace(/\r\n/g, "\n");
+  for (const addition of [
+    'const { installBrowserStorageScope } = require("./openchamber-browser-storage.js");\n',
+    '  const storageNamespace = process.env.ADDON_CHANNEL === "beta" ? "ha-opencode-beta" : "ha-opencode-stable";\n',
+    '    + `  (${installBrowserStorageScope.toString()})(window, ${JSON.stringify(storageNamespace)});\\n`\n',
+  ]) {
+    assert.equal(source.split(addition).length, 2, "Expected one reviewed beta-only storage addition");
+    source = source.replace(addition, "");
+  }
+  return source;
+}
+
+module.exports = { withoutBetaEditorRoute, withoutBetaStorageScope };

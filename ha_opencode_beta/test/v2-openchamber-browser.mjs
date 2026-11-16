@@ -172,6 +172,16 @@ try {
   browser = await puppeteer.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   await checkTerminalRenderer();
   const page = await browser.newPage();
+  await page.evaluateOnNewDocument(() => {
+    // HA frames share an origin. Simulate stable's old unscoped browser state
+    // without changing beta's server settings or stored session history.
+    window.__fixtureRawStorage = window.localStorage;
+    if (!window.localStorage.getItem('fixture-stable-seeded')) {
+      window.localStorage.setItem('lastDirectory', '/data/stable-only-missing');
+      window.localStorage.setItem('lastSession', 'fixture-stable-session');
+      window.localStorage.setItem('fixture-stable-seeded', 'true');
+    }
+  });
   const errors = [], escaped = [];
   let heldRecoverySave;
   let recoverySaveDirectory;
@@ -214,6 +224,12 @@ try {
       && !candidate.pathname.startsWith(base + '/')) escaped.push(candidate.pathname);
   });
   await page.goto(url, { waitUntil: 'domcontentloaded' });
+  assert.deepEqual(await page.evaluate(() => ({
+    rawDirectory: window.__fixtureRawStorage.getItem('lastDirectory'),
+    rawSession: window.__fixtureRawStorage.getItem('lastSession'),
+    inherited: localStorage.getItem('lastDirectory') === '/data/stable-only-missing',
+    scoped: Boolean(window.__HA_OPENCODE_STORAGE_SCOPE__),
+  })), { rawDirectory: '/data/stable-only-missing', rawSession: 'fixture-stable-session', inherited: false, scoped: true });
   await page.waitForSelector('[data-testid="chat-input"]', { timeout: 45000 });
   // Use the actual authenticated Settings API from the rendered Ingress page.
   // A disk-only upstream save must not satisfy these backend assertions.

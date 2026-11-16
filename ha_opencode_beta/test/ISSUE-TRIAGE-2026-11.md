@@ -78,3 +78,24 @@ or replied to by this sweep.
 - Stable restoration: native AMD64 and ARM64 passed,
   https://github.com/magnusoverli/opencode/actions/runs/43825420858 .
 - No release was published and no issue was commented on, relabeled or closed.
+
+### Follow-up investigation
+
+- #199: confirmed unscoped OpenChamber browser keys share the HA origin across
+  stable/beta. Beta now scopes local/session storage and storage events by channel.
+  Old keys remain untouched; no ambiguous cross-channel preferences are imported.
+  Unit/proxy checks: 136 passed, two browser-only skips on Windows. Native beta
+  boundary passed with stale stable workspace/session keys seeded before UI load.
+  Stable production code is unchanged; its parity test explicitly excludes the
+  reviewed beta-only storage bootstrap.
+- #209: automatic tab opening happens after asynchronous authorization and can be
+  blocked by browsers. Added a direct-click handoff link with callback instructions.
+  Patcher tests pass; patched UI/image verification is pending.
+- #208: pinned OpenCode 2.3.0 already applies ChatGPT-specific model filtering.
+  The reports establish account-level model rejection but do not establish a safe
+  replacement catalog. Keep that symptom open; the handoff usability fix also
+  addresses the reported difficulty locating callback instructions.
+- #214: the HA-MCP setup page is served by the independent HA-facing service;
+  it is not rendered from the agent's advertised tool schemas. The reported
+  generic HA side-panel error lacks HTTP/status evidence identifying a failure.
+  Tool-catalog regression remains green; no speculative routing/auth relaxation.

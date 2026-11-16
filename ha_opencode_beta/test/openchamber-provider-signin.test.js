@@ -15,6 +15,8 @@ function fixture(t, newline = "\n") {
   // Independent anchor from pinned OpenChamber 2.5.3. The original component's
   // method labels, SDK calls, polling and cancellation must remain untouched.
   const original = `// upstream authentication stays unchanged
+        {attempt.url && (
+          <div className="flex items-center gap-2">
       const { data } = await sdk().integration.oauth.connect({
    return (
     <div className={cn('space-y-4', className)}>
@@ -38,7 +40,8 @@ for (const newline of ["\n", "\r\n"]) {
     assert.match(result, /OpenCode handles credential storage and refresh/);
     assert.ok(result.includes(activationSteps));
     const withoutWarmup = result.replace(/      \/\/ Plugin listing can race[\s\S]*?      const \{ data \} = await client.integration.oauth.connect\(\{/, "      const { data } = await sdk().integration.oauth.connect({");
-    assert.equal(withoutWarmup.replace(/      \{integrationId === 'openai'[\s\S]*?      \)\}\n/, ""), original);
+    const withoutHandoffLink = withoutWarmup.replace(/        \{\/\* HA_SIGNIN_LINK_START \*\/\}[\s\S]*?        \{\/\* HA_SIGNIN_LINK_END \*\/\}\n/, "");
+    assert.equal(withoutHandoffLink.replace(/      \{integrationId === 'openai'[\s\S]*?      \)\}\n/, ""), original);
     assert.throws(() => patchProviderSignin(root), /Unexpected preview provider sign-in source/);
     assert.equal(fs.readFileSync(target, "utf8"), result);
   });

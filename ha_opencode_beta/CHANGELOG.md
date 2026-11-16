@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Isolate beta browser preferences from stable when both run under the same Home Assistant origin. Existing unscoped browser preferences remain preserved; beta starts its own workspace/model/session selection (#199).
+- Add a direct-click OpenAI sign-in handoff link and inline callback instructions when browsers block the automatic tab (#209).
+
 - Preserve external MCP file references through upstream configuration loading and isolate invalid external definitions from bundled HA MCP activation (#216).
 - Recover established terminal WebSocket errors with bounded reconnect backoff, retaining tmux sessions and input; add a real-browser error-before-close regression (#218).
 - Wait for integration publication before starting one OAuth attempt, covering the remaining cold-start race (#208).

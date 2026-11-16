@@ -140,6 +140,10 @@ test('newer ChatGPT preserves its own method and handoff, then refreshes automat
   begin('Sign in with ChatGPT'); await settle();
   expect(connections[0].methodID).toBe('chatgpt-token-sharing');
   expect(opens).toEqual([attempt.url]);
+  const handoffLink = nodes(await settle()).find(node => node.type === 'a' && node.props.href === attempt.url);
+  expect(handoffLink?.props.children).toBe('Open sign-in handoff');
+  expect(handoffLink?.props.target).toBe('_blank');
+  expect(handoffLink?.props.rel).toBe('noopener noreferrer');
   status = 'complete';
   await Bun.sleep(1600); await settle();
   expect(connected).toBe(1);

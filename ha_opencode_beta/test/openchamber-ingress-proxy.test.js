@@ -948,6 +948,7 @@ describe("openchamber ingress proxy: release parity", () => {
     // allowlist, Assist boundary and forwarding byte identical to stable.
     const shared = source => source.replace(/function armV2OauthBridge\([\s\S]*?\n\/\/ Resolves to "skipped"/, '// Beta-only V2 OAuth handoff\n// Resolves to "skipped"');
     assert.notEqual(shared(beta), beta, "the OAuth-only comparison boundary must exist");
-    assert.equal(shared(beta), shared(stable));
+    const { withoutBetaStorageScope } = require("../../scripts/ingress-proxy-parity.cjs");
+    assert.equal(shared(withoutBetaStorageScope(beta)), shared(stable.replace(/\r\n/g, "\n")));
   });
 });

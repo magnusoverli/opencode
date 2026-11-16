@@ -5,6 +5,7 @@ const zlib = require("zlib");
 const { randomBytes } = require("crypto");
 const { routeHaMcp } = require("./ha-mcp-ingress.js");
 const { validEditorIngressOrigin } = require("./editor-ingress-origin.js");
+const { installBrowserStorageScope } = require("./openchamber-browser-storage.js");
 const TERMINAL = process.env.HA_INGRESS_UI === "terminal";
 
 const LISTEN_HOST = process.env.OPENCHAMBER_INGRESS_HOST || "0.0.0.0";
@@ -135,8 +136,10 @@ function serviceWorkerResetScript() {
 
 function ingressRuntimeScript(ingressPath) {
   const basePath = ingressPath || "";
+  const storageNamespace = process.env.ADDON_CHANNEL === "beta" ? "ha-opencode-beta" : "ha-opencode-stable";
 
   return `(() => {\n`
+    + `  (${installBrowserStorageScope.toString()})(window, ${JSON.stringify(storageNamespace)});\n`
     + `  const configuredBasePath = ${JSON.stringify(basePath)};\n`
     + `  const match = window.location.pathname.match(/^(\\/api\\/hassio_ingress\\/[^/]+)/);\n`
     + `  const basePath = configuredBasePath || (match ? match[1] : "");\n`
