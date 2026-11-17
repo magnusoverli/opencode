@@ -69,6 +69,9 @@ jobs:
       - name: HA-facing MCP discovery and service lifecycle contracts
         run: node --test scripts/ha-facing-discovery.test.mjs scripts/ci-channels.test.mjs
 
+      - name: Assert beta retains the reviewed stable baseline
+        run: node --test ha_opencode_beta/test/stable-baseline.test.js
+
       - name: Assert each channel declares every option its own code reads
         run: bash scripts/check-addon-options.sh ha_opencode ha_opencode_beta
 

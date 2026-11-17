@@ -30,7 +30,7 @@ FORMAT = "ha-opencode-v2-migration/v1"
 GENERATION_RE = re.compile(r"^[a-f0-9]{32}$")
 # Shipped beta generations whose native V2 schema is covered by the upgrade
 # fixture. Unknown builds and downgrades must not open a user's database.
-V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242", "2.0.13", "2.0.22", "2.0.26", "2.1.2", "2.2.5"}
+V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242", "2.0.13", "2.0.22", "2.0.26", "2.1.2", "2.1.4", "2.2.5"}
 V2_UPGRADE_TARGET = "2.3.0"
 MAX_DATABASE_BYTES = 32 * 1024 * 1024 * 1024
 LEGACY_WORKSPACE = "/homeassistant"
@@ -1828,6 +1828,27 @@ def restore_session_permissions(before: Path, after: Path, table: str) -> None:
         target.close()
 
 
+def restore_project_maintenance(before: Path, after: Path) -> None:
+    """Undo converter-startup project sweeping in the private upgrade copy."""
+    # Preserve stable's project placement/archive repair. Every other field
+    # remains subject to exact upgrade validation after native conversion.
+    source = sqlite3.connect(before.resolve().as_uri() + "?mode=ro", uri=True)
+    target = sqlite3.connect(after)
+    try:
+        available = {row[1] for row in source.execute("PRAGMA table_info(project)")}
+        columns = [name for name in ("worktree", "time_archived") if name in available]
+        if "worktree" not in columns:
+            raise MigrationError("v2_upgrade_schema_mismatch")
+        names = ",".join(columns)
+        assignments = ",".join(name + "=?" for name in columns)
+        for row in source.execute(f"SELECT id,{names} FROM project"):
+            target.execute(f"UPDATE project SET {assignments} WHERE id=?", (*row[1:], row[0]))
+        target.commit()
+    finally:
+        source.close()
+        target.close()
+
+
 def restore_v1_session_placement(before: Path, after: Path) -> None:
     """Preserve legacy placement before applying the app's managed relocation."""
     # 2.3.0 resolves global V1 directories against the converter's filesystem
@@ -2027,6 +2048,7 @@ def upgrade_generation(root: Path, current: str, prior: dict, args: argparse.Nam
         snapshot_database(target, baseline)
         convert_candidate(candidate, args.v2_bin.resolve(), args.timeout, args.runtime_user)
         restore_session_permissions(baseline, target, "session_v2")
+        restore_project_maintenance(baseline, target)
         validate_tree(candidate)
         validate_database(target)
         validate_v2_upgrade(baseline, target)

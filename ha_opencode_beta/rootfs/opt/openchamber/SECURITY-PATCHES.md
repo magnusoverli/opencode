@@ -1,6 +1,7 @@
 # Pinned OpenChamber security dependencies
 
-The unreleased beta candidate uses OpenChamber 2.7.2 at the revision in `build.yaml`.
+Stable 3.5.0 uses OpenChamber 2.7.2 at the revision in `build.yaml`, promoted
+from the validated 3.5.0b5 source.
 `patch-security-dependencies.cjs` merges `security-overrides.json` into that
 checkout; `security.bun.lock` is its generated, committed Bun 1.4.4 lock.
 Both build-time and production installs use this lock with `--frozen-lockfile`.
@@ -18,9 +19,9 @@ transfer-encoding before replaying parsed bodies, replacing our old framing
 patch. We still fix replay of empty parsed chunked JSON objects. The managed
 backend patch follows upstream's injected-environment setter without exporting
 the backend credential. Arabic and Hebrew join the Supervisor-owned update
-notices (15 locales). Native image and installed-browser checks remain unverified;
-prior qualification records cover older pins. Testing is proportional to changes,
-not an exhaustive-matrix prerequisite for beta preparation.
+notices (15 locales). Beta's native amd64/arm64 image checks passed. Stable
+publication runs its own native image checks, including retained project-upgrade
+and Zigporter compatibility coverage. Installed stable upgrade/rollback is separate.
 
 ## Visible vendor mitigation
 

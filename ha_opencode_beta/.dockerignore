@@ -34,6 +34,7 @@ rootfs/opt/*/README.md
 !test/fixtures/
 !test/fixtures/mcp-saved-options.json
 !test/fixtures/opencode-v2-compaction.py
+!test/fixtures/opencode-v2-project-upgrade.py
 !test/fixtures/opencode-v2-legacy-data.py
 !test/helpers/
 !test/helpers/assist-fixture.mjs

@@ -24,6 +24,7 @@
     "opencode-beta-previous": "npm:@opencode/cli@2.0.22",
     "opencode-upgrade-previous": "npm:@opencode/cli@2.0.26",
     "opencode-release-previous": "npm:@opencode/cli@2.1.2",
+    "opencode-stable-previous": "npm:@opencode/cli@2.1.4",
     "opencode-beta-release-previous": "npm:@opencode/cli@2.2.5"
   }
 }

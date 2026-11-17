@@ -2,10 +2,10 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta `3.5.1b3` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
+Beta `3.5.1b4` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
-private-model discovery. The unrelated post-3.2.3 Zigporter compatibility patch
-is not included. Beta keeps its own app identity and persistent storage; installing
+private-model discovery. It now includes stable 3.5.0's Zigporter compatibility,
+HAB registry-cache and project-upgrade fixes. Beta keeps its own app identity and persistent storage; installing
 beta does not transfer stable conversations or sign-ins. HA 2026.10 integration includes native LLM API discovery, prompt/context
 forwarding and an experimental native Assist/AI data-task adapter. The roadmap
 is tracked in [#45](https://github.com/magnusoverli/opencode/issues/45).
@@ -26,6 +26,26 @@ fixes, parser-based safe-write validation, guarded global Markdown agent imports
 and the opt-in for remote TTS/STT servers. Installed Supervisor
 upgrade/rollback, real Wyoming/Piper/Whisper speech, public relay pairing and
 account-backed encrypted inference remain unverified. Stable remains unchanged.
+
+## Stable baseline reconciliation in 3.5.1b4
+
+Earlier 3.5.1 betas continued from the previous beta tree rather than the complete
+stable 3.5.0 implementation. This release reconciles the shared code before the
+next stable promotion. It adds stable's reviewed Zigporter 1.4.2 compatibility
+overlay, HAB registry/state-cache invalidation and upgrade preservation of project
+placement/archive metadata, including the previous stable OpenCode 2.1.4 runtime.
+Stable's OpenChamber trust tests and HAB fixtures are included in beta qualification.
+
+All b0–b3 changes remain, including default-off Code Mode, native policies,
+instruction cleanup, guarded cache reclamation and browser channel isolation.
+Beta retains its own app identity, native MCP provenance, companion ownership,
+pattern-update URLs, workspace selections and decision-note directory.
+
+Before stable promotion, verify the installed beta upgrade: retained conversations,
+sign-ins, custom agents/skills and terminal preferences; stable/beta switching;
+and a read-only preview followed by the normal approved Build workflow.
+Automated fixtures do not establish installed upgrade/rollback acceptance.
+Back up the beta app before updating; rollback requires that matching backup.
 
 ## Stable/beta workspace isolation in 3.5.1b2
 

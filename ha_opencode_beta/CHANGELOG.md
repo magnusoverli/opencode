@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.5.1b4
+
+- **Reconcile beta with stable 3.5.0** — combine the 3.5.1 beta improvements with fixes already shipped in stable, while retaining beta's separate identity and storage.
+- **Restore stable's Zigporter compatibility fixes** — include the reviewed Zigporter 1.4.2 overlay for registry identifier handling and passive Zigbee2MQTT diagnostics.
+- **Preserve project metadata during upgrades** — retain project placement and archive state in the private V2 upgrade copy, with coverage for the previous stable 2.1.4 runtime. Original migration inputs remain preserved.
+- **Carry forward HAB registry fixes** — invalidate state and registry caches around mutating HAB commands, prevent stale in-flight reads from repopulating cleared caches, and include stable's HAB 1.8.0 guidance and qualification fixtures.
+- **Expand baseline regression coverage** — retain stable's OpenChamber trust checks and add a check requiring review of shared-code differences between channels.
+
 ## 3.5.1b3
 
 - **Correct context inspection** — `ha-context status` and `ha-context show` now use the active V2 global instructions and explain that the packaged rules are staged at startup. Custom rules belong in `/homeassistant/AGENTS.local.md`.

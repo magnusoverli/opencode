@@ -57,7 +57,7 @@ RUN --mount=type=bind,source=test/openchamber-workspace-gate.test.tsx,target=/op
     cd packages/ui && bun test src/components/auth/WorkspaceRecoveryGate.test.tsx
 RUN --mount=type=bind,source=test/openchamber-provider-signin.test.tsx,target=/opt/openchamber-preview/packages/ui/src/components/sections/providers/ha-provider-signin.test.tsx,readonly \
     cd packages/ui && bun test src/components/sections/providers/ha-provider-signin.test.tsx
-RUN timeout --signal=TERM --kill-after=10s 180s bun run --cwd packages/web test server/lib/git
+RUN timeout --signal=TERM --kill-after=10s 180s bun run --cwd packages/web test server/lib/git server/lib/opencode-trust server/opencode-trust-proxy.test.js
 COPY rootfs/opt/openchamber/patch-ingress.js /tmp/patch-ingress.cjs
 RUN node /tmp/patch-ingress.cjs /opt/openchamber-preview/packages/web
 COPY rootfs/opt/openchamber/patch-managed-backend.cjs /tmp/patch-managed-backend.cjs
@@ -214,6 +214,14 @@ COPY --from=hab-builder /hab /usr/local/bin/hab
 RUN python3 -m venv /opt/zigporter-venv \
     && /opt/zigporter-venv/bin/pip install --no-cache-dir "zigporter==${ZIGPORTER_VERSION}" \
     && /opt/zigporter-venv/bin/zigporter --version
+
+# Temporary source-verified compatibility fix for Zigporter 1.4.2.
+# Keep this at build time; managed launchers and runtime permissions are unchanged.
+COPY compat/zigporter /tmp/zigporter-compat
+RUN /opt/zigporter-venv/bin/python3 /tmp/zigporter-compat/apply_patch.py \
+    && ZIGPORTER_TEST_PACKAGE="$(/opt/zigporter-venv/bin/python3 -c 'import zigporter; from pathlib import Path; print(Path(zigporter.__file__).parent.parent)')" \
+       /opt/zigporter-venv/bin/python3 /tmp/zigporter-compat/test_compat.py \
+    && rm -rf /tmp/zigporter-compat
 
 # Install the PPQ private-mode SDK. Prettier is in the V2 lock;
 # OpenChamber is built independently from its pinned preview source above.
@@ -382,6 +390,11 @@ RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-compaction
     && timeout --signal=TERM --kill-after=10s 120s \
         python3 /tmp/compaction/test/fixtures/opencode-v2-compaction.py \
         /usr/local/libexec/opencode-v2 "${OPENCODE_V2_VERSION}"
+
+RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-project-upgrade.py,target=/tmp/compaction/test/fixtures/opencode-v2-project-upgrade.py,readonly \
+    timeout --signal=TERM --kill-after=10s 120s \
+        python3 /tmp/compaction/test/fixtures/opencode-v2-project-upgrade.py \
+        /usr/local/libexec/opencode-v2
 
 RUN --network=none --mount=type=bind,source=test/hab-cli-fixture.mjs,target=/tmp/hab-cli-fixture.mjs,readonly \
     timeout --signal=TERM --kill-after=10s 120s node /tmp/hab-cli-fixture.mjs
