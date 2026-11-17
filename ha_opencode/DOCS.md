@@ -614,7 +614,7 @@ Persistent CLI preferences cannot enable custom TUI plugins.
 ## Desktop Browser Tools versus HA Screenshots
 
 OpenCode's model-facing `browser` tools require a browser attached by the
-OpenCode desktop app, as described in the [V2 Tools guide](https://opencode.ai/v2/docs/tools).
+OpenCode desktop app, as described in the [V2 Tools guide](https://opencode.ai/docs/tools).
 Opening OpenChamber through Ingress does not attach that desktop browser. The
 packaged Chromium used by the optional HA `screenshot_url` tool is a separate
 capability. Desktop-browser attachment to the app's managed server is not
@@ -1404,7 +1404,7 @@ Do not paste keys into chat. Native `/connect` account setup remains available.
 ### Third-party plugins (Beta)
 
 **Enable third-party plugins** (`custom_plugins_enabled`) is **off by default**.
-This is a thin opt-in to [upstream OpenCode V2 plugin loading](https://opencode.ai/v2/docs/plugins),
+This is a thin opt-in to [upstream OpenCode V2 plugin loading](https://opencode.ai/docs/plugins),
 not an add-on plugin manager or a promise of compatibility with any particular
 plugin, including Magic Context. The add-on does not curate packages, install
 plugins itself, or implement an updater.
