@@ -21,6 +21,8 @@ test("stable promotion retains stable identity, storage defaults and optional sp
   assert.match(config.version, /^\d+\.\d+\.\d+$/);
   assert.equal(config.panel_title, "OpenCode");
   assert.equal(config.options.openchamber_allow_remote_speech, false);
+  assert.equal(config.options.mcp_code_mode, false);
+  assert.equal(config.schema.mcp_code_mode, "bool");
   assert.equal(config.schema.openchamber_allow_remote_speech, "bool?");
   assert.equal(yaml("translations/en.yaml").configuration.native_ha_mcp_enabled.name, "Home Assistant native tools");
   const sidecar = read("rootfs/etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-sidecar/run");
@@ -69,7 +71,7 @@ test("stable promotion preserves the reviewed Zigporter compatibility overlay an
 
 test("stable promotion documents backup-based rollback and the delivered feature scope", () => {
   const docs = read("DOCS.md");
-  assert.ok(docs.includes("Stable **3.3.0**"));
+  assert.ok(docs.includes("Stable **3.5.1**"));
   assert.ok(docs.includes("Rollback requires the pre-upgrade Home Assistant backup"));
   assert.ok(docs.includes("/config/opencode/decisions.yaml"));
   assert.ok(docs.includes("2 MiB"));

@@ -30,9 +30,9 @@ This is a Home Assistant **Supervisor add-on** (called an **app** in newer Home
 Assistant versions), not a standalone Home Assistant Core/Container integration.
 It supports **amd64** and **aarch64/ARM64**.
 
-Stable **3.5.0** includes OpenCode **2.3.0**, OpenChamber **2.7.2** and HAB **1.8.0**.
+Stable **3.5.1** includes OpenCode **2.3.0**, OpenChamber **2.7.2** and HAB **1.8.0**.
 Upgrading an existing installation? Back up first and read the
-[3.5.0 upgrade notes](ha_opencode/DOCS.md#upgrading-to-350), including stable history
+[3.5.1 upgrade notes](ha_opencode/DOCS.md#upgrading-to-351), including stable history
 preservation and backup-based rollback. Coming from 2.x? Follow the
 [2.x upgrade guide](ha_opencode/DOCS.md#upgrading-from-2x).
 

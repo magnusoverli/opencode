@@ -5,8 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define SOURCE_PATH "/homeassistant"
@@ -55,6 +57,31 @@ static void publish_ready(void) {
   }
 }
 
+static void expire_legacy_quarantines(void) {
+  /* Only the real container PID 1, before s6 or user code exists. The helper
+   * independently verifies its parent executable and the process namespace.
+   * Never expose a live deletion path through the public client. */
+  if (getpid() != 1) return;
+  pid_t child = fork();
+  if (child == 0) {
+    alarm(30);
+    char *args[] = {"/usr/bin/python3", "-I", "-B",
+                   "/usr/local/bin/opencode-legacy-data.py", "--startup-expire", NULL};
+    char *env[] = {"PATH=/usr/bin:/bin", "LANG=C.UTF-8", NULL};
+    execve(args[0], args, env);
+    _exit(126);
+  }
+  int status = 0;
+  pid_t waited;
+  if (child < 0) {
+    dprintf(STDERR_FILENO, "Legacy cache expiry skipped: helper could not start\n");
+    return;
+  }
+  do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+  if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    dprintf(STDERR_FILENO, "Legacy cache expiry incomplete/skipped; preserved data needs inspection\n");
+}
+
 int main(void) {
   if (geteuid() != 0) {
     errno = EPERM;
@@ -65,6 +92,7 @@ int main(void) {
     fail("cannot remove a stale V2 workspace marker");
   }
   publish_ready();
+  expire_legacy_quarantines();
 
   char *arguments[] = {"/init", NULL};
   execve(arguments[0], arguments, environ);

@@ -3901,7 +3901,7 @@ const TOOLS = [
   {
     name: "hab_run_read_only",
     title: "Read-only HAB",
-    description: "Enforced read-only subset of pinned HAB 1.8.0 (full profile). Literal args only: ['dashboard','list'], ['dashboard','get','lovelace'], ['helper','list'], ['helper','types']. Lists accept --brief, --count and --limit 1..5000; helper list accepts one type filter. Unknown commands, aliases, global overrides, writes, backups, execution and --plan are denied before execution. Credential-like JSON fields are redacted; output can still contain private home configuration. Permission this tool separately from hab_run.",
+    description: "Enforced read-only subset of the app's pinned HAB (full profile). Literal args only: ['dashboard','list'], ['dashboard','get','lovelace'], ['helper','list'], ['helper','types']. Lists accept --brief, --count and --limit 1..5000; helper list accepts one type filter. Unknown commands, aliases, global overrides, writes, backups, execution and --plan are denied before execution. Credential-like JSON fields are redacted; output can still contain private home configuration. Permission this tool separately from hab_run.",
     inputSchema: {
       type: "object", properties: {
         args: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 12 },

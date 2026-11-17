@@ -380,6 +380,11 @@ RUN set -e; \
 # injection on both supported architectures. It is not part of ordinary local image builds;
 # the Supervisor devcontainer separately covers the shipped s6 service graph.
 FROM runtime AS boundary-test
+RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-legacy-data.py,target=/tmp/legacy/test/fixtures/opencode-v2-legacy-data.py,readonly \
+    ln -s / /tmp/legacy/rootfs \
+    && timeout --signal=TERM --kill-after=5s 30s \
+        python3 -B /tmp/legacy/test/fixtures/opencode-v2-legacy-data.py -v
+
 RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-compaction.py,target=/tmp/compaction/test/fixtures/opencode-v2-compaction.py,readonly \
     ln -s / /tmp/compaction/rootfs \
     && timeout --signal=TERM --kill-after=10s 120s \
@@ -437,6 +442,7 @@ WORKDIR /homeassistant
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -fsS --max-time 5 http://127.0.0.1:8099/ > /dev/null && opencode status > /dev/null || exit 1
 
+# Keep release-only metadata out of shared runtime and boundary-test cache keys.
 # Labels for Home Assistant
 ARG BUILD_VERSION
 LABEL \

@@ -53,6 +53,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           target: boundary-test
           push: false
+          load: true
+          tags: ha-opencode-stable-startup:${{ matrix.ha_arch }}
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
             BUILD_VERSION=ci
@@ -60,3 +62,6 @@ jobs:
             ADDON_CHANNEL=stable
           cache-from: type=gha,scope=ha-opencode-stable-check-${{ matrix.ha_arch }}
           cache-to: type=gha,mode=max,scope=ha-opencode-stable-check-${{ matrix.ha_arch }}
+
+      - name: Verify real PID-1 quarantine expiry before services
+        run: python3 ha_opencode/test/v2-cache-startup-fixture.py "ha-opencode-stable-startup:${{ matrix.ha_arch }}"

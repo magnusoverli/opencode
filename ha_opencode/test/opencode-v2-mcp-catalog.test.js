@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
 import { OpenCode } from "../rootfs/opt/opencode-v2-homeassistant/node_modules/@opencode/client/dist/promise/index.js";
 import { Client } from "../rootfs/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js";
 import { StdioClientTransport } from "../rootfs/opt/ha-mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js";
 
-test("full MCP catalog including hab_run reaches the pinned model tool list (#214)", { timeout: 40000 }, async () => {
+test("full MCP catalogue reaches V2 directly and has a measured Code Mode request footprint", { timeout: 50000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "mcp-catalog-"));
   let backend;
   let requestBody;
@@ -36,7 +36,15 @@ test("full MCP catalog including hab_run reaches the pinned model tool list (#21
     OPENCODE_DECISION_NOTES: "false" };
   const direct = new Client({ name: "catalog-regression", version: "1" });
   try {
-    for (const name of ["home", "config", "data", "state", "cache", "project"]) await mkdir(join(root, name));
+    for (const name of ["home", "config", "data", "state", "cache", "project", "plugin"]) await mkdir(join(root, name));
+    await writeFile(join(root, "plugin/package.json"), '{"type":"module"}');
+    await writeFile(join(root, "plugin/index.js"), `
+      import { Plugin } from "@opencode/plugin";
+      import { retainDirectReviewTools } from ${JSON.stringify(new URL("../rootfs/opt/opencode-v2-homeassistant/plugin.js", import.meta.url).href)};
+      export default Plugin.define({ id: "fixture.direct-review", async setup(ctx) {
+        const registration = await ctx.tool.transform(retainDirectReviewTools);
+        return () => registration.dispose();
+      } });`);
     await direct.connect(new StdioClientTransport({ command: command[0], args: command.slice(1),
       env: { PATH: process.env.PATH, HOME: join(root, "home"), ...environment }, stderr: "ignore" }));
     const advertised = (await direct.listTools()).tools.map(tool => `homeassistant_${tool.name}`).sort();
@@ -45,7 +53,8 @@ test("full MCP catalog including hab_run reaches the pinned model tool list (#21
     provider.listen(0, "127.0.0.1"); await once(provider, "listening");
     const config = join(root, "managed.json");
     await writeFile(config, JSON.stringify({
-      model: "fixture/coding", autoupdate: false, share: "disabled", snapshots: false,
+      model: "fixture/coding", update: "disable", share: "disabled", snapshots: false,
+      plugins: [{ package: pathToFileURL(join(root, "plugin")).href }],
       mcp: { servers: { homeassistant: { type: "local", command, environment, codemode: false } } },
       providers: { fixture: { name: "Fixture", package: "@opencode/ai/providers/openai-compatible",
         settings: { baseURL: `http://127.0.0.1:${provider.address().port}/v1` },
@@ -86,6 +95,33 @@ test("full MCP catalog including hab_run reaches the pinned model tool list (#21
     assert.ok(requestBody, `mock provider must receive a tool-bearing model request: ${JSON.stringify(requestSummaries)}`);
     const received = (requestBody.tools ?? []).map(tool => tool.function.name).filter(name => name.startsWith("homeassistant_")).sort();
     assert.deepEqual(received, advertised, "no advertised full-profile tool may silently disappear");
+    await client.session.wait({ sessionID: session.id }, { signal: AbortSignal.timeout(10000) });
+    const footprint = body => ({ direct_tools: body.tools.length,
+      tool_schema_bytes: Buffer.byteLength(JSON.stringify(body.tools)),
+      request_bytes: Buffer.byteLength(JSON.stringify(body)) });
+    const directFootprint = footprint(requestBody);
+    const document = JSON.parse(await readFile(config, "utf8"));
+    document.mcp.servers.homeassistant.codemode = true;
+    await writeFile(config, JSON.stringify(document));
+    await client.location.reload({ location });
+    connected = false;
+    for (let i = 0; i < 100; i++) {
+      if ((await client.mcp.list({ location })).data.some(server => server.name === "homeassistant" && server.status.status === "connected")) {
+        connected = true; break;
+      }
+      await sleep(50);
+    }
+    assert.ok(connected);
+    requestBody = undefined;
+    const codeSession = await client.session.create({ location });
+    await client.session.prompt({ sessionID: codeSession.id, text: "Return fixture; do not call any tools." });
+    await client.session.wait({ sessionID: codeSession.id }, { signal: AbortSignal.timeout(15000) });
+    assert.ok(requestBody);
+    assert.deepEqual(requestBody.tools.map(tool => tool.function.name).filter(name => name.startsWith("homeassistant_")).sort(),
+      ["homeassistant_get_agent_capabilities", "homeassistant_supervisor_app_apply"]);
+    assert.ok(requestBody.tools.some(tool => tool.function.name === "execute"));
+    t.diagnostic(JSON.stringify({ scope: "synthetic_initial_request_bytes_not_tokens_or_model_accuracy",
+      direct: directFootprint, codemode: footprint(requestBody) }));
   } finally {
     await direct.close().catch(() => {});
     if (backend && backend.exitCode === null) {

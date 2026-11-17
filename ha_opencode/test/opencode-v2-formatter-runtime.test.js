@@ -48,7 +48,7 @@ test("pinned V2 preserves YAML by default, formats on opt-in, and denies read-on
     await new Promise((resolve) => reservation.close(resolve));
     const managed = buildManagedConfig();
     const config = {
-      autoupdate: false, snapshots: false, formatter: managed.formatter, agents: managed.agents,
+      update: "disable", snapshots: false, formatter: managed.formatter, agents: managed.agents,
       permissions: [{ action: "*", resource: "*", effect: "allow" }],
       providers: { fixture: {
         package: "@opencode/ai/providers/openai-compatible",

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Isolated OpenCode V2 roots. V1 keeps its historical /data/.config and
-# /data/.local paths untouched so migration can operate on private copies and a
-# V1 beta image can still roll back safely.
+# Isolated OpenCode state generations. Original history is retained as migration
+# input; /data/.config/opencode also holds active skills, agents and MCP assets.
+# Rollback requires restoring a matching app backup, not selecting a V1 runtime.
 
 OPENCODE_V2_ROOT="${OPENCODE_V2_ROOT:-/data/v2}"
 OPENCODE_V2_GENERATIONS_ROOT="${OPENCODE_V2_ROOT}/generations"

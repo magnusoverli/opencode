@@ -3,6 +3,73 @@
 Your Home Assistant configuration assistant, powered by OpenCode V2. Use the
 terminal or OpenChamber web workspace with one shared, app-managed backend.
 
+## Upgrading to 3.5.1
+
+Stable **3.5.1** promotes **3.5.1b4** while retaining stable's identity, storage,
+Zigporter compatibility overlay, HAB registry-cache handling and project-upgrade
+preservation. Runtime pins remain OpenCode **2.3.0**, OpenChamber **2.7.2** and
+HAB **1.8.0**.
+
+Update the existing stable app to preserve its history and accounts. Installing
+stable beside beta does not transfer beta's conversations or sign-ins. Back up
+the app before updating; **Rollback requires the pre-upgrade Home Assistant backup**.
+Direct V1 upgrades, original migration inputs and user customizations remain
+supported.
+
+### V2 instructions and context inspection
+
+The packaged `/opt/ha-mcp-server/AGENTS.md` is staged at startup as the active
+global `/run/opencode-v2/config/opencode/AGENTS.md`. `ha-context status` and
+`ha-context show` report this source. The server works in an isolated managed
+workspace; configuration work uses absolute `/homeassistant/...` paths.
+
+Startup no longer deploys or rewrites `/homeassistant/AGENTS.md`, or injects
+complete HAB/Zigporter help listings. Historical files and ownership markers are
+preserved for review. Put wanted custom rules in `/homeassistant/AGENTS.local.md`,
+which the context plugin loads alongside the dynamic briefing and decision digest.
+Active skills, agents and MCP assets under `/data/.config/opencode` remain in use.
+
+### Experimental MCP Code Mode
+
+The `mcp_code_mode` option is **off by default**. Enable it to use V2 `search` and
+`execute` discovery for bundled and native HA tools; app-option changes require
+an app restart. External MCP definitions can choose `"codemode": true` individually
+and use native `"disabled"` settings; legacy `enabled` remains accepted unless
+the two settings contradict each other.
+
+Capability reporting and Supervisor apply remain direct because pinned V2
+per-tool hooks do not observe nested Code Mode calls. Read-only sessions deny
+`execute` and receive their permitted tools directly. Native hard-deny policies
+supplement approval rules; credential/process isolation remains enforced.
+Automated catalogue checks are not real-model accuracy or performance benchmarks.
+
+### Retained data and cache reclamation
+
+From the app's root shell, run `opencode legacy-data inspect` for a bounded
+metadata inventory. Original history/accounts, old client state, active
+customizations and user packages are retained. Unsafe or oversized inventories
+are reported as unverified.
+
+Only `/data/.cache/opencode` is eligible for explicit quarantine:
+
+```sh
+opencode legacy-data quarantine-cache --review <cache-revision-from-inspect>
+```
+
+The compatibility name `clean-cache` also only quarantines while running.
+Recorded, unchanged quarantines expire after seven days at the next verified
+cold startup, before services launch. Changed, unrecorded, linked or unverifiable
+data is preserved; interrupted removal disarms its receipt. No user history or
+active V2 state is reclaimed by this workflow.
+
+### Stable/beta browser isolation
+
+The actual Ingress launchers now preserve channel identity: stable uses
+`ha-opencode-stable` and beta uses `ha-opencode-beta`. Existing browser entries
+and conversation records are retained. If a foreign workspace selection was
+already saved, choose **Open /homeassistant** once. A historical conversation
+whose original directory is genuinely missing can still show the recovery screen.
+
 ## Upgrading to 3.5.0
 
 Stable **3.5.0** promotes **3.5.0b5**, with OpenCode CLI/plugin **2.3.0**,

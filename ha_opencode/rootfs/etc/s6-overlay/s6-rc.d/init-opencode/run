@@ -641,7 +641,7 @@ if [ "${V2_STATE_READY}" = "true" ] && opencode_v2_select_generation; then
         && printf '%s\n' \
             '{' \
             '  "$schema": "https://opencode.ai/config.json",' \
-            '  "autoupdate": false,' \
+            '  "update": "disable",' \
             '  "plugins": [' \
             '    { "package": "file:///opt/opencode-v2-homeassistant/runtime-guard-plugin" }' \
             '  ]' \
@@ -745,42 +745,18 @@ if [ -n "${ACCESS_TOKEN}" ] || [ "${DISCOVER_Z2M_FLAG}" = "true" ]; then
 fi
 
 # ==============================================================================
-# Verify hab and zigporter CLIs are available
-# CLI versions only change with an addon update, so they're cached in the
-# help stamp alongside the addon version — a matching stamp skips the version
-# spawns AND the AGENTS.md help re-injection below.
+# Verify CLI availability. Detailed command discovery is on demand through MCP;
+# do not inject entire help listings into every model request.
 # ==============================================================================
 
-HELP_STAMP_FILE="/data/.help_stamp"
-STAMP_ADDON=""
-STAMP_HAB=""
-STAMP_ZIGPORTER=""
-if [ -f "${HELP_STAMP_FILE}" ]; then
-    IFS=':' read -r STAMP_ADDON STAMP_HAB STAMP_ZIGPORTER < "${HELP_STAMP_FILE}" || true
-fi
-HELP_STAMP_FRESH=false
-if [ "${STAMP_ADDON}" = "${ADDON_VERSION}" ] && [ -n "${STAMP_HAB}" ]; then
-    HELP_STAMP_FRESH=true
-fi
-
 if command -v hab &>/dev/null; then
-    if [ "${HELP_STAMP_FRESH}" = "true" ]; then
-        HAB_VERSION="${STAMP_HAB}"
-    else
-        HAB_VERSION=$(hab version --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const v=JSON.parse(s).data.version;if(!/^\d+\.\d+\.\d+$/.test(v))throw 0;console.log(v)}catch{process.exit(1)}})' || echo "unknown")
-    fi
-    bashio::log.info "hab CLI available (v${HAB_VERSION}) - pre-authenticated via Supervisor"
+    bashio::log.info "hab CLI available through the authenticated MCP gateway"
 else
     bashio::log.warning "hab CLI not found - some admin features will be unavailable"
 fi
 
 if command -v zigporter &>/dev/null; then
-    if [ "${HELP_STAMP_FRESH}" = "true" ]; then
-        ZIGPORTER_VERSION="${STAMP_ZIGPORTER}"
-    else
-        ZIGPORTER_VERSION=$(zigporter --version 2>/dev/null | grep -oP '[\d.]+' | head -1 || echo "unknown")
-    fi
-    bashio::log.info "zigporter CLI available (v${ZIGPORTER_VERSION}) - Zigbee rename, inspect, mesh tools"
+    bashio::log.info "zigporter CLI available through the authenticated MCP gateway"
 else
     bashio::log.warning "zigporter CLI not found - Zigbee management features will be unavailable"
 fi
@@ -813,178 +789,13 @@ if [ "${ADDON_STATE_DIR}" != "/homeassistant/opencode" ] \
 fi
 
 # ==============================================================================
-# Deploy this channel's AGENTS.md
-# On first install: copy the full file
-# On update: refresh only when the deployed copy is byte-for-byte what this
-# add-on last wrote, so user edits are never overwritten.
-#
-# The previous check looked for the "# Home Assistant OpenCode Rules" heading,
-# which every customized file still contained — so following the documented
-# advice to add rules to AGENTS.md lost them at the next add-on update. The
-# supported place for user instructions is now /homeassistant/AGENTS.local.md,
-# which the add-on never writes.
-#
-# A fresh help stamp means the deployed copy already has current help injected,
-# so both the refresh-copy and the injection passes are skipped.
-#
-# WHERE it is deployed depends on the channel — see channel.sh. Stable owns
-# /homeassistant/AGENTS.md; beta keeps its copy in /data and has OpenCode load
-# it through `instructions` instead, because only one file in the configuration
-# directory can carry the name OpenCode looks for.
+# Retire the unused beta instruction copy only with exact ownership evidence.
+# The active global copy was staged in /run above; user rules are AGENTS.local.md.
+# Shared historical /homeassistant/AGENTS.md remains available for user review.
 # ==============================================================================
 
-AGENTS_TARGET="${ADDON_AGENTS_FILE}"
-AGENTS_HASH_FILE="${ADDON_AGENTS_MARKER}"
-AGENTS_LEGACY_HASH_FILE="/data/.agents_md_hash"
-AGENTS_REFRESHED=false
-
-agents_md_hash() {
-    sha256sum "$1" 2>/dev/null | cut -d' ' -f1
-}
-
-mkdir -p "$(dirname "${AGENTS_TARGET}")"
-
-if [ "${ADDON_AGENTS_IN_CONFIG_DIR}" = "true" ]; then
-    # The marker used to live in /data, which is wiped on reinstall while the
-    # configuration directory is not — so a reinstall looked like a hand edit
-    # and left a spurious .bak. Carry the old value over once.
-    if [ ! -f "${AGENTS_HASH_FILE}" ] && [ -f "${AGENTS_LEGACY_HASH_FILE}" ]; then
-        if cp "${AGENTS_LEGACY_HASH_FILE}" "${AGENTS_HASH_FILE}" 2>/dev/null; then
-            bashio::log.info "Migrated the AGENTS.md ownership marker into the configuration directory"
-        fi
-    fi
-else
-    # This channel no longer deploys to the configuration directory, but older
-    # versions of it did. Remove that leftover only when it is byte-for-byte
-    # what THIS add-on last wrote: any other content is either the user's own
-    # edit or the stable add-on's file, and neither is ours to delete.
-    LEGACY_CONFIG_AGENTS="/homeassistant/AGENTS.md"
-    if [ -f "${LEGACY_CONFIG_AGENTS}" ] && [ -f "${AGENTS_LEGACY_HASH_FILE}" ]; then
-        if [ "$(agents_md_hash "${LEGACY_CONFIG_AGENTS}")" = "$(cat "${AGENTS_LEGACY_HASH_FILE}" 2>/dev/null || echo "")" ]; then
-            rm -f "${LEGACY_CONFIG_AGENTS}"
-            bashio::log.info "Removed this add-on's old AGENTS.md from the configuration directory"
-            bashio::log.info "Its instructions now load from inside the add-on, so the stable add-on owns that file"
-        fi
-    fi
-fi
-
-if [ ! -f "${AGENTS_TARGET}" ]; then
-    cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
-    AGENTS_REFRESHED=true
-    bashio::log.info "Deployed default AGENTS.md to ${AGENTS_TARGET}"
-    bashio::log.info "Add your own instructions in /homeassistant/AGENTS.local.md - it is loaded too and never overwritten"
-elif [ "${HELP_STAMP_FRESH}" = "true" ]; then
-    bashio::log.info "AGENTS.md is current (addon version unchanged) - skipping refresh"
-elif [ ! -f "${AGENTS_HASH_FILE}" ]; then
-    # First start after the add-on began tracking edits: an edited file and an
-    # untouched one are indistinguishable, so keep a copy before refreshing.
-    #
-    # Never overwrite an existing .bak - it may be the user's only copy of rules
-    # they wrote, and losing it is exactly the failure this backup exists to
-    # prevent. Fall back to a dated name instead.
-    AGENTS_BACKUP="${AGENTS_TARGET}.bak"
-    if [ -f "${AGENTS_BACKUP}" ]; then
-        AGENTS_BACKUP="${AGENTS_TARGET}.$(date +%Y%m%d%H%M%S).bak"
-    fi
-    cp "${AGENTS_TARGET}" "${AGENTS_BACKUP}"
-    cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
-    AGENTS_REFRESHED=true
-    bashio::log.info "Updated AGENTS.md with latest AI instructions"
-    bashio::log.info "Your previous AGENTS.md was saved to ${AGENTS_BACKUP}"
-    bashio::log.info "Move any customizations into /homeassistant/AGENTS.local.md - future updates never touch that file"
-else
-    AGENTS_CURRENT_HASH=$(agents_md_hash "${AGENTS_TARGET}")
-    AGENTS_EXPECTED_HASH=$(cat "${AGENTS_HASH_FILE}" 2>/dev/null || echo "")
-    if [ -n "${AGENTS_CURRENT_HASH}" ] && [ "${AGENTS_CURRENT_HASH}" = "${AGENTS_EXPECTED_HASH}" ]; then
-        cp /opt/ha-mcp-server/AGENTS.md "${AGENTS_TARGET}"
-        AGENTS_REFRESHED=true
-        bashio::log.info "Updated AGENTS.md with latest AI instructions"
-    else
-        bashio::log.info "AGENTS.md has your own edits - keeping it and skipping the update"
-        bashio::log.info "Instructions in /homeassistant/AGENTS.local.md are loaded as well and are never overwritten"
-    fi
-fi
-
-# ==============================================================================
-# Inject live hab help output into AGENTS.md
-# Replaces the content between HAB_LIVE_HELP markers with current `hab --help`
-# output so the AI always sees the exact commands available in the installed
-# hab version — regardless of what was documented when the addon was built.
-# Only runs when AGENTS.md was (re)deployed this boot.
-# ==============================================================================
-
-if [ "${AGENTS_REFRESHED}" = "true" ] && command -v hab &>/dev/null && [ -f "${AGENTS_TARGET}" ]; then
-    if grep -q "<!-- HAB_LIVE_HELP_START -->" "${AGENTS_TARGET}" 2>/dev/null; then
-        HAB_HELP_OUTPUT=$(hab --help 2>/dev/null || echo "")
-        if [ -n "${HAB_HELP_OUTPUT}" ]; then
-            printf '%s\n' "${HAB_HELP_OUTPUT}" > /tmp/hab_help.txt
-            awk '
-                /<!-- HAB_LIVE_HELP_START -->/ {
-                    print
-                    print "```"
-                    while ((getline line < "/tmp/hab_help.txt") > 0) print line
-                    print "```"
-                    skip=1
-                    next
-                }
-                /<!-- HAB_LIVE_HELP_END -->/ {
-                    skip=0
-                    print
-                    next
-                }
-                !skip { print }
-            ' "${AGENTS_TARGET}" > /tmp/agents_tmp \
-                && mv /tmp/agents_tmp "${AGENTS_TARGET}"
-            rm -f /tmp/hab_help.txt
-            bashio::log.info "Injected live hab help (v${HAB_VERSION}) into AGENTS.md"
-        fi
-    fi
-fi
-
-# ==============================================================================
-# Inject live zigporter help output into AGENTS.md
-# Same pattern as hab — replaces content between ZIGPORTER_LIVE_HELP markers
-# so the AI always sees the exact commands available in the installed version.
-# ==============================================================================
-
-if [ "${AGENTS_REFRESHED}" = "true" ] && command -v zigporter &>/dev/null && [ -f "${AGENTS_TARGET}" ]; then
-    if grep -q "<!-- ZIGPORTER_LIVE_HELP_START -->" "${AGENTS_TARGET}" 2>/dev/null; then
-        ZIGPORTER_HELP_OUTPUT=$(zigporter --help 2>/dev/null || echo "")
-        if [ -n "${ZIGPORTER_HELP_OUTPUT}" ]; then
-            printf '%s\n' "${ZIGPORTER_HELP_OUTPUT}" > /tmp/zigporter_help.txt
-            awk '
-                /<!-- ZIGPORTER_LIVE_HELP_START -->/ {
-                    print
-                    print "```"
-                    while ((getline line < "/tmp/zigporter_help.txt") > 0) print line
-                    print "```"
-                    skip=1
-                    next
-                }
-                /<!-- ZIGPORTER_LIVE_HELP_END -->/ {
-                    skip=0
-                    print
-                    next
-                }
-                !skip { print }
-            ' "${AGENTS_TARGET}" > /tmp/agents_tmp \
-                && mv /tmp/agents_tmp "${AGENTS_TARGET}"
-            rm -f /tmp/zigporter_help.txt
-            bashio::log.info "Injected live zigporter help (v${ZIGPORTER_VERSION}) into AGENTS.md"
-        fi
-    fi
-fi
-
-# Remember exactly what we wrote, including any injected help, so the next
-# update can tell an untouched file from one the user has edited.
-if [ "${AGENTS_REFRESHED}" = "true" ] && [ -f "${AGENTS_TARGET}" ]; then
-    agents_md_hash "${AGENTS_TARGET}" > "${AGENTS_HASH_FILE}"
-fi
-
-# Record the stamp so unchanged boots skip the version spawns and re-injection
-if [ "${HELP_STAMP_FRESH}" != "true" ]; then
-    printf '%s:%s:%s\n' "${ADDON_VERSION}" "${HAB_VERSION:-unknown}" "${ZIGPORTER_VERSION:-unknown}" > "${HELP_STAMP_FILE}"
-fi
+node /usr/local/bin/retire-opencode-instructions.mjs || \
+    bashio::log.warning "Legacy instruction cleanup could not be completed; files were preserved"
 
 # ==============================================================================
 # Deploy the AGENTS.local.md example (first install only)
@@ -1010,12 +821,10 @@ if [ ! -f "/homeassistant/.prettierrc.yaml" ]; then
 fi
 
 # ==============================================================================
-# Deploy the add-on's skills and agents
+# Deploy the add-on's editable skills
 #
-# OpenCode discovers skills and agents by convention under its global config
-# directory, so they have to physically exist there. They ship read-only in the
-# image and are copied into /data at every start; a copy the user has edited is
-# kept and the update is skipped, exactly as with AGENTS.md.
+# The managed native skills array explicitly names /data/.config/opencode/skills.
+# Deploy image updates only over unchanged app-owned copies, preserving edits.
 #
 # Skills carry the detailed Home Assistant procedures and are loaded on demand,
 # so they cost nothing until a task needs them. AGENTS.md keeps only the rules

@@ -28,13 +28,17 @@ test("pinned V2 sends managed context once on initial and tool-continuation HTTP
     if (primary) requests.push(body);
     const continuation = body.messages.some((message) => message.role === "tool");
     const lspBoundary = JSON.stringify(body.messages).includes("lsp-boundary-fixture");
-    const toolCall = (primary || lspBoundary) && !continuation;
+    const policyBoundary = JSON.stringify(body.messages).includes("policy-boundary-fixture");
+    const toolCall = (primary || lspBoundary || policyBoundary) && !continuation;
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     const chunk = (delta, finish_reason = null) => response.write(`data: ${JSON.stringify({
       id: "fixture-completion", object: "chat.completion.chunk", created: 1, model: "fixture-model",
       choices: [{ index: 0, delta, finish_reason }],
     })}\n\n`);
-    chunk({ role: "assistant", ...(toolCall ? { tool_calls: [{ index: 0, id: "call_fixture", type: "function", function: { name: lspBoundary ? "ha_yaml_status" : "fixture_read", arguments: "{}" } }] } : { content: "Fixture complete" }) });
+    chunk({ role: "assistant", ...(toolCall ? { tool_calls: [{ index: 0, id: "call_fixture", type: "function", function: {
+      name: policyBoundary ? "read" : lspBoundary ? "ha_yaml_status" : "fixture_read",
+      arguments: policyBoundary ? JSON.stringify({ path: join(root, "secrets.yaml") }) : "{}",
+    } }] } : { content: "Fixture complete" }) });
     chunk({}, toolCall ? "tool_calls" : "stop");
     response.end("data: [DONE]\n\n");
   });
@@ -47,6 +51,9 @@ test("pinned V2 sends managed context once on initial and tool-continuation HTTP
     for (const leaf of ["home", "config", "data", "state", "cache", "project", "plugin"]) {
       await mkdir(join(root, leaf));
     }
+    await mkdir(join(root, "config/opencode"));
+    await writeFile(join(root, "config/opencode/AGENTS.md"), await readFile(join(runtime, "../ha-mcp-server/AGENTS.md")));
+    await writeFile(join(root, "project/AGENTS.md"), "legacy-project-rules-must-not-load");
     await writeFile(join(root, "plugin/package.json"), '{"type":"module"}');
     const briefing = join(root, "briefing.md");
     await writeFile(briefing, marker);
@@ -59,7 +66,7 @@ test("pinned V2 sends managed context once on initial and tool-continuation HTTP
         const dispose = await createContextSetup({ readSource: () => readContextSource(${JSON.stringify(briefing)}) })(ctx);
         const tool = await ctx.tool.transform((editor) => editor.add({
           name: "fixture_read", description: "Read the synthetic fixture", input: { type: "object", properties: {} },
-          options: { codemode: false }, execute: async () => {
+          options: { codemode: false, permission: "fixture_read" }, execute: async () => {
             // Like an approved decision write, publish updated bounded context
             // during a tool call. The continuation must see it without reload.
             writeFileSync(${JSON.stringify(briefing)}, ${JSON.stringify(`${marker}-after-tool`)});
@@ -75,7 +82,7 @@ test("pinned V2 sends managed context once on initial and tool-continuation HTTP
     `);
     const config = join(root, "managed.json");
     await writeFile(config, JSON.stringify({
-      autoupdate: false, snapshots: false, lsp: false,
+      update: "disable", snapshots: false, lsp: false,
       permissions: [{ action: "*", resource: "*", effect: "deny" }, { action: "fixture_read", resource: "*", effect: "allow" }, { action: "lsp", resource: "*", effect: "allow" }],
       plugins: [{ package: join(root, "plugin"), options: { files: ["/data/context/home-briefing.md"] } }],
       agents: buildManagedConfig().agents,
@@ -122,6 +129,8 @@ test("pinned V2 sends managed context once on initial and tool-continuation HTTP
       const body = JSON.stringify(request);
       assert.equal(body.split(marker).length - 1, 1);
       assert.doesNotMatch(body, /must-not-reach-model-context/);
+      assert.doesNotMatch(body, /legacy-project-rules-must-not-load/);
+      assert.equal(body.split("The server's working directory is an isolated managed workspace").length - 1, 1);
     }
     assert.ok(requests[1].messages.some((message) => message.role === "tool" && JSON.stringify(message).includes("fixture-tool-result")));
     const full = await client.session.create({ title: "LSP allowed", model: { providerID: "fixture", id: "fixture-model" } });
@@ -132,6 +141,23 @@ test("pinned V2 sends managed context once on initial and tool-continuation HTTP
     await client.session.prompt({ sessionID: readonly.id, text: "lsp-boundary-fixture" });
     await client.session.wait({ sessionID: readonly.id }, { signal: AbortSignal.timeout(10000) });
     assert.equal(await readFile(join(root, "lsp-calls"), "utf8"), "x", "Read-only must reject an invented LSP call before dispatch");
+    // Native hard-deny policy must defeat an explicit allow and an invented call.
+    const policyConfig = JSON.parse(await readFile(config, "utf8"));
+    policyConfig.permissions.push({ action: "read", resource: "*", effect: "allow" });
+    policyConfig.permissions.push({ action: "external_directory", resource: "*", effect: "allow" });
+    policyConfig.policies = buildManagedConfig().policies;
+    await writeFile(config, JSON.stringify(policyConfig));
+    await client.location.reload();
+    assert.ok((await client.config.get()).some(entry => entry.type === "document" &&
+      entry.info.policies?.some(rule => rule.resource === "read:*secrets.yaml")), "reloaded runtime must see the policy");
+    await writeFile(join(root, "secrets.yaml"), "POLICY_PRIVATE_CONTENT_MUST_NOT_REACH_MODEL");
+    await writeFile(briefing, "policy-must-preserve-this");
+    const policySession = await client.session.create({ title: "Policy fixture", model: { providerID: "fixture", id: "fixture-model" } });
+    await client.session.prompt({ sessionID: policySession.id, text: "policy-boundary-fixture" });
+    await client.session.wait({ sessionID: policySession.id }, { signal: AbortSignal.timeout(10000) });
+    assert.equal(await readFile(briefing, "utf8"), "policy-must-preserve-this", "native policy must prevent dispatch despite the global allow");
+    assert.doesNotMatch(JSON.stringify(requests), /POLICY_PRIVATE_CONTENT_MUST_NOT_REACH_MODEL/);
+    assert.match(JSON.stringify(requests.at(-1).messages.filter(message => message.role === "tool")), /policy/i);
   } finally {
     if (server && server.exitCode === null && server.signalCode === null) {
       const exited = once(server, "exit");

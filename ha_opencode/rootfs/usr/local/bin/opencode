@@ -22,6 +22,12 @@ HELP = """OpenCode — Home Assistant managed V2 client
   opencode api GET /api/info       Query the managed server explicitly
   opencode readonly               Start a managed read-only session
   opencode status                 Inspect the existing conversation server
+  opencode legacy-data inspect     Inventory retained data without reading contents
+  opencode legacy-data quarantine-cache --review <revision>
+                                  Preserve reviewed V1 cache at a quarantine path
+                                  No live deletion; recorded unchanged quarantines
+                                  expire after 7 days at verified cold startup
+                                  clean-cache is a compatibility alias
   opencode service status         Alias for managed-server status
   opencode --version              Print the image's certified V2 version
 
@@ -91,6 +97,11 @@ def main(arguments):
         return managed_status()
     if arguments and arguments[0] == "readonly":
         return readonly(arguments[1:])
+    if arguments and arguments[0] == "legacy-data":
+        if os.geteuid() != 0:
+            print("Legacy data administration requires the app's root shell.", file=sys.stderr)
+            return 2
+        os.execv("/usr/bin/python3", ["/usr/bin/python3", "-B", "/usr/local/bin/opencode-legacy-data.py", *arguments[1:]])
     if arguments and arguments[0] in {"service", "serve", "upgrade", "update", "uninstall"}:
         print("OpenCode is managed by Home Assistant. Use the app controls; no separate service was started.", file=sys.stderr)
         return 2

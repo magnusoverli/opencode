@@ -13,7 +13,7 @@ export function prepareReadOnlyHabRequest(input = {}) {
   }
   const command = args.slice(0, 2).join(" ");
   if (!["dashboard list", "dashboard get", "helper list", "helper types"].includes(command)) {
-    throw new Error("Command not in the reviewed HAB 1.7.2 read-only policy. Allowed: dashboard list/get, helper list/types.");
+    throw new Error("Command not in the reviewed HAB read-only policy. Allowed: dashboard list/get, helper list/types.");
   }
   let index = 2;
   if (command === "dashboard get") {

@@ -162,10 +162,12 @@ try {
   });
   let ui = startUi();
   await wait(async () => (await fetch('http://127.0.0.1:3010/health')).ok, 'UI startup');
-  start('node', ['/usr/local/bin/openchamber-ingress-proxy.js'], {
-    HA_INGRESS_UI: 'openchamber', HA_INGRESS_PROXY_IP: '127.0.0.1',
-    OPENCHAMBER_ALLOW_ANY_REMOTE: 'false', OPENCHAMBER_INGRESS_HOST: '127.0.0.1',
-  });
+  await writeFile(`${root}/interface-mode`, 'openchamber\n');
+  // Run the actual service launcher, including env -i. Directly spawning the
+  // proxy missed the lost ADDON_CHANNEL that made beta use stable's storage.
+  const proxyLaunch = (await readFile('/etc/s6-overlay/s6-rc.d/ha-openchamber-ingress/run', 'utf8'))
+    .replaceAll('/data/.interface_mode', `${root}/interface-mode`);
+  start('bash', ['-c', proxyLaunch], { ADDON_CHANNEL: 'stable' });
   await new Promise(resolve => ingress.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${ingress.address().port}${base}/`;
   await wait(async () => (await fetch(url)).ok, 'Ingress startup');
@@ -173,13 +175,15 @@ try {
   await checkTerminalRenderer();
   const page = await browser.newPage();
   await page.evaluateOnNewDocument(() => {
-    // HA frames share an origin. Simulate stable's old unscoped browser state
-    // without changing beta's server settings or stored session history.
+    // HA frames share an origin. Simulate beta's current and old browser state
+    // without changing stable's server settings or stored session history.
     window.__fixtureRawStorage = window.localStorage;
-    if (!window.localStorage.getItem('fixture-stable-seeded')) {
-      window.localStorage.setItem('lastDirectory', '/data/stable-only-missing');
-      window.localStorage.setItem('lastSession', 'fixture-stable-session');
-      window.localStorage.setItem('fixture-stable-seeded', 'true');
+    if (!window.localStorage.getItem('fixture-beta-seeded')) {
+      window.localStorage.setItem('lastDirectory', '/data/beta-only-missing');
+      window.localStorage.setItem('lastSession', 'fixture-beta-session');
+      window.localStorage.setItem('ha-opencode-beta:lastDirectory', '/data/beta-only-missing');
+      window.localStorage.setItem('ha-opencode-beta:oc.lastSession.v1', 'fixture-beta-session');
+      window.localStorage.setItem('fixture-beta-seeded', 'true');
     }
   });
   const errors = [], escaped = [];
@@ -227,9 +231,13 @@ try {
   assert.deepEqual(await page.evaluate(() => ({
     rawDirectory: window.__fixtureRawStorage.getItem('lastDirectory'),
     rawSession: window.__fixtureRawStorage.getItem('lastSession'),
-    inherited: localStorage.getItem('lastDirectory') === '/data/stable-only-missing',
-    scoped: Boolean(window.__HA_OPENCODE_STORAGE_SCOPE__),
-  })), { rawDirectory: '/data/stable-only-missing', rawSession: 'fixture-stable-session', inherited: false, scoped: true });
+    betaDirectory: window.__fixtureRawStorage.getItem('ha-opencode-beta:lastDirectory'),
+    betaSession: window.__fixtureRawStorage.getItem('ha-opencode-beta:oc.lastSession.v1'),
+    inherited: localStorage.getItem('lastDirectory') === '/data/beta-only-missing',
+    scoped: window.__HA_OPENCODE_STORAGE_SCOPE__,
+  })), { rawDirectory: '/data/beta-only-missing', rawSession: 'fixture-beta-session',
+    betaDirectory: '/data/beta-only-missing', betaSession: 'fixture-beta-session',
+    inherited: false, scoped: 'ha-opencode-stable' });
   await page.waitForSelector('[data-testid="chat-input"]', { timeout: 45000 });
   // Use the actual authenticated Settings API from the rendered Ingress page.
   // A disk-only upstream save must not satisfy these backend assertions.

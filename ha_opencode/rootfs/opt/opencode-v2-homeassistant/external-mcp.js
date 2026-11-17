@@ -98,7 +98,7 @@ function remoteHeaderValue(value, label, { literalAllowed }) {
 }
 
 function remoteServer(value, label) {
-  fields(value, ["type", "url", "headers", "enabled", "timeout", "allow_insecure"], label);
+  fields(value, ["type", "url", "headers", "enabled", "disabled", "codemode", "timeout", "allow_insecure"], label);
   let url;
   try { url = new URL(value.url); }
   catch { invalid(`${label}.url must be an absolute HTTP(S) URL`); }
@@ -128,13 +128,14 @@ function remoteServer(value, label) {
     url: url.toString(),
     headers,
     enabled: value.enabled ?? true,
+    ...presentation(value, label),
     ...(url.protocol === "http:" ? { allow_insecure: true } : {}),
     ...(value.timeout === undefined ? {} : { timeout: timeout(value.timeout, `${label}.timeout`) }),
   };
 }
 
 function localServer(value, label) {
-  fields(value, ["type", "command", "environment", "literal_environment", "enabled", "timeout"], label);
+  fields(value, ["type", "command", "environment", "literal_environment", "enabled", "disabled", "codemode", "timeout"], label);
   if (!Array.isArray(value.command) || value.command.length === 0 || value.command.length > 64) {
     invalid(`${label}.command must contain 1-64 arguments`);
   }
@@ -174,7 +175,23 @@ function localServer(value, label) {
     environment,
     literal_environment: literalEnvironment,
     enabled: value.enabled ?? true,
+    ...presentation(value, label),
     ...(value.timeout === undefined ? {} : { timeout: timeout(value.timeout, `${label}.timeout`) }),
+  };
+}
+
+function presentation(value, label) {
+  for (const key of ["disabled", "codemode"]) {
+    if (value[key] !== undefined && typeof value[key] !== "boolean") invalid(`${label}.${key} must be true or false`);
+  }
+  if (value.disabled !== undefined && value.enabled !== undefined && value.disabled === value.enabled) {
+    invalid(`${label} has conflicting enabled and disabled settings`);
+  }
+  // Keep the app's stored intermediate representation stable; emit only native
+  // disabled/codemode fields when registering with V2.
+  return {
+    ...(value.disabled === undefined ? {} : { enabled: !value.disabled }),
+    ...(value.codemode === undefined ? {} : { codemode: value.codemode }),
   };
 }
 
@@ -332,7 +349,7 @@ export async function resolveExternalServers(value, { readSecret = readExternalM
         headers: Object.fromEntries(await Promise.all(Object.entries(server.headers).map(async ([key, item]) => [key, await resolveHeaderValue(item, readSecret)]))),
         oauth: false,
         disabled: false,
-        codemode: false,
+        codemode: server.codemode ?? false,
         ...(server.timeout === undefined ? {} : { timeout: server.timeout }),
       };
     } else {
@@ -346,7 +363,7 @@ export async function resolveExternalServers(value, { readSecret = readExternalM
         command: [EXTERNAL_MCP_LAUNCHER, String(EXTERNAL_MCP_UID_BASE + index), String(environmentNames.length), ...environmentNames, ...server.command],
         environment,
         disabled: false,
-        codemode: false,
+        codemode: server.codemode ?? false,
         ...(server.timeout === undefined ? {} : { timeout: server.timeout }),
       };
     }

@@ -1,5 +1,5 @@
 #!/command/with-contenv bashio
-# Private OpenCode V2 loopback server. V1 remains the explicit rollback path.
+# Single Supervisor-managed OpenCode server on private loopback.
 
 # shellcheck source=/usr/local/lib/opencode/v2-environment.sh
 source /usr/local/lib/opencode/v2-environment.sh

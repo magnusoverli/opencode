@@ -1,4 +1,13 @@
 # Changelog
+
+## 3.5.1
+
+- **Consolidate the V2 runtime** — promote the combined implementation qualified in **3.5.1b4**, with native update settings, full generated-configuration validation and native hard-deny policies alongside existing approval rules. Runtime pins remain OpenCode **2.3.0**, OpenChamber **2.7.2** and HAB **1.8.0**.
+- **Add experimental MCP Code Mode** — optionally use V2 tool discovery and execution for bundled and native Home Assistant tools. It is **off by default**; capability reporting and Supervisor apply stay direct, with existing read-only and approval boundaries preserved.
+- **Unify instruction ownership** — load the packaged global instructions once, use bounded CLI discovery instead of injected help listings, and make `ha-context` report the active V2 instruction source. Historical shared instructions and custom rules remain preserved.
+- **Inspect and quarantine legacy cache** — `opencode legacy-data inspect` reports retained data categories. Reviewed cache cleanup only quarantines while running; recorded, unchanged quarantines become eligible for removal after seven days at verified cold startup, before services launch. Original history, accounts, user packages and active V2 assets are preserved.
+- **Keep stable and beta browser selections separate** — preserve channel identity through the Ingress launcher. If a workspace selection was already contaminated, choose **Open /homeassistant** once; historical conversations retain their original directories.
+- **Retain stable compatibility fixes** — preserve stable identity and storage, the Zigporter compatibility overlay, HAB registry-cache handling and project-upgrade preservation. Direct upgrades from V1 remain supported.
 All notable changes to this project will be documented in this file.
 
 ## 3.5.0
