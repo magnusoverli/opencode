@@ -10,6 +10,7 @@ on:
       - "ha_opencode_beta/build.yaml"
       - "ha_opencode_beta/rootfs/**"
       - "ha_opencode_beta/test/v2-boundary-fixture.sh"
+      - "ha_opencode_beta/test/v2-cache-startup-fixture.py"
       - "ha_opencode_beta/test/hab-cli-fixture.mjs"
       - "ha_opencode_beta/test/v2-openchamber-browser.mjs"
       - "ha_opencode_beta/test/v2-provider-startup-fixture.mjs"
@@ -35,6 +36,7 @@ on:
       - "ha_opencode_beta/build.yaml"
       - "ha_opencode_beta/rootfs/**"
       - "ha_opencode_beta/test/v2-boundary-fixture.sh"
+      - "ha_opencode_beta/test/v2-cache-startup-fixture.py"
       - "ha_opencode_beta/test/hab-cli-fixture.mjs"
       - "ha_opencode_beta/test/v2-openchamber-browser.mjs"
       - "ha_opencode_beta/test/v2-provider-startup-fixture.mjs"
@@ -87,6 +89,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           target: ${{ matrix.target }}
           push: false
+          load: true
+          tags: ha-opencode-beta-startup:${{ matrix.ha_arch }}
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
             BUILD_ARCH=${{ matrix.ha_arch }}
@@ -95,3 +99,6 @@ jobs:
             type=gha,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
             type=gha,scope=ha_opencode_beta-${{ matrix.ha_arch }}
           cache-to: type=gha,mode=max,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
+
+      - name: Verify real PID-1 quarantine expiry before services
+        run: python3 ha_opencode_beta/test/v2-cache-startup-fixture.py "ha-opencode-beta-startup:${{ matrix.ha_arch }}"

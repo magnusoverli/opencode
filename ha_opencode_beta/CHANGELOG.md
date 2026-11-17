@@ -2,7 +2,8 @@
 
 ## 3.5.1b1
 
-- **Prevent raced cache deletion** — replace automatic legacy-cache deletion with revision-reviewed quarantine. `opencode legacy-data quarantine-cache` preserves the directory for inspection and rechecks metadata after the process scan. The old `clean-cache` command is now a quarantine-only compatibility alias. Neither command deletes data or reclaims disk space, including when a writer changes files after the last check.
+- **Prevent raced cache deletion** — live legacy-cache commands now only quarantine reviewed data; the old `clean-cache` name remains a compatibility alias. Neither command deletes data while the app is running.
+- **Reclaim old quarantines safely at startup** — recorded, unchanged cache quarantines expire after seven days at the next verified cold startup, before services launch. Changed, unrecorded, linked or unverifiable data is preserved. Startup logs report removals and skipped candidates; original history, accounts and active V2 data are excluded.
 - **Correct HAB guidance** — update the pinned-version instructions to HAB **1.8.0** and remove stale version claims from tool descriptions and rejection messages. The read-only allowlist and its historical review provenance remain intact.
 
 ## 3.5.1b0

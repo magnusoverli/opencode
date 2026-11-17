@@ -189,5 +189,97 @@ class LegacyData(unittest.TestCase):
         self.assertEqual((existing / "keep").read_text(), "previous quarantine")
         self.assertEqual((self.cache / "new").read_text(), "new active cache")
 
+    def expiry_fixture(self):
+        result = legacy.quarantine_cache(self.root, self.review(), in_use=lambda _: False)
+        retired = Path(result["quarantine_path"])
+        review = retired.name.removeprefix(".opencode-retired-")
+        receipt = self.root / legacy.RECEIPTS / f"{review}.json"
+        recorded = json.loads(receipt.read_text())
+        return retired, receipt, recorded["quarantined_at"]
+
+    def expire_at(self, timestamp):
+        # Only the startup identity guard is substituted in these disposable
+        # root fixtures; the production entrypoint is tested separately.
+        with mock.patch.object(legacy, "require_cold_start"), mock.patch.object(legacy.time, "time", return_value=timestamp):
+            return legacy.expire_quarantines(self.root)
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "root Linux expiry")
+    def test_expiry_waits_seven_days_then_removes_only_recorded_quarantine(self):
+        retired, receipt, created = self.expiry_fixture()
+        self.cache.mkdir()
+        (self.cache / "current").write_text("active cache")
+        before = (self.active / "data/opencode/opencode.db").read_bytes()
+        early = self.expire_at(created + legacy.RETENTION_SECONDS - 1)
+        self.assertEqual(early["preserved"][0]["reason"], "within_grace_period")
+        self.assertTrue(retired.exists())
+        result = self.expire_at(created + legacy.RETENTION_SECONDS)
+        self.assertEqual(result["removed"], [retired.name])
+        self.assertEqual(result["removed_bytes"], len("disposable"))
+        self.assertFalse(retired.exists())
+        self.assertFalse(receipt.exists())
+        self.assertEqual((self.cache / "current").read_text(), "active cache")
+        self.assertEqual((self.original / "auth.json").read_text(), "SECRET_NEVER_PRINT")
+        self.assertEqual((self.user / "mine.md").read_text(), "USER_CONTENT_NEVER_PRINT")
+        self.assertEqual((self.active / "data/opencode/opencode.db").read_bytes(), before)
+        self.assertEqual(self.expire_at(created + legacy.RETENTION_SECONDS)["removed"], [])
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "root Linux expiry")
+    def test_changed_quarantine_is_preserved_even_if_mtime_and_size_restored(self):
+        retired, _, created = self.expiry_fixture()
+        target = retired / "entry"
+        before = target.stat()
+        target.write_text("DIFFERENT!")
+        os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
+        result = self.expire_at(created + legacy.RETENTION_SECONDS)
+        self.assertEqual(result["preserved"][0]["reason"], "quarantine_changed")
+        self.assertEqual(target.read_text(), "DIFFERENT!")
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "root Linux expiry")
+    def test_unrecorded_quarantine_and_invalid_receipts_are_never_adopted(self):
+        retired, receipt, created = self.expiry_fixture()
+        original = receipt.read_bytes()
+        for data in [b"{", b'{"format":1,"revision":"../outside","quarantined_at":1}', original.replace(b'"format": 1', b'"format": true')]:
+            receipt.write_bytes(data)
+            self.assertEqual(self.expire_at(created + legacy.RETENTION_SECONDS)["removed"], [])
+            self.assertTrue(retired.exists())
+        receipt.unlink()
+        result = self.expire_at(created + legacy.RETENTION_SECONDS)
+        self.assertEqual(result["preserved"][0]["reason"], "unrecorded_quarantine")
+        self.assertTrue(retired.exists())
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "root Linux expiry")
+    def test_unsafe_receipt_clock_rollback_and_late_process_block_expiry(self):
+        retired, receipt, created = self.expiry_fixture()
+        self.assertEqual(self.expire_at(created - 1)["preserved"][0]["reason"], "clock_before_quarantine")
+        receipt.chmod(0o666)
+        self.assertEqual(self.expire_at(created + legacy.RETENTION_SECONDS)["removed"], [])
+        receipt.chmod(0o600)
+        with mock.patch.object(legacy, "require_cold_start", side_effect=[None, ValueError("other_processes_present")]), \
+                mock.patch.object(legacy.time, "time", return_value=created + legacy.RETENTION_SECONDS):
+            result = legacy.expire_quarantines(self.root)
+        self.assertEqual(result["preserved"][0]["reason"], "other_processes_present")
+        self.assertTrue(receipt.exists())
+        self.assertTrue(retired.exists())
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "root Linux expiry")
+    def test_interrupted_removal_disarms_receipt_and_preserves_remainder(self):
+        retired, receipt, created = self.expiry_fixture()
+        with mock.patch.object(legacy.shutil, "rmtree") as remove:
+            remove.avoids_symlink_attacks = True
+            remove.side_effect = OSError("interrupted")
+            result = self.expire_at(created + legacy.RETENTION_SECONDS)
+        self.assertEqual(result["removed_bytes"], 0)
+        self.assertTrue(retired.exists())
+        self.assertFalse(receipt.exists())
+        self.assertEqual(self.expire_at(created + legacy.RETENTION_SECONDS)["preserved"][0]["reason"], "unrecorded_quarantine")
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "root Linux expiry")
+    def test_live_invocation_cannot_expire_data(self):
+        retired, receipt, _ = self.expiry_fixture()
+        with self.assertRaises(ValueError):
+            legacy.expire_quarantines(self.root)
+        self.assertTrue(retired.exists())
+        self.assertTrue(receipt.exists())
+
 
 unittest.main()

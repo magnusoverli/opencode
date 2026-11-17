@@ -110,6 +110,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           target: boundary-test
           push: false
+          load: true
+          tags: ha-opencode-beta-startup:${{ matrix.ha_arch }}
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
             BUILD_ARCH=${{ matrix.ha_arch }}
@@ -121,6 +123,9 @@ jobs:
             type=gha,scope=${{ env.IMAGE_NAME }}-${{ matrix.ha_arch }}
             type=gha,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
           cache-to: type=gha,mode=max,scope=ha-opencode-beta-check-${{ matrix.ha_arch }}
+
+      - name: Verify real PID-1 quarantine expiry before services
+        run: python3 ha_opencode_beta/test/v2-cache-startup-fixture.py "ha-opencode-beta-startup:${{ matrix.ha_arch }}"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4

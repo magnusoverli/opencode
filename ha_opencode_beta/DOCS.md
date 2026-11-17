@@ -125,18 +125,44 @@ process usage can be inspected. The directory is always preserved at
 `/data/.cache/.opencode-retired-<revision>` for manual inspection, including when
 post-quarantine checks fail. Do not retry by deleting unknown directories.
 
-**3.5.1b1 removes automatic deletion.** The old `clean-cache` command is a
-compatibility alias for quarantine only. Neither command reclaims disk space;
+**3.5.1b1 removes live deletion.** The old `clean-cache` command is a
+compatibility alias for quarantine only. Neither live command reclaims disk space;
 success reports `status: "quarantined"`, `quarantine_path` and `bytes_reclaimed: 0`.
 Inventory reports `quarantine_supported` separately and keeps
 `cleanup_supported: false`.
 
 Process scans and metadata snapshots cannot freeze concurrent writers. A second
 snapshot detects the reported transient writer during the process scan, but even
-a write after the final check is preserved because there is no deletion step.
-Quarantine is not proof that the directory is idle or immutable. Disk reclamation
-requires separate offline review after writers have been stopped; this command
-does not authorize or perform it.
+a write after the final check is preserved because the live command has no deletion step.
+Quarantine is not proof that the directory is idle or immutable.
+
+#### Seven-day startup reclamation
+
+Successfully quarantined cache receives a private, root-owned receipt under
+`/data/.opencode-legacy-quarantines`. After **seven days**, it is eligible for
+automatic expiry on the next **cold app startup**. No restart is scheduled solely
+for cleanup. The grace period starts when quarantine is recorded, not at a file's
+last-modified date.
+
+Expiry runs synchronously from the container's PID-1 entrypoint, before s6,
+plugins, hooks or client services launch. The helper verifies that entrypoint is
+its PID-1 parent and that no other processes exist in the container. Calling the
+helper from a running app is refused. This relies on the app's private data
+volume; concurrent host/admin modifications to that volume are outside this
+startup boundary.
+
+Only recorded directories matching their reviewed metadata can be removed.
+Future timestamps, changed data (including file change-time differences),
+unsafe receipts, links, nested mounts, missing active-state evidence or an
+unverified startup phase cause preservation. Pre-existing quarantines without
+receipts are never adopted for automatic deletion. An interrupted removal
+disarms its receipt and leaves any remainder for manual review.
+
+Startup logs identify removed directories, total logical bytes removed and
+reasons for skipped candidates. Filesystem space actually recovered can differ
+from logical byte counts. Work is bounded; cleanup failure does not prevent
+ordinary app startup. Inventory's `cleanup_supported: false` means there is no
+live cleanup command; its `quarantine_retention_days: 7` describes startup expiry.
 
 This command **never deletes original conversation history or account files,
 the shared `/homeassistant` tree, `/data/.config/opencode`, `/data/.npm-global`,

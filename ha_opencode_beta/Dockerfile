@@ -372,6 +372,11 @@ RUN set -e; \
 # injection on both supported architectures. It is not part of ordinary local image builds;
 # the Supervisor devcontainer separately covers the shipped s6 service graph.
 FROM runtime AS boundary-test
+RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-legacy-data.py,target=/tmp/legacy/test/fixtures/opencode-v2-legacy-data.py,readonly \
+    ln -s / /tmp/legacy/rootfs \
+    && timeout --signal=TERM --kill-after=5s 30s \
+        python3 -B /tmp/legacy/test/fixtures/opencode-v2-legacy-data.py -v
+
 RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-compaction.py,target=/tmp/compaction/test/fixtures/opencode-v2-compaction.py,readonly \
     ln -s / /tmp/compaction/rootfs \
     && timeout --signal=TERM --kill-after=10s 120s \

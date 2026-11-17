@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded metadata-only inventory; reviewed quarantine of disposable V1 cache only."""
+"""Metadata-only inventory and live quarantine; seven-day expiry only at cold startup."""
 import argparse
 import hashlib
 import importlib.util
@@ -7,11 +7,15 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import sys
 import time
 
 MAX_ENTRIES = 20000
+RETENTION_SECONDS = 7 * 24 * 60 * 60
+RECEIPTS = ".opencode-legacy-quarantines"
+MAX_QUARANTINES = 128
 PATHS = (
     (".cache/opencode", "disposable_v1_cache"),
     (".local/share/opencode", "retained_original_history_and_accounts"),
@@ -46,7 +50,7 @@ def snapshot(path):
     pending = [path]
     while pending:
         parent = pending.pop()
-        if parent != path and str(parent) in mounts:
+        if str(parent) in mounts:
             raise ValueError("nested_mount")
         info = parent.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_dev != root_device:
@@ -58,7 +62,7 @@ def snapshot(path):
                 if len(entries) + len(pending) >= MAX_ENTRIES or time.monotonic() > deadline:
                     raise ValueError("inventory_limit")
                 info = child.stat(follow_symlinks=False)
-                if info.st_dev != root_device:
+                if info.st_dev != root_device or child.path in mounts:
                     raise ValueError("nested_mount")
                 if stat.S_ISDIR(info.st_mode):
                     pending.append(Path(child.path))
@@ -66,7 +70,8 @@ def snapshot(path):
                     files += 1
                     size += info.st_size
                     entries.append((str(Path(child.path).relative_to(path)), info.st_dev,
-                                    info.st_ino, info.st_mode, info.st_mtime_ns, info.st_size))
+                                    info.st_ino, info.st_mode, info.st_mtime_ns, info.st_size,
+                                    info.st_ctime_ns, info.st_uid, info.st_gid))
                 else:
                     raise ValueError("links_or_special_files")
     revision = hashlib.sha256(json.dumps(sorted(entries)).encode()).hexdigest()
@@ -118,7 +123,8 @@ def inspect(root):
         except (OSError, ValueError):
             item["status"] = "unverified"
         result["items"].append(item)
-    result["note"] = "Metadata only. Unknown sizes are not zero. Reviewed V1 cache can be quarantined, never automatically deleted; no disk space is reclaimed. Original history/accounts, active assets, npm packages and V2 state are retained."
+    result["quarantine_retention_days"] = 7
+    result["note"] = "Metadata only. Unknown sizes are not zero. Live commands only quarantine reviewed V1 cache. Recorded, unchanged quarantines expire after seven days at a verified cold startup before services launch. Original history/accounts, active assets, npm packages and V2 state are retained."
     return result
 
 
@@ -173,23 +179,162 @@ def quarantine_cache(root, review, in_use=cache_in_use):
             raise ValueError("cache_changed_inspect_again")
         os.rename(cache, retired)
         # Process scans and metadata snapshots cannot exclude concurrent writers.
-        # Preserve the directory unconditionally: another revision check alone
+        # Preserve the directory during live calls: another revision check alone
         # would merely move the race window before recursive deletion.
         if snapshot(retired)["revision"] != review or in_use(retired):
             raise ValueError("quarantined_cache_requires_inspection")
         if snapshot(retired)["revision"] != review:
             raise ValueError("quarantined_cache_requires_inspection")
+        record_quarantine(root, review)
         return {"status": "quarantined", "path": str(cache), "quarantine_path": str(retired),
                 "reviewed_bytes": before["bytes"], "bytes_reclaimed": 0,
-                "note": "Preserved for inspection, not deleted. These checks do not freeze writers or prove the quarantined data will remain unchanged."}
+                "retention_days": 7,
+                "note": "Preserved now; recorded unchanged data is eligible for expiry after seven days at verified cold startup. Live checks do not freeze writers."}
 
 
 def clean_cache(root, review, in_use=cache_in_use):
-    """Compatibility alias: b1 preserves quarantined data and never deletes it."""
+    """Compatibility alias: live calls only quarantine; expiry is startup-only."""
     return quarantine_cache(root, review, in_use=in_use)
 
 
+def owned_directory(path):
+    directory(path)
+    info = path.stat()
+    if info.st_uid != 0 or info.st_mode & 0o022:
+        raise ValueError("untrusted_quarantine_directory")
+
+
+def record_quarantine(root, review):
+    owned_directory(root)
+    store = root / RECEIPTS
+    store.mkdir(mode=0o700, exist_ok=True)
+    owned_directory(store)
+    record = {"format": 1, "revision": review, "quarantined_at": int(time.time())}
+    # Exclusive creation: an interrupted/invalid receipt is retained, never
+    # silently adopted or overwritten. No receipt means no automatic expiry.
+    fd = os.open(store / f"{review}.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as target:
+        json.dump(record, target)
+        target.flush()
+        os.fsync(target.fileno())
+    sync_directory(store)
+
+
+def sync_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def require_cold_start():
+    # This is a scheduling boundary, not a claim that a live process scan locks
+    # out writers. PID 1 is synchronously waiting for this helper before exec /init.
+    # Host/admin processes must not concurrently alter the private app volume.
+    if sys.platform != "linux" or os.geteuid() != 0 or os.getppid() != 1:
+        raise ValueError("not_container_preinit")
+    if os.readlink("/proc/1/exe") != "/usr/local/bin/opencode-container-init":
+        raise ValueError("not_container_preinit")
+    pids = {int(item.name) for item in Path("/proc").iterdir() if item.name.isdigit()}
+    if pids != {1, os.getpid()}:
+        raise ValueError("other_processes_present")
+
+
+def read_receipt(path, review):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as source:
+        info = os.fstat(source.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or
+                info.st_uid != 0 or info.st_mode & 0o077 or info.st_size > 1024):
+            raise ValueError("untrusted_quarantine_receipt")
+        value = json.loads(source.read(1025))
+    if (not isinstance(value, dict) or set(value) != {"format", "revision", "quarantined_at"} or
+            type(value["format"]) is not int or value["format"] != 1 or value["revision"] != review or
+            type(value["quarantined_at"]) is not int or value["quarantined_at"] <= 0):
+        raise ValueError("invalid_quarantine_receipt")
+    return value
+
+
+def expire_quarantines(root):
+    require_cold_start()
+    result = {"status": "checked", "removed": [], "preserved": [],
+              "removed_bytes": 0, "retention_days": 7}
+    store = root / RECEIPTS
+    cache_root = root / ".cache"
+    if not cache_root.exists() and not cache_root.is_symlink():
+        return {**result, "status": "no_legacy_cache"}
+    owned_directory(root)
+    owned_directory(cache_root)
+    entries = []
+    if store.exists() or store.is_symlink():
+        owned_directory(store)
+        with os.scandir(store) as scan:
+            for entry in scan:
+                if len(entries) >= MAX_QUARANTINES:
+                    raise ValueError("quarantine_inventory_limit")
+                entries.append(entry.name)
+    with os.scandir(cache_root) as scan:
+        for index, entry in enumerate(scan):
+            if index >= MAX_ENTRIES:
+                raise ValueError("cache_inventory_limit")
+            if entry.name.startswith(".opencode-retired-"):
+                review = entry.name.removeprefix(".opencode-retired-")
+                if not re.fullmatch(r"[a-f0-9]{64}", review) or f"{review}.json" not in entries:
+                    result["preserved"].append({"reason": "unrecorded_quarantine"})
+                    if len(result["preserved"]) >= MAX_QUARANTINES:
+                        raise ValueError("quarantine_inventory_limit")
+    if not entries:
+        return {**result, "status": "no_recorded_quarantines"}
+    active_generation(root)
+    deadline = time.monotonic() + 20
+    with migration_module().migration_lock(root / "v2/work/.migration.lock"):
+        for name in sorted(entries):
+            if not re.fullmatch(r"[a-f0-9]{64}\.json", name):
+                result["preserved"].append({"reason": "unrecognized_receipt"})
+                continue
+            review = name[:-5]
+            target = root / ".cache" / f".opencode-retired-{review}"
+            receipt = store / name
+            try:
+                if time.monotonic() > deadline:
+                    raise ValueError("startup_time_budget")
+                recorded = read_receipt(receipt, review)
+                age = int(time.time()) - recorded["quarantined_at"]
+                if age < 0:
+                    raise ValueError("clock_before_quarantine")
+                if age < RETENTION_SECONDS:
+                    raise ValueError("within_grace_period")
+                current = snapshot(target)
+                if current["revision"] != review:
+                    raise ValueError("quarantine_changed")
+                require_cold_start()
+                if not shutil.rmtree.avoids_symlink_attacks:
+                    raise ValueError("safe_removal_unavailable")
+                # Disarm the receipt durably before removal. Interruption leaves
+                # an unrecorded partial quarantine for manual review, never an
+                # automatically retried deletion of a changed directory.
+                receipt.unlink()
+                sync_directory(store)
+                shutil.rmtree(target)
+                result["removed"].append(target.name)
+                result["removed_bytes"] += current["bytes"]
+            except (OSError, ValueError) as error:
+                # Only our fixed reason codes reach logs, not arbitrary paths
+                # from OS errors or malformed JSON.
+                reason = str(error) if type(error) is ValueError and re.fullmatch(r"[a-z_]+", str(error)) else "unsafe_or_unavailable"
+                result["preserved"].append({"directory": target.name, "reason": reason})
+    return result
+
+
 def main():
+    if sys.argv[1:] == ["--startup-expire"]:
+        try:
+            print("Legacy quarantine expiry: " + json.dumps(expire_quarantines(Path("/data"))))
+            return 0
+        except Exception:
+            print("Legacy quarantine expiry skipped: cold-start, ownership or state evidence unavailable", file=sys.stderr)
+            return 1
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("inspect", "quarantine-cache", "clean-cache"),
                         nargs="?", default="inspect",
