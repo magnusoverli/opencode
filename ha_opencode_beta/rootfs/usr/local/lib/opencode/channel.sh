@@ -36,12 +36,7 @@ case "${ADDON_CHANNEL}" in
 esac
 
 # -----------------------------------------------------------------------------
-# Historical instruction ownership metadata
-#
-# Managed V2 loads its packaged global file from /run/opencode-v2/config/opencode.
-# Both channels explicitly load user rules from /homeassistant/AGENTS.local.md.
-# These legacy paths remain available to administrative scripts; they are not
-# active instruction sources. Beta never modifies the shared stable AGENTS.md.
+# Channel labels and decision-note locations
 # -----------------------------------------------------------------------------
 
 if [ "${ADDON_CHANNEL}" = "beta" ]; then
@@ -51,21 +46,9 @@ if [ "${ADDON_CHANNEL}" = "beta" ]; then
     # note recorded while testing beta is not injected into every stable
     # session, and so uninstalling one channel cannot take the other's data.
     ADDON_STATE_DIR="/homeassistant/opencode_beta"
-    # Retired beta copy; only exact app-owned bytes may be removed.
-    ADDON_AGENTS_FILE="/data/context/AGENTS.md"
-    ADDON_AGENTS_MARKER="/data/.agents_md_hash"
-    ADDON_AGENTS_IN_CONFIG_DIR=false
 else
     ADDON_CHANNEL_LABEL="OpenCode"
     ADDON_STATE_DIR="/homeassistant/opencode"
-    ADDON_AGENTS_FILE="/homeassistant/AGENTS.md"
-    # Beside the file it describes, not in /data. /data is wiped when the
-    # add-on is reinstalled while the configuration directory is not, so a
-    # marker in /data would make a reinstall look like a hand edit and leave a
-    # spurious .bak behind.
-    ADDON_AGENTS_MARKER="/homeassistant/.opencode_agents_md.sha256"
-    ADDON_AGENTS_IN_CONFIG_DIR=true
 fi
 
 export ADDON_CHANNEL ADDON_CHANNEL_LABEL ADDON_STATE_DIR
-export ADDON_AGENTS_FILE ADDON_AGENTS_MARKER ADDON_AGENTS_IN_CONFIG_DIR

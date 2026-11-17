@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.1b3
+
+- **Correct context inspection** — `ha-context status` and `ha-context show` now use the active V2 global instructions and explain that the packaged rules are staged at startup. Custom rules belong in `/homeassistant/AGENTS.local.md`.
+- **Remove unused legacy metadata** — simplify beta's channel helper by removing obsolete instruction-path and ownership variables. Direct upgrades from V1, migration support, retained history and user customizations remain supported.
+
 ## 3.5.1b2
 
 - **Isolate stable and beta browser state** — preserve the beta channel identity when starting the Ingress proxy. Switching between stable and beta no longer shares the browser's saved workspace, conversation, model and draft selections, which could open a directory belonging to the other app and show “Workspace unavailable.”
