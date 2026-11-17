@@ -791,7 +791,7 @@ fi
 # ==============================================================================
 # Retire the unused beta instruction copy only with exact ownership evidence.
 # The active global copy was staged in /run above; user rules are AGENTS.local.md.
-# No code in this beta deploys or removes /homeassistant/AGENTS.md.
+# Shared historical /homeassistant/AGENTS.md remains available for user review.
 # ==============================================================================
 
 node /usr/local/bin/retire-opencode-instructions.mjs || \

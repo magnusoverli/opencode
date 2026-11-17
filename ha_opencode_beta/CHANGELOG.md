@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.2b0 (Unreleased)
+
+- Begin the next beta series from stable **3.5.1** (`v3.5.1`), including the complete reconciled runtime and compatibility fixes.
+- Shared runtime/build files match stable, with only explicitly checked channel identity differences. No new functional changes have been selected yet.
+
 ## 3.5.1b4
 
 - **Reconcile beta with stable 3.5.0** — combine the 3.5.1 beta improvements with fixes already shipped in stable, while retaining beta's separate identity and storage.

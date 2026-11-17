@@ -2,6 +2,11 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
+The next development target is **3.5.2b0**, based on released stable **3.5.1**.
+It is not published yet; the currently available beta remains **3.5.1b4**.
+See [the next-release baseline](NEXT_RELEASE.md) for source identity and the
+release preparation steps.
+
 Beta `3.5.1b4` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
 private-model discovery. It now includes stable 3.5.0's Zigporter compatibility,

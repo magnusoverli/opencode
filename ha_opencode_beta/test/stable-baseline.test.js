@@ -14,9 +14,6 @@ const reviewed = new Map([
   ["rootfs/etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-sidecar/run", source => source
     .replace("ADDON_CHANNEL=stable", "ADDON_CHANNEL=beta")
     .replace("OPENCODE_DECISION_NOTES_DIR:-/homeassistant/opencode}", "OPENCODE_DECISION_NOTES_DIR:-/homeassistant/opencode_beta}")],
-  ["rootfs/etc/s6-overlay/s6-rc.d/init-opencode/run", source => source
-    .replace("# Shared historical /homeassistant/AGENTS.md remains available for user review.",
-      "# No code in this beta deploys or removes /homeassistant/AGENTS.md.")],
   ["rootfs/opt/ha-lsp-server/server.js", patternChannel],
   ["rootfs/opt/ha-mcp-server/index.js", patternChannel],
   ["rootfs/opt/opencode-assist/install.py", source => source.replace('OWNER = "ha_opencode"', 'OWNER = "ha_opencode_beta"')],
