@@ -226,7 +226,7 @@ Use these prompts for complex tasks:
 
 The `hab_run` MCP tool provides access to the full Home Assistant admin CLI. It wraps the `hab` (Home Assistant Builder) CLI as a native MCP tool.
 
-The app pins **hab 1.7.2**. Prefer `hab_run(args=[...])`: each argument stays literal,
+The app pins **hab 1.8.0**. Prefer `hab_run(args=[...])`: each argument stays literal,
 including JSON, templates, apostrophes and spaces. The legacy `command` string is
 also accepted; pass exactly one form. The gateway defaults to JSON and disables
 CLI update checks. Shell hab defaults to JSON when non-interactive, text otherwise.

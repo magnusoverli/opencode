@@ -23,8 +23,10 @@ HELP = """OpenCode — Home Assistant managed V2 client
   opencode readonly               Start a managed read-only session
   opencode status                 Inspect the existing conversation server
   opencode legacy-data inspect     Inventory retained data without reading contents
-  opencode legacy-data clean-cache --review <revision>
-                                  Remove only the reviewed disposable V1 cache
+  opencode legacy-data quarantine-cache --review <revision>
+                                  Preserve reviewed V1 cache at a quarantine path
+                                  No deletion or disk-space reclamation
+                                  clean-cache is a compatibility alias
   opencode service status         Alias for managed-server status
   opencode --version              Print the image's certified V2 version
 

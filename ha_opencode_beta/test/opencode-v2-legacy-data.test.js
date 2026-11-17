@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-test("legacy inventory and reviewed cache cleanup preserve active/user state", () => {
+test("legacy inventory and reviewed cache quarantine preserve concurrent writes and active/user state", () => {
   const result = spawnSync(process.env.PYTHON || "python3",
     ["-B", fileURLToPath(new URL("./fixtures/opencode-v2-legacy-data.py", import.meta.url))],
     { encoding: "utf8", timeout: 30000 });

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded metadata-only inventory; reviewed cleanup of disposable V1 cache only."""
+"""Bounded metadata-only inventory; reviewed quarantine of disposable V1 cache only."""
 import argparse
 import hashlib
 import importlib.util
@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import stat
 import sys
 import time
@@ -109,21 +108,22 @@ def inspect(root):
     except Exception:
         result["active_v2"] = {"status": "unverified"}
     for relative, purpose in PATHS:
-        item = {"path": str(root / relative), "purpose": purpose, "cleanup_supported": False}
+        item = {"path": str(root / relative), "purpose": purpose,
+                "cleanup_supported": False, "quarantine_supported": False}
         try:
             item.update(snapshot(root / relative))
-            item["cleanup_supported"] = purpose == "disposable_v1_cache" and "generation" in result["active_v2"]
+            item["quarantine_supported"] = purpose == "disposable_v1_cache" and "generation" in result["active_v2"]
         except FileNotFoundError:
             item["status"] = "absent"
         except (OSError, ValueError):
             item["status"] = "unverified"
         result["items"].append(item)
-    result["note"] = "Metadata only. Unknown sizes are not zero. Cleanup removes only the reviewed V1 cache; original history/accounts, active assets, npm packages and V2 state are retained."
+    result["note"] = "Metadata only. Unknown sizes are not zero. Reviewed V1 cache can be quarantined, never automatically deleted; no disk space is reclaimed. Original history/accounts, active assets, npm packages and V2 state are retained."
     return result
 
 
 def cache_in_use(path):
-    # Linux cleanup only: fail closed if procfs cannot establish process usage.
+    # Linux quarantine only: fail closed if procfs cannot establish process usage.
     prefix = str(path) + "/"
     for process in Path("/proc").iterdir():
         if not process.name.isdigit():
@@ -149,9 +149,9 @@ def cache_in_use(path):
     return False
 
 
-def clean_cache(root, review, in_use=cache_in_use):
+def quarantine_cache(root, review, in_use=cache_in_use):
     if sys.platform != "linux" or os.geteuid() != 0:
-        raise ValueError("cleanup_requires_linux_app_root")
+        raise ValueError("quarantine_requires_linux_app_root")
     if not isinstance(review, str) or len(review) != 64 or any(c not in "0123456789abcdef" for c in review):
         raise ValueError("inspect_first_and_supply_exact_revision")
     directory(root / "v2/work")
@@ -168,33 +168,42 @@ def clean_cache(root, review, in_use=cache_in_use):
             raise ValueError("legacy_cache_in_use")
         retired = cache.with_name(f".opencode-retired-{review}")
         if retired.exists() or retired.is_symlink():
-            raise ValueError("interrupted_cleanup_requires_inspection")
+            raise ValueError("existing_quarantine_requires_inspection")
         if snapshot(cache)["revision"] != review:
             raise ValueError("cache_changed_inspect_again")
         os.rename(cache, retired)
-        # Quarantine first. If a writer raced the review, retain the directory
-        # rather than deleting it or overwriting a newly created cache.
+        # Process scans and metadata snapshots cannot exclude concurrent writers.
+        # Preserve the directory unconditionally: another revision check alone
+        # would merely move the race window before recursive deletion.
         if snapshot(retired)["revision"] != review or in_use(retired):
             raise ValueError("quarantined_cache_requires_inspection")
-        if not shutil.rmtree.avoids_symlink_attacks:
-            raise ValueError("safe_cleanup_unavailable")
-        shutil.rmtree(retired)
-        return {"status": "removed", "path": str(cache), "bytes": before["bytes"]}
+        if snapshot(retired)["revision"] != review:
+            raise ValueError("quarantined_cache_requires_inspection")
+        return {"status": "quarantined", "path": str(cache), "quarantine_path": str(retired),
+                "reviewed_bytes": before["bytes"], "bytes_reclaimed": 0,
+                "note": "Preserved for inspection, not deleted. These checks do not freeze writers or prove the quarantined data will remain unchanged."}
+
+
+def clean_cache(root, review, in_use=cache_in_use):
+    """Compatibility alias: b1 preserves quarantined data and never deletes it."""
+    return quarantine_cache(root, review, in_use=in_use)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("inspect", "clean-cache"), nargs="?", default="inspect")
+    parser.add_argument("command", choices=("inspect", "quarantine-cache", "clean-cache"),
+                        nargs="?", default="inspect",
+                        help="clean-cache is a compatibility alias for quarantine-cache; neither deletes data")
     parser.add_argument("--review", help="Exact V1 cache revision from inspect")
     args = parser.parse_args()
     root = Path("/data")
     try:
-        result = inspect(root) if args.command == "inspect" else clean_cache(root, args.review)
+        result = inspect(root) if args.command == "inspect" else quarantine_cache(root, args.review)
         print(json.dumps(result, indent=2))
         return 0
     except Exception:
         # Never echo arbitrary path names, metadata payloads or file contents.
-        print("Legacy cache cleanup/inventory could not be verified. Inspect the fixed cache, retired-cache and V2 work paths before retrying; retained history and active assets were not cleanup targets.", file=sys.stderr)
+        print("Legacy cache quarantine/inventory could not be verified. No automatic deletion was performed. Inspect the fixed cache, retired-cache and V2 work paths before retrying; retained history and active assets were not quarantine targets.", file=sys.stderr)
         return 1
 
 

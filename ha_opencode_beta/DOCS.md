@@ -2,7 +2,7 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta `3.5.1b0` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
+Beta `3.5.1b1` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
 private-model discovery. The unrelated post-3.2.3 Zigporter compatibility patch
 is not included. Beta keeps its own app identity and persistent storage; installing
@@ -110,20 +110,33 @@ Only the app-owned generation marker is read to identify active V2 state.
 Sizes are bounded inventories; an unsafe or oversized tree is **unverified**,
 not zero bytes. The report never prints individual filenames or credentials.
 
-Only `/data/.cache/opencode` is eligible for explicit cleanup:
+Only `/data/.cache/opencode` is eligible for explicit quarantine:
 
 ```sh
-opencode legacy-data clean-cache --review <cache-revision-from-inspect>
+opencode legacy-data quarantine-cache --review <cache-revision-from-inspect>
 ```
 
-Cleanup requires Linux app-root access, a validated active-generation marker
+Quarantine requires Linux app-root access, a validated active-generation marker
 and an existing V2 database (not a live database-health check), the
-migration lock, unchanged reviewed metadata and no process using the cache.
+migration lock, unchanged reviewed metadata and no observed process using the cache.
 Links, special files, nested mounts, incomplete inventories and inaccessible
-process evidence block cleanup. It may require a maintenance environment where
-all process usage can be established. A cache changed after quarantine is
-preserved at `/data/.cache/.opencode-retired-<revision>` for manual inspection;
-do not retry by deleting unknown directories.
+process evidence block quarantine. It may require a maintenance environment where
+process usage can be inspected. The directory is always preserved at
+`/data/.cache/.opencode-retired-<revision>` for manual inspection, including when
+post-quarantine checks fail. Do not retry by deleting unknown directories.
+
+**3.5.1b1 removes automatic deletion.** The old `clean-cache` command is a
+compatibility alias for quarantine only. Neither command reclaims disk space;
+success reports `status: "quarantined"`, `quarantine_path` and `bytes_reclaimed: 0`.
+Inventory reports `quarantine_supported` separately and keeps
+`cleanup_supported: false`.
+
+Process scans and metadata snapshots cannot freeze concurrent writers. A second
+snapshot detects the reported transient writer during the process scan, but even
+a write after the final check is preserved because there is no deletion step.
+Quarantine is not proof that the directory is idle or immutable. Disk reclamation
+requires separate offline review after writers have been stopped; this command
+does not authorize or perform it.
 
 This command **never deletes original conversation history or account files,
 the shared `/homeassistant` tree, `/data/.config/opencode`, `/data/.npm-global`,

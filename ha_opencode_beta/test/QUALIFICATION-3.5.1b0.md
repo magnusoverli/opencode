@@ -1,5 +1,13 @@
 # Beta 3.5.1b0: V2 consolidation
 
+## Subsequent self-test
+
+The operator's later self-test found a reproducible transient-writer cache
+deletion race and stale HAB version guidance. Full acceptance was not
+established. See [the b1 follow-up](QUALIFICATION-3.5.1b1.md) for the corrections
+and remaining installed-acceptance gaps; the original evidence below is
+historical and is not a full-release acceptance claim.
+
 ## Finding disposition
 
 | Audit finding | Implementation / decision |
