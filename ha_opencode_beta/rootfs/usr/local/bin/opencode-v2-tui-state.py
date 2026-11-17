@@ -73,13 +73,30 @@ def directory(path, uid, gid, mode):
         raise identity_error(path, "directory", info, uid, gid, mode)
 
 
-def managed_file(path, content):
+def managed_file(path, content, previous=None):
     if path.exists() or path.is_symlink():
         info = path.lstat()
         if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
                 or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o444):
             raise identity_error(path, "single-link-managed-file", info, 0, 0, 0o444)
-        if path.read_bytes() != content:
+        existing = path.read_bytes()
+        if previous is not None and existing == previous:
+            # Upgrade only our exact, root-owned legacy document. cli.json and
+            # other user preferences are never rewritten by this conversion.
+            temporary = path.with_name(f".managed-{os.urandom(12).hex()}")
+            try:
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o444)
+                with os.fdopen(fd, "wb") as output:
+                    output.write(content)
+                    os.fchmod(output.fileno(), 0o444)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temporary, path)
+            finally:
+                if temporary.exists():
+                    temporary.unlink()
+            return
+        if existing != content:
             raise identity_error(path, "unchanged-managed-file", info)
         return
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o444)
@@ -104,7 +121,8 @@ def prepare(root, legacy):
     # UID 60001 from replacing root-owned config files or plugin directories.
     directory(config, 0, GID, 0o1770)
     directory(config / "plugins", 0, 0, 0o555)
-    managed_file(config / "opencode.json", b'{"autoupdate":false}\n')
+    managed_file(config / "opencode.json", b'{"update":"disable"}\n',
+                 previous=b'{"autoupdate":false}\n')
     managed_file(config / "opencode.jsonc", b'{}\n')
     for leaf in ("data", "state"):
         directory(root / leaf, UID, GID, 0o700)

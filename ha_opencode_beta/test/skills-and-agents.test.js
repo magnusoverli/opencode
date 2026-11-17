@@ -107,16 +107,11 @@ describe(`${CHANNEL} skills`, () => {
     }
   });
 
-  it("keeps the live help injection markers AGENTS.md deployment depends on", () => {
+  it("uses on-demand CLI discovery and the actual V2 workspace", () => {
     const agents = fs.readFileSync(path.join(MCP_DIR, "AGENTS.md"), "utf8");
-    for (const marker of [
-      "<!-- HAB_LIVE_HELP_START -->",
-      "<!-- HAB_LIVE_HELP_END -->",
-      "<!-- ZIGPORTER_LIVE_HELP_START -->",
-      "<!-- ZIGPORTER_LIVE_HELP_END -->",
-    ]) {
-      assert.ok(agents.includes(marker), `AGENTS.md lost ${marker}`);
-    }
+    assert.doesNotMatch(agents, /LIVE_HELP|working directory is `\/homeassistant`/);
+    assert.match(agents, /isolated managed workspace/);
+    assert.match(agents, /args=\["schema"\]/);
   });
 
   it("documents the ESPHome troubleshooting and migration tools in shipped guidance", () => {

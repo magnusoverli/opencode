@@ -17,6 +17,16 @@ function projectContext(context) {
     status: "unknown",
     note: "No fresh matching model-context snapshot is available for this call. The server catalogue is not the active agent's tool list.",
   };
+  if (context.codeMode) return {
+    status: "unknown",
+    agent_id: context.agent,
+    source: "opencode_model_context",
+    observed_at: new Date(context.time).toISOString(),
+    direct_tool_names: context.bundled,
+    direct_native_tool_names: context.native,
+    code_mode: true,
+    note: "Direct tools were observed, but this runtime hook does not enumerate the permission-filtered Code Mode catalogue. These direct names are not the full agent tool list, authorization, or an approval receipt.",
+  };
   return {
     status: "observed",
     agent_id: context.agent,
@@ -48,7 +58,7 @@ export function annotateAgentCapabilities(result, context) {
   };
 }
 
-export async function registerAgentCapabilityContext(ctx, { now = Date.now } = {}) {
+export async function registerAgentCapabilityContext(ctx, { now = Date.now, codeMode = false } = {}) {
   // Older hosts/test adapters still get truthful server-only/unknown reporting.
   if (!ctx.session?.hook || !ctx.tool?.hook) return null;
   const contexts = new Map(), calls = new Map(), registrations = [];
@@ -60,6 +70,7 @@ export async function registerAgentCapabilityContext(ctx, { now = Date.now } = {
       const names = Object.keys(event.tools ?? {}).filter(name => name.startsWith("homeassistant_"));
       boundedSet(contexts, event.sessionID, {
         agent: event.agent, names: names.length <= MAX_TOOLS ? names : null, time: now(),
+        codeMode: codeMode && Object.hasOwn(event.tools ?? {}, "execute"),
       });
     }));
     registrations.push(await ctx.tool.hook("execute.before", event => {
@@ -73,7 +84,7 @@ export async function registerAgentCapabilityContext(ctx, { now = Date.now } = {
         const bundled = names.filter(name => name.startsWith("homeassistant_") &&
           !name.startsWith("homeassistant_native_")).map(name => name.slice("homeassistant_".length)).sort();
         if (bundled.length + native.length <= MAX_TOOLS && bundled.includes("get_agent_capabilities")) {
-          snapshot = { agent: observed.agent, time: observed.time, bundled, native };
+          snapshot = { agent: observed.agent, time: observed.time, bundled, native, codeMode: observed.codeMode };
         }
       }
       boundedSet(calls, JSON.stringify([event.sessionID, event.id]), { agent: event.agent, snapshot, time: now() });

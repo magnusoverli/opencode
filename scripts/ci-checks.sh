@@ -50,5 +50,9 @@ for suite in external-mcp mcp-startup tui-state provider-environment; do
   "${root[@]}" env HA_NATIVE_TESTS_REQUIRED=1 "$(command -v node)" --test \
     "$addon/test/opencode-v2-$suite.test.js"
 done
+if [ "$channel" = beta ]; then
+  "${root[@]}" env HA_NATIVE_TESTS_REQUIRED=1 "$(command -v node)" --test \
+    "$addon/test/opencode-v2-legacy-data.test.js"
+fi
 bash scripts/check-addon-options.sh "$addon"
 bash scripts/test-startup-hooks.sh "$channel"

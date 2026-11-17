@@ -1557,7 +1557,7 @@ def convert_candidate(
         config,
         {
             "$schema": "https://opencode.ai/config.json",
-            "autoupdate": False,
+            "update": "disable",
             "plugins": [],
             "permissions": [{"action": "*", "resource": "*", "effect": "deny"}],
         },

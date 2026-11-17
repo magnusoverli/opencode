@@ -24,6 +24,13 @@ build_runner() { # channel, addon_dir -> writes $SB/runner.sh
     local chan="${REPO}/${addon}/rootfs/usr/local/lib/opencode/channel.sh"
 
     local start end
+    if [ "$channel" = beta ]; then
+        # Beta now has a single packaged global instruction path. Exercise the
+        # real retirement helper; it never touches the shared configuration.
+        printf 'node --input-type=module -e '\''import {pathToFileURL} from "node:url"; const {retireInstructions}=await import(pathToFileURL(process.argv[1])); await retireInstructions(process.argv[2]);'\'' "%s" "%s"\n' \
+            "${REPO}/${addon}/rootfs/usr/local/bin/retire-opencode-instructions.mjs" "${sb}/data" > "${sb}/runner.sh"
+        return
+    fi
     start=$(grep -n 'AGENTS_TARGET="\${ADDON_AGENTS_FILE}"' "$init" | cut -d: -f1)
     end=$(grep -n 'agents_md_hash "\${AGENTS_TARGET}" > "\${AGENTS_HASH_FILE}"' "$init" | cut -d: -f1)
     end=$((end + 1))
@@ -100,16 +107,16 @@ check "does not create a private copy in /data" \
 scenario "beta fresh install" beta ha_opencode_beta setup_fresh
 check "does NOT write into the configuration directory" \
     "$([ ! -f "$SB/homeassistant/AGENTS.md" ] && echo 0 || echo 1)"
-check "deploys its own copy under /data" \
-    "$([ -f "$SB/data/context/AGENTS.md" ] && echo 0 || echo 1)"
-check "keeps its marker private too" \
-    "$([ -f "$SB/data/.agents_md_hash" ] && echo 0 || echo 1)"
+check "does not create an unused private instruction copy" \
+    "$([ ! -f "$SB/data/context/AGENTS.md" ] && echo 0 || echo 1)"
+check "does not create a redundant ownership marker" \
+    "$([ ! -f "$SB/data/.agents_md_hash" ] && echo 0 || echo 1)"
 
 scenario "beta upgrading from the old scheme" beta ha_opencode_beta setup_beta_upgrade
-check "removes its own leftover from the configuration directory" \
-    "$([ ! -f "$SB/homeassistant/AGENTS.md" ] && echo 0 || echo 1)"
-check "still deploys its private copy" \
-    "$([ -f "$SB/data/context/AGENTS.md" ] && echo 0 || echo 1)"
+check "preserves shared historical instructions for operator review" \
+    "$([ -f "$SB/homeassistant/AGENTS.md" ] && echo 0 || echo 1)"
+check "does not recreate a retired private copy" \
+    "$([ ! -f "$SB/data/context/AGENTS.md" ] && echo 0 || echo 1)"
 
 scenario "beta alongside stable" beta ha_opencode_beta setup_beta_with_stable
 check "leaves the stable add-on's file untouched" \

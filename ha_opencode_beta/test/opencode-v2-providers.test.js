@@ -247,13 +247,24 @@ describe("bounded native V2 provider configuration", () => {
       assert.equal(result.status, 0, result.stderr);
       const config = JSON.parse(result.stdout);
       const base = buildManagedConfig();
-      for (const field of ["plugins", "permissions", "agents", "snapshots", "lsp", "skills", "autoupdate", "share"]) assert.deepEqual(config[field], base[field]);
+      for (const field of ["plugins", "permissions", "policies", "agents", "snapshots", "lsp", "skills", "update", "share"]) assert.deepEqual(config[field], base[field]);
       assert.equal(config.model, "fixture/coding");
       assert.equal(config.formatter, false);
       assert.deepEqual(config.websearch, { provider: "tavily" });
       assert.equal(await readFile(output, "utf8"), `FIXTURE_API_KEY=${fixtureKey}\0`);
       assert.ok(!(result.stdout + result.stderr).includes(fixtureKey));
       assert.deepEqual(JSON.parse(await readFile(input, "utf8")), raw);
+
+      const mcpRun = () => spawnSync(process.execPath, [generator, "--options-file", input,
+        "--environment-output", output, "--plugin-enabled", "true"], { encoding: "utf8" });
+      for (const enabled of [true, false]) {
+        await writeFile(input, JSON.stringify({ ...raw, mcp_code_mode: enabled }));
+        const staged = mcpRun();
+        assert.equal(staged.status, 0, staged.stderr);
+        assert.equal(JSON.parse(staged.stdout).plugins.find(entry => entry.package.endsWith("/mcp-plugin")).options.codemode, enabled);
+      }
+      await writeFile(input, JSON.stringify({ ...raw, mcp_code_mode: "true" }));
+      assert.equal(mcpRun().status, 1, "malformed toggle must not silently enable code execution");
 
       await writeFile(input, JSON.stringify(options({ plugins: [{ package: 123, options: { key: fixtureKey } }] }, { custom_plugins_enabled: true })));
       const rejected = run();

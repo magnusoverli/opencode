@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.5.1b0
+
+- **Consolidate the V2 runtime configuration** — use native update settings throughout, validate the complete generated configuration against the pinned V2 schema, and add native hard-deny policies alongside agent permissions. Preserve terminal preferences when upgrading the app-owned client configuration.
+- **Add experimental MCP Code Mode** — opt into V2 tool discovery and execution for bundled and native Home Assistant tools. Direct tools remain the default; capability reporting and Supervisor apply stay direct. Read-only restrictions and native apply approval remain enforced. External MCP servers can select `codemode` individually and use native `disabled` settings.
+- **Unify Home Assistant instructions** — use one packaged global instruction source, correct the workspace guidance, and replace startup help-text injection with on-demand CLI discovery. Retire only unchanged, app-owned beta instruction copies; preserve customized files and shared stable instructions.
+- **Inspect retained legacy data** — add `opencode legacy-data inspect` and revision-reviewed, cache-only cleanup. Original history, accounts, custom assets and user-installed packages remain preserved; late V1 upgrades and V2-to-V2 migrations remain supported.
+- Refresh obsolete rollback/read-only comments and upstream documentation links. Runtime pins remain OpenCode **2.3.0**, OpenChamber **2.7.2** and HAB **1.8.0**.
+
 ## 3.5.0b5
 
 - **Improve Supervisor app review ([#199](https://github.com/magnusoverli/opencode/issues/199))** — show app display names, allow inspection and non-applying previews from all profiles and the managed read-only agent, and bind bounded before/after diffs to reviewed plans. Distinguish unset from withheld options; reveal only schema-constrained standard `log_level` strings. Apply still requires the full profile, an apply-capable agent and native permission approval.

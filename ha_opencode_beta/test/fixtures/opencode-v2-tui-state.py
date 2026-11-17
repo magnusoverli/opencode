@@ -52,7 +52,12 @@ for path in [config / "opencode.json", config / "opencode.jsonc", config / "plug
 (root / "state/opencode/kv.json").write_text('{"session_picker":"all"}')
 ''', root)
     before = (root / "config/opencode/cli.json").read_bytes()
+    # Real 3.5.0 -> 3.5.1 conversion of the exact immutable app-owned document.
+    managed = root / "config/opencode/opencode.json"
+    managed.write_bytes(b'{"autoupdate":false}\n')
     state.prepare(root, legacy)
+    assert managed.read_bytes() == b'{"update":"disable"}\n'
+    assert managed.stat().st_mode & 0o777 == 0o444
     assert (root / "config/opencode/cli.json").read_bytes() == before
     # Resume after an interruption between fchown and fchmod, and after mkdir
     # under a restrictive umask. Never require blanket recursive repair.

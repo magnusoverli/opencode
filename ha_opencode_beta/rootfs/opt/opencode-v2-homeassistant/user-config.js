@@ -1,5 +1,5 @@
-// Bounded native V2 configuration, based on /v2/docs/config, /providers and
-// /models. Do not fall back to the public (potentially V1) config.json schema.
+// Bounded native V2 configuration, based on /docs/config, /providers and
+// /models. Validate with the pinned native schema rather than the mixed public schema.
 // Unsupported fields fail visibly instead of silently bypassing managed policy.
 import { Config } from "@opencode/schema/config";
 import { Schema } from "effect";
@@ -9,6 +9,11 @@ import { isPrivateModel } from "../ppq-private-runtime/catalog.js";
 // These are locked dependencies of the pinned plugin package already shipped in
 // the image. The actual V2 decoder validates nested fields, not a V1 facsimile.
 const decodeConfig = Schema.decodeUnknownSync(Config.Info, { onExcessProperty: "error" });
+export function validateManagedConfig(config) {
+  try { decodeConfig(config); }
+  catch { throw new TypeError("Generated configuration failed the pinned native V2 schema; managed settings were not activated"); }
+  return config;
+}
 const ROOT_FIELDS = ["$schema", "model", "default_agent", "providers", "formatter", "compaction", "media", "tool_output", "websearch", "plugins"];
 const PACKAGES = new Set([
   "openai", "openai/chat", "openai/responses", "openai-compatible",
@@ -204,7 +209,7 @@ export function prepareUserConfig(options = {}, { warn = () => {} } = {}) {
   jsonValues(nonPluginConfig, environment);
   normalizeLegacyProviders(config, warn);
   try { decodeConfig(config); }
-  catch { invalid("native V2 schema validation failed; check field names and value types against /v2/docs/config and /v2/docs/providers (use npm/options only inside a supported legacy provider entry)"); }
+  catch { invalid("native V2 schema validation failed; check field names and value types against https://opencode.ai/docs/config and https://opencode.ai/docs/providers (use npm/options only inside a supported legacy provider entry)"); }
   if (config.plugins?.length) warn("Third-party plugins are enabled as trusted root-level backend code; upstream handles loading and compatibility is not verified by the add-on.");
   if (config.$schema !== undefined && config.$schema !== "https://opencode.ai/config.json") invalid("$schema must be https://opencode.ai/config.json");
   if (config.model !== undefined && (typeof config.model !== "string" || !/^[^\s/#]+\/[^\s#]+$/.test(config.model))) invalid("model must be a provider/model string without a variant");

@@ -17,7 +17,7 @@ const names = ["get_agent_capabilities", "supervisor_app_inspect", "supervisor_a
 const tools = names.map(name => ({ name, description: name,
   inputSchema: { type: "object", properties: {}, additionalProperties: true } }));
 
-test("pinned runtime reports reader tools and transfers a preview to Build with separate approval", { timeout: 45000 }, async () => {
+for (const codemode of [false, true]) test(`pinned runtime reports reader tools and transfers a preview to Build with separate approval (Code Mode ${codemode})`, { timeout: 45000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "supervisor-review-v2-"));
   const generations = [], nextCalls = [], calls = [];
   let backend, saves = 0;
@@ -60,9 +60,15 @@ test("pinned runtime reports reader tools and transfers a preview to Build with 
     const parts = [];
     for await (const part of req) parts.push(part);
     const body = JSON.parse(Buffer.concat(parts));
-    const primary = body.tools?.some(tool => tool.function?.name === `homeassistant_${names[0]}`);
+    const codeTool = body.tools?.find(tool => tool.function?.name === "execute");
+    const primary = !!codeTool || body.tools?.some(tool => tool.function?.name === `homeassistant_${names[0]}`);
     if (primary) generations.push(body);
-    const call = primary ? nextCalls.shift() : null;
+    let call = primary ? nextCalls.shift() : null;
+    if (call && codeTool && codemode && !body.tools.some(tool => tool.function?.name === call.name)) {
+      call = { name: "execute", arguments: JSON.stringify({
+        code: `return await tools.homeassistant.${call.name.slice("homeassistant_".length)}(${call.arguments});`,
+      }) };
+    }
     res.writeHead(200, { "content-type": "text/event-stream" });
     const chunks = call
       ? [[{ role: "assistant", tool_calls: [{ index: 0, id: `call_${generations.length}`, type: "function", function: call }] }, null], [{}, "tool_calls"]]
@@ -84,9 +90,9 @@ test("pinned runtime reports reader tools and transfers a preview to Build with 
     `);
     const config = join(root, "managed.json");
     await writeFile(config, JSON.stringify({
-      model: "fixture/coding", autoupdate: false, share: "disabled", snapshots: false,
+      model: "fixture/coding", update: "disable", share: "disabled", snapshots: false,
       plugins: [{ package: pathToFileURL(join(root, "plugin")).href,
-        options: { endpoint: `http://127.0.0.1:${bridge.address().port}/mcp` } }],
+        options: { endpoint: `http://127.0.0.1:${bridge.address().port}/mcp`, codemode } }],
       permissions: [
         { action: "*", resource: "*", effect: "allow" },
         ...buildManagedConfig().permissions.filter(rule => rule.action === "homeassistant_supervisor_app_apply"),
@@ -130,7 +136,16 @@ test("pinned runtime reports reader tools and transfers a preview to Build with 
       await client.session.prompt({ sessionID: session.id, text: "Run the synthetic fixture call." });
     };
     const wait = () => client.session.wait({ sessionID: session.id }, { signal: AbortSignal.timeout(10000) });
-    const lastResult = () => generations.at(-1).messages.filter(item => item.role === "tool").at(-1)?.content;
+    const lastResult = () => {
+      let result = generations.at(-1).messages.filter(item => item.role === "tool").at(-1)?.content;
+      // Code Mode wraps the MCP result; direct-tool responses contain its text.
+      for (let i = 0; i < 5; i++) {
+        const parsed = typeof result === "string" ? JSON.parse(result) : result;
+        if (parsed?.mcp || parsed?.status || parsed?.revision || parsed?.preview_id) return JSON.stringify(parsed);
+        result = parsed?.content?.[0]?.text ?? parsed?.result ?? parsed;
+      }
+      return typeof result === "string" ? result : JSON.stringify(result);
+    };
     const call = async (name, args) => { await start(name, args); await wait(); return lastResult(); };
     const reader = JSON.parse(await call(names[0]));
     assert.equal(reader.mcp.tools, 4);
@@ -145,10 +160,34 @@ test("pinned runtime reports reader tools and transfers a preview to Build with 
     const apply = { preview_id: plan.preview_id, review: plan.review };
     await call(names[3], apply);
     assert.equal(calls.includes(names[3]), false, "read-only apply must not reach MCP even if the model requests it");
+    if (codemode) {
+      nextCalls.push({ name: "execute", arguments: JSON.stringify({
+        code: `return await tools.homeassistant.supervisor_app_apply(${JSON.stringify(apply)});`,
+      }) });
+      await client.session.prompt({ sessionID: session.id, text: "Attempt the unavailable executor." });
+      await wait();
+      assert.equal(calls.includes(names[3]), false, "read-only must also reject invented Code Mode execution");
+    }
     await client.session.switchAgent({ sessionID: session.id, agent: "build" });
     const builder = JSON.parse(await call(names[0]));
     assert.equal(builder.mcp.current_agent.agent_id, "build");
-    assert.ok(builder.mcp.current_agent.tool_names.includes(names[3]));
+    if (codemode) {
+      assert.equal(builder.mcp.current_agent.status, "unknown");
+      assert.equal(builder.mcp.current_agent.code_mode, true);
+      assert.ok(builder.mcp.current_agent.direct_tool_names.includes(names[3]));
+      assert.ok(!generations.at(-1).tools.some(tool => tool.function?.name === `homeassistant_${names[1]}`));
+      assert.ok(generations.at(-1).tools.some(tool => tool.function?.name === "execute"));
+      const before = calls.filter(name => name === names[1]).length;
+      await call(names[1], { slug: "other" });
+      assert.equal(calls.filter(name => name === names[1]).length, before + 1, "Code Mode read reaches the registered MCP");
+      nextCalls.push({ name: "execute", arguments: JSON.stringify({
+        code: `return await tools.homeassistant.supervisor_app_apply(${JSON.stringify(apply)});`,
+      }) });
+      await client.session.prompt({ sessionID: session.id, text: "Attempt to bypass the direct-only review tool." });
+      await wait();
+      assert.equal(saves, 0, "direct-only apply is not callable through the Code Mode catalogue");
+      assert.equal(calls.includes(names[3]), false);
+    } else assert.ok(builder.mcp.current_agent.tool_names.includes(names[3]));
     await start(names[3], apply);
     let approval;
     for (let i = 0; i < 100; i++) {

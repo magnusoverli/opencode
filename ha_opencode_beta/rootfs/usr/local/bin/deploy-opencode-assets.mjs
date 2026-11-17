@@ -1,20 +1,9 @@
 #!/usr/bin/env node
 /**
- * Deploy the add-on's skills into OpenCode's global discovery path.
- *
- * OpenCode finds skills by convention under its global config directory
- * (XDG_CONFIG_HOME/opencode), not from anything we can point at, so the files
- * have to exist there. They ship read-only inside the image and are copied into
- * /data at every start.
- *
- * The read-only agent is deliberately NOT deployed here. An agent file in the
- * global directory is selectable in every session, including OpenChamber, where
- * nothing applies the read-only configuration overlay — its `edit`/`bash` denials
- * would hold but the Home Assistant MCP server would still be in whatever
- * profile the user configured, so `call_service` and `write_config_safe` would
- * work in a session whose own description promises they do not. That agent
- * exists only inside `ha-readonly`, which is the one place the whole contract
- * is in force.
+ * Deploy editable skills into the path explicitly listed by managed V2 config.
+ * The native read-only agent is defined in managed-config.js and is available
+ * through /agents in every managed client. Custom agents use the bounded
+ * native importer; this helper deploys skills only.
  *
  * The hard part is updates. These are the add-on's files, but they sit in a
  * directory the user can edit, and editing them is a reasonable thing to do —

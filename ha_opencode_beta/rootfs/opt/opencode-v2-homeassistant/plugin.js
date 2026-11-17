@@ -88,13 +88,13 @@ function requireTimeouts(value) {
 
 export function parseOptions(value) {
   const input = requireObject(value);
-  const allowed = new Set(["bundledEnabled", "endpoint", "nativeEnabled", "nativeEndpoint", "timeouts", "externalServers"]);
+  const allowed = new Set(["bundledEnabled", "endpoint", "nativeEnabled", "nativeEndpoint", "timeouts", "externalServers", "codemode"]);
   const unknown = Object.keys(input).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
     throw new TypeError(`Unknown Home Assistant plugin option: ${unknown.join(", ")}`);
   }
 
-  for (const name of ["bundledEnabled", "nativeEnabled"]) {
+  for (const name of ["bundledEnabled", "nativeEnabled", "codemode"]) {
     if (input[name] !== undefined && typeof input[name] !== "boolean") {
       throw new TypeError(`Home Assistant plugin option '${name}' must be true or false`);
     }
@@ -115,6 +115,7 @@ export function parseOptions(value) {
     nativeEnabled,
     ...(nativeEndpoint ? { nativeEndpoint } : {}),
     timeouts: requireTimeouts(input.timeouts),
+    ...(input.codemode === undefined ? {} : { codemode: input.codemode }),
     ...(input.externalServers === undefined ? {} : { externalServers: validateExternalServers(input.externalServers) }),
   };
 }
@@ -147,7 +148,7 @@ export async function readCallerSecret({
     return requireCallerSecret(buffer.toString("utf8"));
   } catch {
     // Do not attach an underlying error: plugin failures are written to logs.
-    throw new Error("Home Assistant sidecar caller credential is unavailable; restart the beta app");
+    throw new Error("Home Assistant sidecar caller credential is unavailable; restart the app");
   } finally {
     buffer.fill(0);
     library?.close();
@@ -161,7 +162,7 @@ export function createServerConfig(options, callerSecret, endpoint = options.end
     headers: { Authorization: `Bearer ${requireCallerSecret(callerSecret)}` },
     oauth: false,
     disabled: false,
-    codemode: false,
+    codemode: options.codemode ?? false,
     timeout: { ...options.timeouts },
   };
 }
@@ -192,6 +193,12 @@ async function disposeRegistrations(registrations) {
 
   if (errors.length === 1) throw errors[0];
   if (errors.length > 1) throw new AggregateError(errors, "Failed to dispose Home Assistant plugin registrations");
+}
+
+export function retainDirectReviewTools(editor) {
+  for (const name of ["homeassistant_get_agent_capabilities", "homeassistant_supervisor_app_apply"]) {
+    editor.update(name, tool => { tool.options = { ...tool.options, codemode: false }; });
+  }
 }
 
 export function createSetup({ readSecret = readCallerSecret, resolveExternal = resolveExternalServers } = {}) {
@@ -231,7 +238,7 @@ export function createSetup({ readSecret = readCallerSecret, resolveExternal = r
     }
 
     if (managedFailed) {
-      const message = "Home Assistant MCP registration failed; check the sidecar status and restart the beta app";
+      const message = "Home Assistant MCP registration failed; check the sidecar status and restart the app";
       // A broken HA boundary must not prevent unrelated external MCPs from
       // loading. Never attach the credential-bearing underlying exception.
       if (registrations.length === 0) throw new Error(message);
@@ -239,8 +246,13 @@ export function createSetup({ readSecret = readCallerSecret, resolveExternal = r
     }
 
     if (options.bundledEnabled && !managedFailed) {
+      if (options.codemode) {
+        // Keep review/application and capability provenance on the direct call
+        // path. Pinned V2 does not run per-tool hooks for nested Code Mode calls.
+        registrations.push(await ctx.tool.transform(retainDirectReviewTools));
+      }
       try {
-        const registration = await registerAgentCapabilityContext(ctx);
+        const registration = await registerAgentCapabilityContext(ctx, { codeMode: options.codemode ?? false });
         if (registration) registrations.push(registration);
       } catch {
         // Keep server-only reporting explicit when a host cannot supply context.

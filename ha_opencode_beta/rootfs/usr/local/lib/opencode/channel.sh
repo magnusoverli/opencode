@@ -36,25 +36,12 @@ case "${ADDON_CHANNEL}" in
 esac
 
 # -----------------------------------------------------------------------------
-# Where this channel's instruction file goes
+# Historical instruction ownership metadata
 #
-# Only ONE file in the configuration directory can be called AGENTS.md, and
-# OpenCode finds it by convention from the working directory rather than from
-# anything we configure. Both channels deploying it therefore means the add-on
-# that started most recently owns it — and the two copies are not
-# interchangeable. Beta's documents capabilities that only beta's build ships
-# (`call_service` returning service response data, for one), so a stable
-# session reading beta's copy is told to use a tool it does not have.
-#
-# The rule is: stable owns /homeassistant/AGENTS.md. Beta keeps its own copy
-# inside its private /data and has OpenCode load it through `instructions`, so
-# it never writes to the configuration directory at all.
-#
-# That leaves the leak asymmetric in the only direction that is harmless. A
-# stable session now only ever reads stable's instructions. A beta session
-# additionally picks up stable's file through the working directory when both
-# add-ons are installed, which under-describes beta rather than mis-describing
-# it.
+# Managed V2 loads its packaged global file from /run/opencode-v2/config/opencode.
+# Both channels explicitly load user rules from /homeassistant/AGENTS.local.md.
+# These legacy paths remain available to administrative scripts; they are not
+# active instruction sources. Beta never modifies the shared stable AGENTS.md.
 # -----------------------------------------------------------------------------
 
 if [ "${ADDON_CHANNEL}" = "beta" ]; then
@@ -64,8 +51,7 @@ if [ "${ADDON_CHANNEL}" = "beta" ]; then
     # note recorded while testing beta is not injected into every stable
     # session, and so uninstalling one channel cannot take the other's data.
     ADDON_STATE_DIR="/homeassistant/opencode_beta"
-    # Private to this add-on, and listed in OpenCode's `instructions` because
-    # nothing outside the working directory is discovered automatically.
+    # Retired beta copy; only exact app-owned bytes may be removed.
     ADDON_AGENTS_FILE="/data/context/AGENTS.md"
     ADDON_AGENTS_MARKER="/data/.agents_md_hash"
     ADDON_AGENTS_IN_CONFIG_DIR=false

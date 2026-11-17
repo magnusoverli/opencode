@@ -10,6 +10,7 @@ import {
   prepareExternalMcpConfig,
   readExternalMcpSecret,
   resolveExternalServers,
+  validateExternalServers,
 } from "../rootfs/opt/opencode-v2-homeassistant/external-mcp.js";
 import {
   applyExternalMcpConfig,
@@ -53,6 +54,22 @@ function fixture() {
 }
 
 describe("bounded external MCP configuration", () => {
+  it("accepts native disabled and per-server Code Mode without changing permission defaults", async () => {
+    const servers = validateExternalServers({
+      reference: { type: "remote", url: "https://example.test/mcp", disabled: false, codemode: true },
+      off: { type: "remote", url: "https://example.test/off", disabled: true, codemode: true },
+    });
+    const resolved = await resolveExternalServers(servers);
+    assert.equal(resolved.reference.codemode, true);
+    assert.equal(resolved.reference.disabled, false);
+    assert.equal(resolved.off, undefined);
+    assert.throws(() => validateExternalServers({
+      bad: { type: "remote", url: "https://example.test", enabled: true, disabled: true },
+    }), /conflicting/);
+    assert.throws(() => validateExternalServers({
+      bad: { type: "remote", url: "https://example.test", codemode: "true" },
+    }), /true or false/);
+  });
   for (const reference of [secret("metrics-token"), "{file:metrics-token}"]) {
     it(`keeps ${reference} out of upstream config substitution (#216)`, async () => {
       const value = fixture();

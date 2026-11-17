@@ -135,7 +135,7 @@ describe("opt-in upstream V2 plugin configuration", () => {
 
   it("documents upstream ownership, persistent absolute paths, trusted code and recovery without enabling project discovery", async () => {
     const docs = await readFile(new URL("DOCS.md", addon), "utf8");
-    for (const text of ["custom_plugins_enabled", "https://opencode.ai/v2/docs/plugins", "/data/plugins/my-plugin",
+    for (const text of ["custom_plugins_enabled", "https://opencode.ai/docs/plugins", "/data/plugins/my-plugin",
       "root-level code", "before their", "Client/TUI-only", "not an add-on plugin manager"]) {
       assert.ok(docs.includes(text), `Missing documented contract: ${text}`);
     }
