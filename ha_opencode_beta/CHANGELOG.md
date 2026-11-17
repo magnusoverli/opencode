@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.1b2
+
+- **Isolate stable and beta browser state** — preserve the beta channel identity when starting the Ingress proxy. Switching between stable and beta no longer shares the browser's saved workspace, conversation, model and draft selections, which could open a directory belonging to the other app and show “Workspace unavailable.”
+- **Preserve existing conversations and settings** — existing browser entries are retained. Beta now uses its own namespace; a previously saved invalid server-side workspace may still need a one-time **Open /homeassistant** selection.
+
 ## 3.5.1b1
 
 - **Prevent raced cache deletion** — live legacy-cache commands now only quarantine reviewed data; the old `clean-cache` name remains a compatibility alias. Neither command deletes data while the app is running.

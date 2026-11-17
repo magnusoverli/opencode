@@ -2,7 +2,7 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta `3.5.1b1` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
+Beta `3.5.1b2` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
 private-model discovery. The unrelated post-3.2.3 Zigporter compatibility patch
 is not included. Beta keeps its own app identity and persistent storage; installing
@@ -26,6 +26,26 @@ fixes, parser-based safe-write validation, guarded global Markdown agent imports
 and the opt-in for remote TTS/STT servers. Installed Supervisor
 upgrade/rollback, real Wyoming/Piper/Whisper speech, public relay pairing and
 account-backed encrypted inference remain unverified. Stable remains unchanged.
+
+## Stable/beta workspace isolation in 3.5.1b2
+
+Home Assistant Ingress serves both apps on the same browser origin. Earlier
+versions stripped `ADDON_CHANNEL` when launching the proxy, so beta incorrectly
+used stable's browser-storage namespace. Switching instances could restore a
+private chat directory that exists only in the other app and immediately show
+**Workspace unavailable**.
+
+Beta now preserves its channel identity through that restricted launch
+environment and uses `ha-opencode-beta`; stable continues using
+`ha-opencode-stable`. Existing browser entries and conversation history are
+preserved, not copied or deleted. Beta may initialize fresh browser preferences
+instead of inheriting the shared namespace.
+
+If a bad selection was already persisted in beta's server settings, select
+**Open /homeassistant** once on the recovery screen. This starts a new draft;
+historical conversations retain their recorded directories. Reopening a
+conversation whose original workspace is genuinely missing can still show the
+recovery screen.
 
 ## V2 consolidation in 3.5.1b0
 

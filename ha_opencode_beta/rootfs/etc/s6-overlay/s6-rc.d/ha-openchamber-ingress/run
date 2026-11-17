@@ -1,5 +1,8 @@
 #!/command/with-contenv bashio
 # Shared ingress router. s6 owns each UI backend independently.
+# Resolve channel identity before entering the deliberately stripped environment.
+# shellcheck source=/usr/local/lib/opencode/channel.sh
+source /usr/local/lib/opencode/channel.sh
 export NODE_OPTIONS="--max-old-space-size=768"
 # Both interfaces attach to the same supervised V2 backend.
 export HA_INGRESS_UI=$(cat /data/.interface_mode 2>/dev/null || echo "terminal")
@@ -17,6 +20,7 @@ export OPENCHAMBER_UPSTREAM_HOST="127.0.0.1"
 # Do not wait for a UI or MCP backend: setup must survive independent restarts.
 # Do not inherit user runtime overrides, Supervisor credentials or MCP secrets.
 exec env -i PATH="/usr/local/bin:/usr/bin:/bin" NODE_OPTIONS="${NODE_OPTIONS}" \
+    ADDON_CHANNEL="${ADDON_CHANNEL}" \
     HA_INGRESS_UI="${HA_INGRESS_UI}" \
     HA_INGRESS_PROXY_IP="${HA_INGRESS_PROXY_IP}" \
     OPENCHAMBER_ALLOW_ANY_REMOTE="${OPENCHAMBER_ALLOW_ANY_REMOTE}" \
