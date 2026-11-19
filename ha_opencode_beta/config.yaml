@@ -136,6 +136,8 @@ options:
   openchamber_public_url: ""
   # Additional exact HTTPS browser origins for the API frontend.
   cors_origins: []
+  # Let the OpenCode desktop app connect to the API frontend.
+  server_desktop_app: false
   # Let OpenChamber desktop/mobile apps sign in to the OpenChamber LAN UI.
   openchamber_lan_native_apps: false
   # Relay hosting for the managed OpenChamber instance. When enabled, OpenChamber
@@ -223,6 +225,7 @@ schema:
   openchamber_public_url: str?
   cors_origins:
     - str
+  server_desktop_app: bool?
   openchamber_lan_native_apps: bool?
   openchamber_relay_host: bool?
   openchamber_allow_remote_speech: bool?

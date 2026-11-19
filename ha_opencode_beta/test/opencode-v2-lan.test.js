@@ -225,6 +225,42 @@ test("OpenChamber native-app access is opt-in, UI-only and limited to packaged o
   assert.equal((await request(api.port, { headers: { origin: "openchamber-ui://app" } })).status, 403);
 });
 
+test("OpenCode desktop app access is opt-in, API-only and limited to its renderer origin", async (t) => {
+  const { parseLanOptions } = await import(`${root}lan-config.js`);
+  const options = { enable_server: true, lan_password: password, lan_trusted_proxies: ["127.0.0.1"], server_public_url: origin };
+  assert.equal(parseLanOptions(options).desktopApps, false);
+  assert.equal(parseLanOptions({ ...options, server_desktop_app: true }).desktopApps, true);
+  assert.equal(parseLanOptions({ enable_openchamber_lan: true, interface_mode: "openchamber", lan_password: password,
+    lan_trusted_proxies: ["127.0.0.1"], openchamber_public_url: origin, server_desktop_app: true }).desktopApps, false);
+  assert.throws(() => parseLanOptions({ ...options, server_desktop_app: "yes" }), /server_desktop_app/);
+
+  const app = "oc://renderer";
+  const preflightHeaders = { authorization: "", origin: app, "access-control-request-method": "GET",
+    "access-control-request-headers": "authorization, x-opencode-capabilities, x-opencode-directory" };
+  const { port, calls } = await fixture(t, { desktopApps: true });
+  const preflight = await request(port, { method: "OPTIONS", headers: preflightHeaders });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers["access-control-allow-origin"], app);
+  for (const name of ["authorization", "x-opencode-capabilities", "x-opencode-directory"]) {
+    assert.match(preflight.headers["access-control-allow-headers"], new RegExp(`\\b${name}\\b`));
+  }
+  assert.equal(calls.length, 0);
+  assert.equal((await request(port, { headers: { authorization: "", origin: app } })).status, 401);
+  const authorized = await request(port, { path: "/api/fixture", headers: { origin: app } });
+  assert.equal(authorized.status, 200);
+  assert.equal(authorized.headers["access-control-allow-origin"], app);
+  assert.equal(JSON.parse(authorized.text).origin, undefined);
+  for (const bad of ["oc://evil", "oc://renderer.evil", "null", "openchamber-ui://app"]) {
+    assert.equal((await request(port, { method: "OPTIONS", headers: { ...preflightHeaders, origin: bad } })).status, 403);
+  }
+
+  const off = await fixture(t);
+  assert.equal((await request(off.port, { method: "OPTIONS", headers: preflightHeaders })).status, 403);
+  assert.equal((await request(off.port, { headers: { origin: app } })).status, 403);
+  const ui = await fixture(t, { mode: "ui", desktopApps: true });
+  assert.equal((await request(ui.port, { path: "/api/fixture", method: "POST", headers: { authorization: "", origin: app } })).status, 403);
+});
+
 test("closing a frontend terminates existing SSE streams for app-restart credential rotation", async (t) => {
   const { port, proxy } = await fixture(t);
   const response = await new Promise((resolve, reject) => {

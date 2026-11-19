@@ -27,12 +27,15 @@ export function parseLanOptions(options) {
   if (!Array.isArray(origins) || origins.length > 32) throw new Error("cors_origins must be a list of at most 32 HTTPS origins");
   const nativeApps = options.openchamber_lan_native_apps ?? false;
   if (typeof nativeApps !== "boolean") throw new Error("openchamber_lan_native_apps must be true or false");
+  const desktopApps = options.server_desktop_app ?? false;
+  if (typeof desktopApps !== "boolean") throw new Error("server_desktop_app must be true or false");
   return {
     apiEnabled, uiEnabled, password, proxies,
     apiOrigin: apiEnabled ? httpsOrigin(options.server_public_url, "server_public_url") : null,
     uiOrigin: uiEnabled ? httpsOrigin(options.openchamber_public_url, "openchamber_public_url") : null,
     corsOrigins: apiEnabled ? origins.map((origin) => httpsOrigin(origin, "cors_origins")) : [],
     nativeApps: uiEnabled && nativeApps,
+    desktopApps: apiEnabled && desktopApps,
   };
 }
 
@@ -69,7 +72,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
   } catch (error) {
     // Never include parser input or an option value in diagnostics.
-    const message = /^(lan_|cors_origins|server_public_url|openchamber_public_url|enable_openchamber_lan|openchamber_lan_native_apps)/.test(error.message)
+    const message = /^(lan_|cors_origins|server_public_url|openchamber_public_url|enable_openchamber_lan|openchamber_lan_native_apps|server_desktop_app)/.test(error.message)
       ? error.message : "Unable to stage the managed LAN configuration";
     console.error(message);
     process.exitCode = 1;
