@@ -125,6 +125,10 @@ configuration:
     name: "LAN server CORS origins"
     description: "Additional exact HTTPS browser origins allowed to call the authenticated LAN API. No wildcards. Empty allows only the API's own origin; non-browser authenticated clients do not need an entry."
 
+  server_desktop_app:
+    name: "OpenCode desktop app"
+    description: "Lets the official OpenCode desktop app connect to the LAN API frontend through your HTTPS proxy. Allows only its packaged renderer origin (oc://renderer); every request still needs the LAN password or a paired device token. Requires the LAN server."
+
   openchamber_lan_native_apps:
     name: "OpenChamber LAN native apps"
     description: "Lets the OpenChamber desktop and mobile apps sign in to the OpenChamber LAN UI through your HTTPS proxy. Allows only OpenChamber's packaged app origins; browsers still need the public origin. Requires OpenChamber LAN web UI."
