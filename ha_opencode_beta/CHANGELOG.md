@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.5.2b0 (Unreleased)
+## 3.5.2b0
 
 - Begin the next beta series from stable **3.5.1** (`v3.5.1`), including the complete reconciled runtime and compatibility fixes.
 - Shared runtime/build files match stable, with only explicitly checked channel identity differences and the reviewed LAN change below.
