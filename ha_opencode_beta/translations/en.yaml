@@ -103,7 +103,7 @@ configuration:
 
   enable_server:
     name: "OpenCode LAN server"
-    description: "Opens an authenticated frontend on 4096 to the existing managed V2 backend. Requires LAN password, public HTTPS URL and trusted reverse-proxy IPs. Map the port only for that proxy."
+    description: "Requires a LAN password and server URL. Use a trusted HTTPS reverse proxy, or configure the direct desktop subnet to connect over HTTP or HTTPS."
 
   lan_password:
     name: "LAN password"
@@ -114,8 +114,8 @@ configuration:
     description: "Exact IPs of your nearest HTTPS reverse proxy, as seen by the app. No wildcards or CIDRs. The proxy must preserve Host and overwrite X-Forwarded-Proto and X-Forwarded-For; see Documentation."
 
   server_public_url:
-    name: "OpenCode public HTTPS origin"
-    description: "External HTTPS origin for the API frontend, for example https://code.example.com. No path. Required when the LAN server is enabled."
+    name: "OpenCode server URL"
+    description: "Enter the origin without a path. For direct desktop HTTP, use the HA IP and mapped port (e.g. http://192.168.5.33:4096); proxy mode requires HTTPS."
 
   openchamber_public_url:
     name: "OpenChamber public HTTPS origin"
@@ -127,7 +127,11 @@ configuration:
 
   server_desktop_app:
     name: "OpenCode desktop app"
-    description: "Lets the official OpenCode desktop app connect to the LAN API frontend through your HTTPS proxy. Allows only its packaged renderer origin (oc://renderer); every request still needs the LAN password or a paired device token. Requires the LAN server."
+    description: "Allows the official desktop app's renderer to call the authenticated LAN API. Requires the LAN server."
+
+  server_direct_subnet:
+    name: "Direct desktop LAN subnet"
+    description: "Leave empty for reverse-proxy mode. For direct desktop access, enter your private IPv4 network (e.g. 192.168.5.0/24). An HTTP server URL needs no certificate; credentials and traffic are unencrypted."
 
   openchamber_lan_native_apps:
     name: "OpenChamber LAN native apps"

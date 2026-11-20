@@ -21,7 +21,7 @@ ports:
   4096/tcp: null
   4097/tcp: null
 ports_description:
-  4096/tcp: "Authenticated OpenCode LAN server — requires LAN access and a trusted HTTPS reverse proxy. Use a different host port if beta is also installed."
+  4096/tcp: "OpenCode LAN API: HTTPS proxy or direct desktop HTTP/HTTPS. Use a different host port if beta is also installed."
   4097/tcp: "Authenticated OpenChamber LAN web UI — requires OpenChamber mode, LAN access and a trusted HTTPS reverse proxy."
 
 # File access - Home Assistant config directory
@@ -127,7 +127,7 @@ options:
   cpu_mode: "auto"
 
   # --- 5. Network exposure -----------------------------------------------
-  # Authenticated frontends to the existing backend; HTTPS reverse proxy required.
+  # Authenticated frontends to the existing backend.
   enable_server: false
   lan_password: ""
   lan_trusted_proxies: []
@@ -137,6 +137,7 @@ options:
   cors_origins: []
   # Let the OpenCode desktop app connect to the API frontend.
   server_desktop_app: false
+  server_direct_subnet: ""
   # Let OpenChamber desktop/mobile apps sign in to the OpenChamber LAN UI.
   openchamber_lan_native_apps: false
   # Opt-in passive relay hosting; public phone/relay pairing remains unverified.
@@ -224,6 +225,7 @@ schema:
   cors_origins:
     - str
   server_desktop_app: bool?
+  server_direct_subnet: str?
   openchamber_lan_native_apps: bool?
   openchamber_relay_host: bool?
   openchamber_allow_remote_speech: bool?

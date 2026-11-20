@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.3b0
+
+- Connect OpenCode Desktop directly to the add-on over a private IPv4 LAN. Set `server_direct_subnet` and use an `http://` server URL for access without a proxy or certificates. HTTP sends the LAN password and session traffic unencrypted. Direct HTTPS is also supported.
+- Startup now reports invalid LAN settings together before services start, instead of repeatedly retrying a listener that cannot run. Existing HTTPS reverse-proxy setups retain their defaults.
+
 ## 3.5.2b0
 
 - Begin the next beta series from stable **3.5.1** (`v3.5.1`), including the complete reconciled runtime and compatibility fixes.

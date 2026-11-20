@@ -1,4 +1,6 @@
 import http from "node:http";
+import https from "node:https";
+import { directSubnet as parseSubnet } from "./direct-lan.js";
 import { BlockList, isIP } from "node:net";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createLanPairing } from "./lan-pairing.js";
@@ -25,9 +27,14 @@ export const NATIVE_APP_ORIGINS = Object.freeze(["openchamber-ui://app", "capaci
 // Ordinary web pages cannot claim it; authentication is still required.
 export const OPENCODE_DESKTOP_ORIGINS = Object.freeze(["oc://renderer"]);
 
-export function createLanProxy({ mode, origin, proxies, corsOrigins = [], nativeApps = false, desktopApps = false, password, backendPassword, upstreamPort }) {
+export function createLanProxy({ mode, origin, proxies, corsOrigins = [], nativeApps = false, desktopApps = false, password, backendPassword, upstreamPort, directSubnet, tls }) {
   if (!["api", "ui"].includes(mode)) throw new Error("Invalid LAN proxy mode");
   const publicUrl = new URL(origin);
+  const direct = mode === "api" && Boolean(directSubnet);
+  const clients = direct ? parseSubnet(directSubnet) : null;
+  const plainHttp = direct && publicUrl.protocol === "http:";
+  if (!plainHttp && publicUrl.protocol !== "https:") throw new Error("Invalid LAN protocol");
+  if (direct && (!clients || !desktopApps || (!plainHttp && (!tls?.cert || !tls?.key)))) throw new Error("Incomplete direct LAN settings");
   const trusted = new BlockList();
   for (const value of proxies) {
     const ip = normalizeIp(value);
@@ -52,18 +59,23 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
 
   function authorize(req, upgrade) {
     const remote = normalizeIp(req.socket.remoteAddress);
-    if (!isIP(remote) || !trusted.check(remote, isIP(remote) === 6 ? "ipv6" : "ipv4")) return 403;
-    if (req.headers.host?.toLowerCase() !== publicUrl.host || req.headers["x-forwarded-proto"] !== "https") return 403;
-    if (req.headers["x-forwarded-host"] && req.headers["x-forwarded-host"].toLowerCase() !== publicUrl.host) return 403;
+    if (req.headers.host?.toLowerCase() !== publicUrl.host) return 403;
+    if (direct) {
+      if ((!plainHttp && !req.socket.encrypted) || isIP(remote) !== 4 || !clients.check(remote, "ipv4")) return 403;
+      if (Object.keys(req.headers).some(name => name === "forwarded" || name.startsWith("x-forwarded-"))) return 403;
+    } else {
+      if (!isIP(remote) || !trusted.check(remote, isIP(remote) === 6 ? "ipv6" : "ipv4")) return 403;
+      if (req.headers["x-forwarded-proto"] !== "https") return 403;
+      if (req.headers["x-forwarded-host"] && req.headers["x-forwarded-host"].toLowerCase() !== publicUrl.host) return 403;
+      // Use a single overwritten client IP, never an untrusted forwarding chain.
+      if (typeof req.headers["x-forwarded-for"] !== "string" || !isIP(req.headers["x-forwarded-for"])) return 403;
+    }
     const originHeader = req.headers.origin;
     if (originHeader !== undefined && !allowedOrigins.has(originHeader)) return 403;
     if (mode === "ui" && (upgrade || !["GET", "HEAD", "OPTIONS"].includes(req.method)) && originHeader !== origin
       // The desktop shell logs in without Origin; its renderer uses a packaged
       // origin. OpenChamber still authenticates the password/cookie/client token.
       && !(nativeApp && (originHeader === undefined || nativeOrigins.has(originHeader)))) return 403;
-    // The nearest trusted proxy must overwrite X-Forwarded-For with one IP.
-    // Do not let an arbitrary list become OpenChamber's login rate-limit key.
-    if (typeof req.headers["x-forwarded-for"] !== "string" || !isIP(req.headers["x-forwarded-for"])) return 403;
     let path;
     try {
       if (!req.url.startsWith("/") || req.url.startsWith("//") || /[\\\x00-\x20]/.test(req.url)) return 400;
@@ -117,8 +129,8 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
     const result = cleanHeaders(req.headers, upgrade);
     result.host = publicUrl.host;
     result["x-forwarded-host"] = publicUrl.host;
-    result["x-forwarded-proto"] = "https";
-    result["x-forwarded-for"] = req.headers["x-forwarded-for"];
+    result["x-forwarded-proto"] = plainHttp ? "http" : "https";
+    result["x-forwarded-for"] = direct ? normalizeIp(req.socket.remoteAddress) : req.headers["x-forwarded-for"];
     if (mode === "api") {
       result.authorization = upstreamAuthorization;
       delete result.cookie;
@@ -146,7 +158,10 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
     res.end(status === 204 ? undefined : "LAN request denied\n");
   }
 
-  const server = http.createServer({ maxHeaderSize: 16384 }, (req, res) => {
+  const server = direct && !plainHttp
+    ? https.createServer({ cert: tls.cert, key: tls.key, minVersion: "TLSv1.2", maxHeaderSize: 16384 })
+    : http.createServer({ maxHeaderSize: 16384 });
+  server.on("request", (req, res) => {
     const denied = authorize(req, false);
     if (denied) return reject(req, res, denied);
     if (pairing) {

@@ -1214,18 +1214,18 @@ permissions as Ingress, not separate users or a read-only account.
 | Option | Required setting |
 | --- | --- |
 | `lan_password` | A separate 16–256 character password, entered privately in app options |
-| `lan_trusted_proxies` | Exact IP addresses of the nearest reverse proxy as seen by the app |
-| `server_public_url` | Public HTTPS origin, for example `https://code.example.com` |
+| `lan_trusted_proxies` | Exact proxy IPs for proxy mode; leave empty for direct desktop access alone |
+| `server_public_url` | HTTPS origin in proxy mode; HTTP or HTTPS origin with the HA IP and mapped port in direct mode |
 | `cors_origins` | Additional exact HTTPS browser origins, if needed; no wildcard |
 | `server_desktop_app` | Optional: allow the OpenCode desktop app (see below) |
 
-Map `4096/tcp` for your reverse proxy. The proxy must terminate HTTPS, preserve
+For proxy-free access, use [direct desktop HTTP](#direct-desktop-http-no-proxy) or [direct desktop HTTPS](#direct-desktop-https-no-proxy). In proxy mode, map `4096/tcp` for your reverse proxy. The proxy must terminate HTTPS, preserve
 the public `Host`, overwrite `X-Forwarded-Proto` with `https`, and overwrite
 `X-Forwarded-For` with the single connecting client's IP. It must not append an
 untrusted incoming forwarding chain. If it sends `X-Forwarded-Host`, that must
 match the public host too. Allow WebSocket upgrades and unbuffered SSE responses.
 Restrict the mapped port to the proxy; forwarding headers alone do not authenticate
-an untrusted socket peer. Direct HTTP/browser access to the mapped port is refused.
+an untrusted socket peer. In proxy mode direct access to the mapped port is refused.
 
 Use HTTP Basic authentication with username `opencode` and your **LAN password**
 in compatible remote V2 clients. Keep the password in the client's private
@@ -1246,10 +1246,65 @@ Compatible V2 clients use `/api/info` for server health. A client requesting
 would return the backend's HTML fallback, not a V2 health response.
 
 Save options and **restart the app** to activate or rotate LAN credentials. Invalid
-enabled-LAN settings fail managed activation with an option-specific error. If
+LAN settings stop startup before migrations or app services run. The **Log**
+tab lists all invalid LAN fields together. Correct them in **Configuration**,
+save, and start the app again. If
 upgrading with an old enabled LAN option, configure these required settings or
 disable LAN before starting. Leaving both LAN options disabled requires no LAN
 configuration.
+
+### Direct desktop HTTP (no proxy)
+
+Map `4096/tcp` to host port `4096` in **Network**. For HA at `192.168.5.33`
+with subnet mask `255.255.255.0`, use:
+
+```yaml
+enable_server: true
+server_desktop_app: true
+server_direct_subnet: "192.168.5.0/24"
+server_public_url: "http://192.168.5.33:4096"
+lan_trusted_proxies: []
+```
+
+Set a unique 16–256 character `lan_password`, save, and restart. Add the HTTP URL
+in OpenCode Desktop with username `opencode` and that password. No certificate
+files are read. HTTP sends credentials and session traffic unencrypted. Use the
+actual subnet and a LAN-only port mapping, with no router port-forward.
+
+### Direct desktop HTTPS (no proxy)
+
+The add-on can serve TLS itself on port 4096 for OpenCode Desktop. It checks the
+actual TCP peer against your configured private IPv4 subnet. No public domain or
+router port-forward is needed. Use the real network prefix from your LAN settings.
+
+1. On your desktop, obtain a trusted TLS certificate with the HA IP in its IP
+   Subject Alternative Name. For example, with [mkcert](https://github.com/FiloSottile/mkcert)
+   installed, run `mkcert -install`, then
+   `mkcert -cert-file server.pem -key-file server-key.pem 192.168.5.33`.
+2. In your HA **configuration directory**, create `opencode/lan-tls/` and
+   copy **only** `server.pem` and `server-key.pem` there privately. Restrict access
+   to the key. Keep the CA private key on your desktop.
+3. In the add-on's **Network** settings map `4096/tcp` to host port `4096`.
+   For an HA host at `192.168.5.33` on a `/24` LAN, set:
+
+   ```yaml
+   enable_server: true
+   server_desktop_app: true
+   server_direct_subnet: "192.168.5.0/24"
+   server_public_url: "https://192.168.5.33:4096"
+   lan_trusted_proxies: []
+   ```
+
+4. Enter a fresh 16–256 character `lan_password` privately, save and restart.
+   In Desktop, add `https://192.168.5.33:4096`, username `opencode`, and the
+   LAN password. If certificate verification fails, check desktop trust, expiry,
+   and the IP on the certificate. Restart the add-on after replacing the files.
+
+With another mapped host port, change the URL accordingly. Desktop connects
+directly: forwarded headers are refused. If routing rewrites the desktop's
+source IP, the check sees that address instead; use a source-preserving LAN
+route. Leave `server_direct_subnet` empty to use the existing proxy mode.
+OpenChamber LAN still needs its own HTTPS reverse proxy.
 
 ## OpenChamber LAN Web UI
 

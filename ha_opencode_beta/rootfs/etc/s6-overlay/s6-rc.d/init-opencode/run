@@ -15,6 +15,13 @@ source /usr/local/lib/opencode/v2-environment.sh
 
 bashio::log.info "Initializing ${ADDON_CHANNEL_LABEL} (${ADDON_CHANNEL} channel)..."
 
+# All app services depend on this oneshot. Reject invalid options here, before
+# migrations or service startup, rather than letting s6 retry the LAN listener.
+if ! node /opt/opencode-v2-homeassistant/lan-config.js --check /data/options.json; then
+    bashio::log.error "Startup stopped. Correct the LAN settings above in Configuration, or turn off OpenCode LAN server and OpenChamber LAN web UI for ingress-only access. Save and start the app again."
+    exit 1
+fi
+
 # Resolve native settings BEFORE overwriting version markers or creating data
 # directories that would erase fresh/legacy evidence. Journal, save, read back;
 # failures withhold native activation, not ordinary bundled tools.

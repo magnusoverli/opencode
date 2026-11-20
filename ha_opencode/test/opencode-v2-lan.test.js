@@ -73,6 +73,31 @@ test("LAN options fail closed without logging values and allow a disabled legacy
   }
 });
 
+test("startup preflight reports all invalid LAN prerequisites together without disclosing saved values", (t) => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "opencode-lan-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "options.json");
+  function check(options) {
+    fs.writeFileSync(file, JSON.stringify(options));
+    return require("node:child_process").spawnSync(process.execPath,
+      [require.resolve(`${root}lan-config.js`), "--check", file], { encoding: "utf8" });
+  }
+  const invalid = check({ enable_server: true, lan_password: "short-private", lan_trusted_proxies: [],
+    server_public_url: "", access_token: "private-test-token" });
+  assert.equal(invalid.status, 1);
+  for (const field of ["lan_password", "lan_trusted_proxies", "server_public_url"]) assert.match(invalid.stderr, new RegExp(field));
+  assert.doesNotMatch(invalid.stderr, /short-private|private-test-token/);
+  assert.equal(invalid.stdout, "");
+  for (const options of [{ enable_server: false }, { enable_server: true, server_desktop_app: true,
+    lan_password: password, lan_trusted_proxies: ["192.0.2.1"], server_public_url: origin }]) {
+    const valid = check(options);
+    assert.equal(valid.status, 0, valid.stderr);
+    assert.equal(valid.stdout + valid.stderr, "");
+  }
+});
+
 test("API frontend authenticates separately and forwards bodies without credential or header leakage", async (t) => {
   const { port } = await fixture(t);
   const res = await request(port, { method: "POST", headers: { "content-type": "application/json", cookie: "ambient-cookie", forwarded: "spoofed", "x-ingress-path": "/spoofed" }, body: '{"fixture":true}' });

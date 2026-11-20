@@ -111,7 +111,7 @@ Once connected, ask OpenCode things like:
 Use natural language to modify your Home Assistant configuration. No more searching documentation - just ask!
 
 #### 🎨 **Two Interface Modes**
-Choose a web **terminal** with 10 themes or the graphical **OpenChamber** web UI through Home Assistant Ingress. Both share one backend and history within a channel. Optional LAN frontends require separate authentication and a trusted HTTPS reverse proxy; mapping a port alone is not enough. The OpenCode LAN API also supports [device pairing and individual revocation](ha_opencode/DOCS.md#lan-device-pairing). See [LAN setup](ha_opencode/DOCS.md#lan-server-mode).
+Choose a web **terminal** with 10 themes or the graphical **OpenChamber** web UI through Home Assistant Ingress. Both share one backend and history within a channel. OpenCode Desktop supports [direct LAN HTTP without certificates](ha_opencode/DOCS.md#direct-desktop-http-no-proxy), direct HTTPS, or an HTTPS reverse proxy. All require LAN authentication. The OpenCode LAN API also supports [device pairing and individual revocation](ha_opencode/DOCS.md#lan-device-pairing). See [LAN setup](ha_opencode/DOCS.md#lan-server-mode).
 
 #### 🔌 **Provider Agnostic**
 Works with **Anthropic, OpenAI, Google**, other cloud providers and OpenAI-compatible local servers. Available models and authentication methods depend on the bundled runtime and provider.
