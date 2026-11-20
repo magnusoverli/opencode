@@ -1,4 +1,4 @@
-// Shared implementation starts from stable 3.5.1. Only exact, reviewed channel
+// Shared implementation matches stable 3.5.2. Only exact, reviewed channel
 // substitutions are permitted; new feature differences need explicit review.
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
@@ -17,24 +17,6 @@ const reviewed = new Map([
   ["rootfs/opt/ha-lsp-server/server.js", patternChannel],
   ["rootfs/opt/ha-mcp-server/index.js", patternChannel],
   ["rootfs/opt/opencode-assist/install.py", source => source.replace('OWNER = "ha_opencode"', 'OWNER = "ha_opencode_beta"')],
-  // #222: opt-in OpenCode desktop app origin on the API LAN frontend.
-  ["rootfs/opt/opencode-v2-homeassistant/lan-config.js", source => source
-    .replace('throw new Error("openchamber_lan_native_apps must be true or false");\n',
-      'throw new Error("openchamber_lan_native_apps must be true or false");\n'
-      + '  const desktopApps = options.server_desktop_app ?? false;\n'
-      + '  if (typeof desktopApps !== "boolean") throw new Error("server_desktop_app must be true or false");\n')
-    .replace("    nativeApps: uiEnabled && nativeApps,\n", "    nativeApps: uiEnabled && nativeApps,\n    desktopApps: apiEnabled && desktopApps,\n")
-    .replace("openchamber_lan_native_apps)/", "openchamber_lan_native_apps|server_desktop_app)/")],
-  ["rootfs/opt/opencode-v2-homeassistant/lan-proxy.js", source => source
-    .replace('"https://localhost"]);\n', '"https://localhost"]);\n'
-      + '// Renderer origin of the official OpenCode desktop app (Electron, custom "oc" scheme).\n'
-      + "// Ordinary web pages cannot claim it; authentication is still required.\n"
-      + 'export const OPENCODE_DESKTOP_ORIGINS = Object.freeze(["oc://renderer"]);\n')
-    .replace("nativeApps = false, password,", "nativeApps = false, desktopApps = false, password,")
-    .replace("  const allowedOrigins = new Set([origin, ...(mode === \"api\" ? corsOrigins : []), ...nativeOrigins]);",
-      "  const desktopOrigins = mode === \"api\" && desktopApps === true ? OPENCODE_DESKTOP_ORIGINS : [];\n"
-      + "  const allowedOrigins = new Set([origin, ...(mode === \"api\" ? corsOrigins : []), ...desktopOrigins, ...nativeOrigins]);")
-    .replace("content-type, x-opencode-directory", "content-type, x-opencode-capabilities, x-opencode-directory")],
   ["rootfs/opt/opencode-v2-homeassistant/mcp-startup.js", source => source
     .replace('state.channel !== "stable"', 'state.channel !== "beta"')
     .replaceAll('channel: "stable"', 'channel: "beta"')],

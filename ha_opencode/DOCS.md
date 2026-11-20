@@ -3,6 +3,13 @@
 Your Home Assistant configuration assistant, powered by OpenCode V2. Use the
 terminal or OpenChamber web workspace with one shared, app-managed backend.
 
+## Upgrading to 3.5.2
+
+Stable **3.5.2** promotes the desktop LAN API fix from **3.5.2b0**. To use it,
+enable `server_desktop_app` in [LAN Server Mode](#lan-server-mode) and restart
+the add-on. Existing installs need no configuration change unless enabling
+desktop access. Runtime versions and the backup guidance below are unchanged.
+
 ## Upgrading to 3.5.1
 
 Stable **3.5.1** promotes **3.5.1b4** while retaining stable's identity, storage,
@@ -1210,6 +1217,7 @@ permissions as Ingress, not separate users or a read-only account.
 | `lan_trusted_proxies` | Exact IP addresses of the nearest reverse proxy as seen by the app |
 | `server_public_url` | Public HTTPS origin, for example `https://code.example.com` |
 | `cors_origins` | Additional exact HTTPS browser origins, if needed; no wildcard |
+| `server_desktop_app` | Optional: allow the OpenCode desktop app (see below) |
 
 Map `4096/tcp` for your reverse proxy. The proxy must terminate HTTPS, preserve
 the public `Host`, overwrite `X-Forwarded-Proto` with `https`, and overwrite
@@ -1224,6 +1232,14 @@ in compatible remote V2 clients. Keep the password in the client's private
 credential settings, not a URL or command argument. The app's internal backend
 credential is never distributed. Browser preflight does not authorize API calls;
 every actual API request still needs authentication.
+
+The official OpenCode desktop app runs its interface at the origin `oc://renderer`
+and sends a CORS preflight before every API call. `cors_origins` accepts HTTPS
+origins only, so enable `server_desktop_app` to allow exactly that origin on the
+API frontend, then add `server_public_url` as a server in the app. The option
+only affects CORS: each actual request still needs the LAN password or a paired
+device token, other origins remain refused, and it has no effect on the
+OpenChamber frontend.
 
 Compatible V2 clients use `/api/info` for server health. A client requesting
 `/global/health` needs its exact build/protocol checked: allowing that path alone

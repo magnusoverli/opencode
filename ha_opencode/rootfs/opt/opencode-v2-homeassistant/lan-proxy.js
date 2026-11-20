@@ -21,8 +21,11 @@ function cleanHeaders(headers, websocket = false) {
 // Origins of OpenChamber's packaged clients (desktop, iOS, Android WebViews).
 // Restrict the upstream's broader development CORS policy to these app origins.
 export const NATIVE_APP_ORIGINS = Object.freeze(["openchamber-ui://app", "capacitor://localhost", "https://localhost"]);
+// Renderer origin of the official OpenCode desktop app (Electron, custom "oc" scheme).
+// Ordinary web pages cannot claim it; authentication is still required.
+export const OPENCODE_DESKTOP_ORIGINS = Object.freeze(["oc://renderer"]);
 
-export function createLanProxy({ mode, origin, proxies, corsOrigins = [], nativeApps = false, password, backendPassword, upstreamPort }) {
+export function createLanProxy({ mode, origin, proxies, corsOrigins = [], nativeApps = false, desktopApps = false, password, backendPassword, upstreamPort }) {
   if (!["api", "ui"].includes(mode)) throw new Error("Invalid LAN proxy mode");
   const publicUrl = new URL(origin);
   const trusted = new BlockList();
@@ -32,7 +35,8 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
   }
   const nativeApp = mode === "ui" && nativeApps === true;
   const nativeOrigins = new Set(nativeApp ? NATIVE_APP_ORIGINS : []);
-  const allowedOrigins = new Set([origin, ...(mode === "api" ? corsOrigins : []), ...nativeOrigins]);
+  const desktopOrigins = mode === "api" && desktopApps === true ? OPENCODE_DESKTOP_ORIGINS : [];
+  const allowedOrigins = new Set([origin, ...(mode === "api" ? corsOrigins : []), ...desktopOrigins, ...nativeOrigins]);
   const lanAuthorization = hash(`Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`);
   const upstreamAuthorization = mode === "api" ? `Basic ${Buffer.from(`opencode:${backendPassword}`).toString("base64")}` : null;
   const sockets = new Set();
@@ -104,7 +108,7 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
       "access-control-allow-origin": req.headers.origin,
       "access-control-allow-credentials": "true",
       "access-control-allow-methods": "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS",
-      "access-control-allow-headers": "authorization, content-type, x-opencode-directory, x-opencode-worktree, x-opencode-ticket",
+      "access-control-allow-headers": "authorization, content-type, x-opencode-capabilities, x-opencode-directory, x-opencode-worktree, x-opencode-ticket",
       vary: "Origin",
     } : {};
   }

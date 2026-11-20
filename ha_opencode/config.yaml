@@ -1,7 +1,7 @@
 ---
 name: "OpenCode"
 description: "AI coding agent for editing Home Assistant configuration with deep MCP integration and LSP support"
-version: "3.5.1"
+version: "3.5.2"
 slug: "ha_opencode"
 image: "ghcr.io/magnusoverli/ha_opencode"
 url: "https://github.com/magnusoverli/opencode"
@@ -135,6 +135,8 @@ options:
   openchamber_public_url: ""
   # Additional exact HTTPS browser origins for the API frontend.
   cors_origins: []
+  # Let the OpenCode desktop app connect to the API frontend.
+  server_desktop_app: false
   # Let OpenChamber desktop/mobile apps sign in to the OpenChamber LAN UI.
   openchamber_lan_native_apps: false
   # Opt-in passive relay hosting; public phone/relay pairing remains unverified.
@@ -221,6 +223,7 @@ schema:
   openchamber_public_url: str?
   cors_origins:
     - str
+  server_desktop_app: bool?
   openchamber_lan_native_apps: bool?
   openchamber_relay_host: bool?
   openchamber_allow_remote_speech: bool?

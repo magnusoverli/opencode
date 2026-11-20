@@ -71,7 +71,7 @@ test("stable promotion preserves the reviewed Zigporter compatibility overlay an
 
 test("stable promotion documents backup-based rollback and the delivered feature scope", () => {
   const docs = read("DOCS.md");
-  assert.ok(docs.includes("Stable **3.5.1**"));
+  assert.ok(docs.includes(`Stable **${yaml("config.yaml").version}**`));
   assert.ok(docs.includes("Rollback requires the pre-upgrade Home Assistant backup"));
   assert.ok(docs.includes("/config/opencode/decisions.yaml"));
   assert.ok(docs.includes("2 MiB"));

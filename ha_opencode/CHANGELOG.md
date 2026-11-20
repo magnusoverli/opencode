@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.2
+
+- Connect the official OpenCode desktop app to the LAN API by enabling `server_desktop_app` (off by default). This allows the exact `oc://renderer` origin on the API frontend; the LAN password or a paired device token is still required.
+- The LAN API now accepts `X-OpenCode-Capabilities` from allowed origins. This promotes the fix tested in [3.5.2b0](https://github.com/magnusoverli/opencode/releases/tag/beta-v3.5.2b0) for [#222](https://github.com/magnusoverli/opencode/issues/222). Runtime versions are unchanged from 3.5.1.
+
 ## 3.5.1
 
 - **Consolidate the V2 runtime** — promote the combined implementation qualified in **3.5.1b4**, with native update settings, full generated-configuration validation and native hard-deny policies alongside existing approval rules. Runtime pins remain OpenCode **2.3.0**, OpenChamber **2.7.2** and HAB **1.8.0**.
