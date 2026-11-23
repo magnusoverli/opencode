@@ -37,8 +37,8 @@ test('managed Usage follows backend login, refresh, selection and disconnect wit
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const auth = await import(pathToFileURL(path.join(source, 'packages/web/server/lib/opencode/auth.js')));
-  const quota = await import(pathToFileURL(path.join(source, 'packages/web/server/lib/quota/providers/codex.js')));
+  const auth = await import(pathToFileURL(path.join(source, 'packages/web/build/server/lib/opencode/auth.js')));
+  const quota = await import(pathToFileURL(path.join(source, 'packages/web/build/server/lib/quota/providers/codex.js')));
   auth.configureOpenCodeCredentials(auth.openCodeCredentialSource({
     buildOpenCodeUrl: (url) => base + url,
     getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic fixture-backend' }),

@@ -1,0 +1,102 @@
+{
+  ".dockerignore": [
+    "b6a2357136698ad4b549b3b311521f0eb56160453e1b0ac8024180209dede9b0",
+    "b2f5a43afac24f1760202b2a5bcbf5cd88dc4944cb7c321e7d26dc3650451e71"
+  ],
+  "Dockerfile": [
+    "cba8661df0c4b840d67d90bd3b4028570a8ff8618f0336e76efbe96d8155dc04",
+    "f89d0fe59c088962e0561e4e19305cb6c5e08856897cf7b69e9b2720049cfcbc"
+  ],
+  "rootfs/opt/ha-lsp-server/package.json": [
+    "f329feec25f5f86cc92cc3503a3cc845ac4ca79f43b2cbbc23afe7dd6367c181",
+    "d2930839334dbfb614e46487cd23f04a5534bfa0f75edf46925154bdc9354a45"
+  ],
+  "rootfs/opt/ha-lsp-server/server.js": [
+    "176cc17da71703d80686210b4093ba131835d5bbeb3976a3be9749c9fb64da85",
+    "1bd07c09d8fa402310958baccd8977843d5a4105b7316e549f2bc80ea5c27e2b"
+  ],
+  "rootfs/opt/ha-lsp-server/test/stdio-completions.test.js": [
+    "1fc6be0a8d34353cc202cd860936b1a21e61e2f2b9463b09c931e8eecb9a9fdd",
+    "51dcdfdc25b083940f27a9abda07d129dff3973096c81bc77b901c7481c6c5c4"
+  ],
+  "rootfs/opt/ha-mcp-server/AGENTS.md": [
+    "d46ba8ceef128c79ee4803a5ecb6f4ab1167d3d711267d0e074004fe47782a77",
+    "c3aeaee03a6dac34ed59dae49cf11b1e2200e44a61db9ee34a166cecbf87d5c9"
+  ],
+  "rootfs/opt/ha-mcp-server/INSTRUCTIONS.md": [
+    "7a8ec12033e05d78d845a0c4c353a4f68b7c16525397ca4b80d427eee8fdabe7",
+    "c43b6161c8df76b4f28fca010974df5b1defc4ebe6a1d6b2aece6de2d7c807b8"
+  ],
+  "rootfs/opt/ha-mcp-server/MCP_PROFILE_FULL.md": [
+    "ecaf9a67f07d05c88201868a7c2ec719f299d32cbec890942eb1508fd31c646c",
+    "d97ec98532e372fcad88e14afb3d9a655c4affff0afd9752d3de2f7f7d41f348"
+  ],
+  "rootfs/opt/ha-mcp-server/index.js": [
+    "97f76f5a91f8e246dac8e63ceb3336dc6e1f57dd162b9d93d75f101472784b31",
+    "6367a2edae3bf4758cf01db9b9d2535a14edd58b22ff9dcce4b858fbe4187332"
+  ],
+  "rootfs/opt/ha-mcp-server/package.json": [
+    "7bfb489a5166fe2a82124ea87d0288c31f0553ecdacca7f45f6e44e79ebf10c2",
+    "e4ad78d150806faec3b363689e9985fe1cb1d22d35721a577cc27b8d257945e5"
+  ],
+  "rootfs/opt/openchamber/SECURITY-PATCHES.md": [
+    "125addf485b24b89b6a8753a0d0f2ec4aa1c9e121f56ae780620726aadf0b556",
+    "f8bfa875d9d4089ff66065287aeaa34fde589005f89ce5b454c2ddfe8083d28f"
+  ],
+  "rootfs/opt/openchamber/managed-server.mjs": [
+    "6ed3316ca38b17f45de8c2d9bce94acc700b9a1d754ccf4c5a3fabf5ac080216",
+    "4a52a538691ae8b4be8fac3bd525287005944af4a2ee36d33ce8e6180774170f"
+  ],
+  "rootfs/opt/openchamber/patch-agent-settings.cjs": [
+    "4d920053031066863760cb8b4dc160b756bf26607267b1e7a38e9e19f470930b",
+    "45025f383c4c0ce0986386b0740f22b70728faefdb9035ba1b4360c1bf758e8d"
+  ],
+  "rootfs/opt/openchamber/patch-editor-lsp.cjs": [
+    "e85211808196dfd0dd9f41612753c519833d5a241216fc3fcd150d994eba3f98",
+    "13f73695293d49d00cc52e76d2d392e8c111c460027173722d6ad5f0daec7178"
+  ],
+  "rootfs/opt/openchamber/patch-managed-backend.cjs": [
+    "76e18e946db2b5efac08b7a66d7284bf55788174d7546b0d281de22a799dd6b3",
+    "0aa857d32c6fa09186ca77c4f838d629661191d26761a6180d64c5ffd8aff6fa"
+  ],
+  "rootfs/opt/openchamber/patch-security-dependencies.cjs": [
+    "d2de244ec970e298ae4842bda1677e00baafae49a40d3e2f009b82d2929022c0",
+    "77dfb51171f0f9012317d72037ac498c2f9c069846eb337eef5df891a4a80ad3"
+  ],
+  "rootfs/opt/openchamber/patch-usage-model.cjs": [
+    "60bc320098c4049b769307240d5d89c32911aa19c5f52f702f880a0809006102",
+    "d7fba4903a18dba8250726175f350c46616579aafb7265ab89a918908a66830e"
+  ],
+  "rootfs/opt/openchamber/security-overrides.json": [
+    "981892ce205d37be3faa0a258a498becf7156d674c068787699e6d77337a5cd1",
+    "e8f8a4376607f37f465e6345d1c7219699bc225978daaaadfa4b407a1311b0b9"
+  ],
+  "rootfs/opt/openchamber/security.bun.lock": [
+    "e6b67c5e3f4d5e2db4c8310030fc439afead4cda9e9ca54cdcf35a85803441c9",
+    "99bce795f2e15c5dffae7a56eb1e3d2898eaafb246a9c1e7a54c35dccfadb11b"
+  ],
+  "rootfs/opt/opencode-v2-homeassistant/lsp-client.js": [
+    "659eeb6a22f7a9c126369147039b6ba83070e09c09c6daf43e0fd6de689f6500",
+    "10b97402c4820ba094f6b51840a4401737f8850543978130ab2b173060e98099"
+  ],
+  "rootfs/opt/opencode-v2-homeassistant/package-lock.json": [
+    "8d191a9303586a8f8394dac3b39ad98e074fd9e26830704edad9c4ff68ac3ed0",
+    "580dc28bb9bc4149400b5527e676cf6f8c472d525e5a395e6c079d90cd42862c"
+  ],
+  "rootfs/opt/opencode-v2-homeassistant/package.json": [
+    "8f5ad54605eeef77bba01fbb0f4154b198300adf74ffbe2f4b91a7d063858c42",
+    "9c39e57dfd8109391a454725429226cc102719432a4d148f83fe48d29578a005"
+  ],
+  "rootfs/opt/ppq-private-runtime/package-lock.json": [
+    "c4892c8ddcbda6e90016dd171156dcc2c1cd09fd06a2e4888aa769462e098405",
+    "93119143e0299d084336a64c6c454db6927d5ba6fe2d4e82579dc370f5c096f9"
+  ],
+  "rootfs/opt/ppq-private-runtime/package.json": [
+    "3e7d9ee2924e44c60da74353204ba5299918fc046b6cfae328722d0655d64140",
+    "0c4fe3154d9f77607cba858a235a2841e1b920cbd9801962d67eaf53d711c359"
+  ],
+  "rootfs/usr/local/bin/opencode-v2-migrate.py": [
+    "7ec515fe95a3093bea0208ac54829dd0eff359052340739cc084a79ea72c063e",
+    "90176363559d20085692772ae836332c97094a5535f754180261e13c859d0028"
+  ]
+}

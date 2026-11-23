@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.4b1
+
+- Update OpenCode CLI and plugin to 2.4.0, OpenChamber to 2.8.0 and HAB CLI to 1.10.0. Existing OpenCode 2.3.0 installations use the verified copy-on-write upgrade.
+- Teach agents when to use each HAB command family, including Supervisor apps, host and network administration, backup transfers and media. Agent guidance distinguishes option validation from writes, and directs secret-handling steps to the Home Assistant UI.
+- Build with Node 26.13.1 LTS, Bun 1.4.5 and Go 1.27.4. Update yq to 4.54.3, Tinfoil to 1.4.0, and lock the MCP and language-server dependencies used by the image.
+
 ## 3.5.4b0
 
 - Based on stable **3.5.3**. Use one OpenChamber UI or OpenCode API through multiple trusted HTTPS reverse proxies, for example Tailscale and a custom domain ([#221](https://github.com/magnusoverli/opencode/issues/221)). Add up to seven addresses to `openchamber_public_url_aliases` or `server_public_url_aliases`; existing primary URLs still work.

@@ -84,7 +84,7 @@ test("late OAuth source drift rejects the entire patch before writing guidance",
 
 test("beta builds and exercises the patched provider UI before shipping it", () => {
   const docker = fs.readFileSync(path.join(__dirname, "../Dockerfile"), "utf8");
-  assert.match(docker, /ARG OPENCHAMBER_REVISION=1a151518c95cc5ff3578bab593d2f96862ff3bb8/);
+  assert.match(docker, /ARG OPENCHAMBER_REVISION=30c70496a5ca0105e04e60a783964576973edc8f/);
   const patch = docker.indexOf("RUN node /tmp/patch-provider-signin.cjs /opt/openchamber-preview");
   assert.ok(patch > docker.indexOf("git checkout --detach FETCH_HEAD"));
   assert.ok(patch < docker.indexOf("bun run --cwd packages/ui type-check"));

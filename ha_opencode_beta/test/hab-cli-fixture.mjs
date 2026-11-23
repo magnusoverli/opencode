@@ -208,7 +208,7 @@ try {
   };
   const payload = (result) => JSON.parse(result.content[0].text);
   const version = payload(await call(["version"]));
-  assert.equal(version.data.data.version, "1.8.0");
+  assert.equal(version.data.data.version, "1.10.0");
   const root = await call(["schema"]);
   assert.ok(root.content[0].text.length < 15000);
   assert.equal(payload(root).data.metadata.compact_schema, true);

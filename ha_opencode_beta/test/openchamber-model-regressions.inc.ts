@@ -1,6 +1,7 @@
   test('HA new chat remembers the last-used model across storage hydration and later discovery', async () => {
     useSelectionStore.getState().saveSessionModelSelection('previous-session', 'live', 'live-model');
     useSelectionStore.setState({ lastUsedProvider: null });
+    flushDeferredStorage();
     // Seed the persisted record independently, as a previous browser visit would.
     storage.set('selection-store', JSON.stringify({ version: 1, state: {
       lastUsedProvider: { providerID: 'live', modelID: 'live-model' },

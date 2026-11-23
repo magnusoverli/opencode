@@ -206,12 +206,19 @@ remains unavailable, report the limitation rather than working around it.
 
 ### 3. hab CLI (Home Assistant Builder)
 
-A CLI designed for AI agents. In this V2 app, use **`hab_run`**: its sidecar supplies
-Supervisor credentials, while the agent shell does not inherit them. It is
-the primary path for dashboards, areas/floors/zones/labels, helpers,
-blueprints, backups, people, categories, to-do lists, notifications,
-integrations, repairs, events and templates — the registry-level work that has
-no YAML file behind it.
+**HAB 1.10.0 is the administration CLI.** Use `hab_run` when advertised by the
+full MCP profile: the sidecar supplies credentials; do not use shell HAB,
+`auth login` or self-update. For dashboard/helper reads covered by
+`hab_run_read_only`, prefer that narrower tool. If only the read-only tool is
+permitted, do not switch to `hab_run` to get around its limits.
+
+Use `guide apps` for Supervisor app lifecycle, options, logs, protection and
+repositories. Use `guide management` for host/OS, networking, mounts, users,
+integration credentials and flows, backup transfers, instance settings, Assist,
+statistics and media. Use `guide operations` for health, diagnostics and recovery.
+For any other task, `guide list` and the exact command schema are the reference;
+see `/opt/ha-mcp-server/INSTRUCTIONS.md` → **HAB task routing**. A family in the
+catalog does not mean this installation or the current user can run it.
 
 Prefer `hab_run(args=[...])` over quoted command strings. The gateway uses JSON.
 Start with `args=["schema"]` for compact discovery; use
@@ -221,7 +228,7 @@ command's native compact schema; payload/output contracts and schema IDs are ret
 Load one `guide` topic when useful. Use specific filters and
 `--brief`/`--count`/`--limit` when supported. Schema side-effect labels and `--plan`
 are advisory, not proof of permission, a live diff or complete validation.
-hab 1.8.0's entity/device/area/floor/label `update --plan` reads live metadata;
+An entity/device/area/floor/label `update --plan` reads live metadata;
 review `changes` before approval. Omitted fields stay; empty values clear supported
 overrides; labels/aliases replace collections. Registry plans have no revision lock.
 Check `saved` and `verified`; metadata verification does not prove runtime activation.

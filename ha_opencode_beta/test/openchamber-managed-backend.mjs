@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 
 const source = process.env.OPENCHAMBER_TEST_SOURCE || "/opt/openchamber-preview";
-const load = (file) => import(pathToFileURL(path.join(source, "packages/web/server/lib/opencode", file)));
+const load = (file) => import(pathToFileURL(path.join(source, "packages/web/build/server/lib/opencode", file)));
 const { createHmrStateRuntime } = await load("hmr-state-runtime.js");
 const { createOpenCodeAuthStateRuntime } = await load("auth-state-runtime.js");
 

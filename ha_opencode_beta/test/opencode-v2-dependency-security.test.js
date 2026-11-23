@@ -23,7 +23,9 @@ async function fixture(t) {
 test("all locked glob/minimatch instances use the reviewed security fixes", () => {
   const manifest = JSON.parse(fs.readFileSync(new URL("package.json", root)));
   const lock = JSON.parse(fs.readFileSync(new URL("package-lock.json", root)));
-  for (const [name, version] of Object.entries({ glob: "14.0.2", minimatch: "11.0.1" })) {
+  const pins = process.env.HA_DEPENDENCY_TEST_ADDON === "ha_opencode"
+    ? { glob: "14.0.2", minimatch: "11.0.1" } : { glob: "14.0.6", minimatch: "11.0.9" };
+  for (const [name, version] of Object.entries(pins)) {
     assert.equal(manifest.overrides[name], version);
     const entries = Object.entries(lock.packages).filter(([path]) => path.endsWith(`/node_modules/${name}`) || path === `node_modules/${name}`);
     assert.ok(entries.length > 0);
@@ -122,8 +124,10 @@ test("minimatch bounds globparts amplification at optimization level two", () =>
     import assert from 'node:assert/strict';
     import { Minimatch } from ${JSON.stringify(pathToFileURL(entry).href)};
     const pattern = 'a/**/../'.repeat(18) + 'b/c';
-    const matcher = new Minimatch(pattern, { optimizationLevel: 2, braceExpandMax: 32 });
-    assert.ok(matcher.globParts.length <= 32);
+    const compile = () => new Minimatch(pattern, { optimizationLevel: 2, braceExpandMax: 32 });
+    ${process.env.HA_DEPENDENCY_TEST_ADDON === "ha_opencode"
+      ? "assert.ok(compile().globParts.length <= 32);"
+      : "assert.throws(compile, { name: 'RangeError', message: /too many patterns/ });"}
   `], { encoding: "utf8", timeout: 3000 });
   assert.equal(result.status, 0, result.stderr || String(result.error));
 });

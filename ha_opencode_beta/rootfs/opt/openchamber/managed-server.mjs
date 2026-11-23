@@ -37,7 +37,7 @@ try {
   if (!/^\/data\/v2\/generations\/[a-f0-9]{32}$/.test(generation)) throw new Error();
   const lan = readLanConfig();
   if (lan.uiEnabled) process.env.OPENCHAMBER_AUTH_DIR = "/run/opencode-v2/openchamber-auth";
-  const { startWebUiServer } = await import("/opt/openchamber-preview/packages/web/server/index.js");
+  const { startWebUiServer } = await import("/opt/openchamber-preview/packages/web/build/server/index.js");
   delete globalThis[key];
   await startWebUiServer({ port: 3010, host: "127.0.0.1", ...(lan.uiEnabled ? { uiPassword: lan.password } : {}) });
 } catch {

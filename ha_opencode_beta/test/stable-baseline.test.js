@@ -11,6 +11,7 @@ const repo = resolve(__dirname, "../..");
 const beta = file => readFileSync(join(repo, "ha_opencode_beta", file), "utf8").replace(/\r\n/g, "\n");
 const stable = file => readFileSync(join(repo, "ha_opencode", file), "utf8").replace(/\r\n/g, "\n");
 const patternChannel = source => source.replace("/main/ha_opencode/rootfs/", "/main/ha_opencode_beta/rootfs/");
+const dependencyRefresh = require("./fixtures/dependency-refresh-baseline.json");
 // #221 changes the request authority throughout these four modules. Pin both
 // sides of the reviewed delta instead of ignoring whole files or duplicating
 // the implementation here. Remove these pins when promoting the feature.
@@ -40,6 +41,11 @@ test("beta carries every shared stable runtime/build file except reviewed diverg
   for (const file of files) {
     const relative = file.slice("ha_opencode/".length);
     const current = beta(relative); // Missing files fail, even for reviewed paths.
+    if (Object.hasOwn(dependencyRefresh, relative)) {
+      assert.deepEqual([stable(relative), current].map(text => createHash("sha256").update(text).digest("hex")),
+        dependencyRefresh[relative], `Review the dependency refresh in ${relative}`);
+      continue;
+    }
     if (lanAliases.has(relative)) {
       assert.deepEqual([stable(relative), current].map(text => createHash("sha256").update(text).digest("hex")),
         lanAliases.get(relative), `Review the #221 changes to ${relative}`);
@@ -56,12 +62,13 @@ test("beta carries every shared stable runtime/build file except reviewed diverg
 
 test("beta preserves stable project-upgrade repair and HAB cache integration", () => {
   const migration = "rootfs/usr/local/bin/opencode-v2-migrate.py";
-  assert.equal(beta(migration), stable(migration));
+  assert.equal(beta(migration), stable(migration).replace('"2.1.4", "2.2.5"}', '"2.1.4", "2.2.5", "2.3.0"}')
+    .replace('V2_UPGRADE_TARGET = "2.3.0"', 'V2_UPGRADE_TARGET = "2.4.0"'));
   const server = "rootfs/opt/ha-mcp-server/index.js";
-  const normalized = patternChannel(stable(server));
-  assert.equal(beta(server), normalized);
+  const normalizeHabCard = text => text.replace(/(name: "hab_run",\n +title: "[^"]+",\n +description: )"[^\n]+",/, '$1"<version-specific guidance>",');
+  assert.equal(normalizeHabCard(beta(server)), normalizeHabCard(patternChannel(stable(server))));
   for (const file of ["test/fixtures/opencode-v2-project-upgrade.py", "test/hab-cli-fixture.mjs"]) {
-    assert.equal(beta(file), stable(file), `${file} must retain the stable behavioral coverage`);
+    assert.equal(beta(file), stable(file).replace('"1.8.0"', '"1.10.0"'), `${file} must retain the stable behavioral coverage`);
   }
 });
 
