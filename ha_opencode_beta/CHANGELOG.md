@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.3b2
+
+- Fix V1 history migration falsely stopping at `message_projection_mismatch` for assistant provider metadata or mixed-case part IDs. Remaining message mismatches report a field path and row locator without exposing conversation contents ([#228](https://github.com/magnusoverli/opencode/issues/228)).
+
 ## 3.5.3b1
 
 - The web terminal now recovers when Home Assistant Ingress reports an interrupted connection as a normal close. Automatic retries can only reattach to that page’s surviving tmux session; a deliberate exit or detach still requires a manual reconnect ([#224](https://github.com/magnusoverli/opencode/issues/224)).

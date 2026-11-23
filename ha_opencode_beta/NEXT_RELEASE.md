@@ -1,15 +1,16 @@
-# Beta 3.5.3b1 release baseline
+# Beta 3.5.3b2 release baseline
 
 | Field | Value |
 | --- | --- |
-| Beta release | [`beta-v3.5.3b1`](https://github.com/magnusoverli/opencode/releases/tag/beta-v3.5.3b1) |
+| Beta release | [`beta-v3.5.3b2`](https://github.com/magnusoverli/opencode/releases/tag/beta-v3.5.3b2) |
 | Stable baseline | [`v3.5.2`](https://github.com/magnusoverli/opencode/releases/tag/v3.5.2) |
 | Baseline commit | `f10db183cfd5add64a6d728c02b8d7ee6c45546c` |
-| Previous beta | `3.5.3b0` |
+| Previous beta | `3.5.3b1` |
 
 ## Implementation baseline
 
-This beta builds on direct LAN access and startup validation from b0. It addresses
+This beta fixes V1 migration validation of provider metadata and mixed-case part IDs
+(#228). It retains direct LAN access and startup validation from b0, plus b1's fixes for
 terminal reconnection (#224), OpenChamber asset caching (#225), migrated-session
 discovery (#226), and pinned decision-note omission reporting (#227). Runtime pins remain
 OpenCode 2.3.0, OpenChamber 2.7.2 and HAB 1.8.0.
@@ -22,6 +23,10 @@ exemptions. Beta retains its own manifest, AppArmor profile, labels, history and
 channel-specific test expectations.
 
 ## Verification
+
+Both migration suites and the channel parity checks passed (43 tests). Synthetic
+V1 histories were converted with OpenCode 2.3.0; deliberately altered content
+was still rejected. Testing with the affected installation remains pending.
 
 Targeted tests cover Chrome cache revalidation, sidebar selection against the
 pinned OpenChamber source, digest overflow and recall, and masked WebSocket

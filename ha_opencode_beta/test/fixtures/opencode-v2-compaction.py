@@ -122,6 +122,20 @@ def qualify(binary, version):
                     (summary, {"type": "text", "text": "summary"}),
                 )):
                     connection.execute("INSERT INTO part VALUES (?,?,?,?,?,?)", (f"prt_{index}_{offset}", message, session, 1, 2, json.dumps(part)))
+                if index == 1:
+                    # #228: text, reasoning and tool calls carry provider metadata;
+                    # insertion order and binary ID order both differ from localeCompare.
+                    metadata_assistant = assistant
+                    connection.execute("DELETE FROM part WHERE message_id=?", (assistant,))
+                    for suffix, part in (
+                        ("Z", {"type": "tool", "tool": "fixture", "callID": "call",
+                               "state": {"status": "pending", "input": {}, "raw": ""}, "metadata": {"fixture": {"n": 3}}}),
+                        ("A", {"type": "reasoning", "text": "thinking", "time": {"start": 2}, "metadata": {}}),
+                        ("a", {"type": "text", "text": "answer", "metadata": {"fixture": {"n": 1}}}),
+                    ):
+                        connection.execute("INSERT INTO part VALUES (?,?,?,?,?,?)", (
+                            "prt_000000000001" + suffix + "a" * 13, assistant, session, 1, 2, json.dumps(part),
+                        ))
                 expected[compact] = {
                     "status": "completed", "reason": "auto" if auto else "manual", "summary": "summary",
                     **({"metadata": {"recent": "[User]: question\n\n[Assistant]: answer"}} if retained else {}),
@@ -153,11 +167,23 @@ def qualify(binary, version):
         assert result["status"] == "activated"
         assert result["target"]["session_count"] == 4
         assert result["target"]["message_count"] == 12
-        assert result["target"]["validated_content_part_count"] == 12
+        assert result["target"]["validated_content_part_count"] == 14
         assert fingerprint(source_database) == before
         target_database = destination / "generations" / result["generation"] / "data/opencode/opencode.db"
         target = sqlite3.connect(target_database)
         try:
+            raw, = target.execute("SELECT data FROM session_message WHERE id=?", (metadata_assistant,)).fetchone()
+            assistant_data = json.loads(raw)
+            content = assistant_data["content"]
+            assert [(p["type"], p["native"]) for p in content] == [
+                ("text", {"fixture": {"n": 1}}), ("reasoning", {}), ("tool", {"fixture": {"n": 3}}),
+            ]
+            assistant_data["content"] = content[::-1]
+            target.execute("UPDATE session_message SET data=? WHERE id=?", (json.dumps(assistant_data), metadata_assistant))
+            target.commit()
+            expect_mismatch(lambda: MIGRATOR.validate_session_projection(source_database, target_database))
+            target.execute("UPDATE session_message SET data=? WHERE id=?", (raw, metadata_assistant))
+            target.commit()
             expected_placements = [
                 ("ses_compaction_0", MIGRATOR.MANAGED_PROJECT_ID, MIGRATOR.MANAGED_WORKSPACE, placements[0][2]),
                 ("ses_compaction_1", *placements[1]),
@@ -211,7 +237,7 @@ def qualify(binary, version):
                 target.commit()
         finally:
             target.close()
-        assert MIGRATOR.validate_session_projection(source_database, target_database) == (4, 12, 12)
+        assert MIGRATOR.validate_session_projection(source_database, target_database) == (4, 12, 14)
 
         # Simulate a validation failure before activation, then retry from the
         # unchanged V1 data. A failed migration journal must not block recovery.

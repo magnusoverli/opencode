@@ -173,7 +173,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert.doesNotMatch(result.stdout + result.stderr, /secret|duplicate text/);
   });
 
-  it("migrates automatic and manual compactions with or without retained context using the pinned converter", () => {
+  it("migrates compactions, provider metadata and mixed-case part IDs using the pinned converter", () => {
     const result = spawnSync(python, [
       join(ADDON_ROOT, "test", "fixtures", "opencode-v2-compaction.py"), V2_BIN, TARGET_VERSION,
     ], { encoding: "utf8", timeout: 60_000 });
@@ -697,6 +697,7 @@ with tempfile.TemporaryDirectory() as directory:
     if (version === "2.1.4") {
       const corrupted = spawnSync(python, ["-c", [
         "import importlib.util,json,sqlite3,sys",
+        "from contextlib import closing",
         "path,args=sys.argv[1:]",
         "spec=importlib.util.spec_from_file_location('migration',path)",
         "migration=importlib.util.module_from_spec(spec)",
@@ -704,7 +705,7 @@ with tempfile.TemporaryDirectory() as directory:
         "restore=migration.restore_project_maintenance",
         "def corrupt(before, after):",
         "    restore(before, after)",
-        "    with sqlite3.connect(after) as c:",
+        "    with closing(sqlite3.connect(after)) as c, c:",
         "        c.execute(\"UPDATE project SET name='synthetic-corruption' WHERE id='unavailable-project'\")",
         "migration.restore_project_maintenance=corrupt",
         "sys.argv=[path,*json.loads(args)]",

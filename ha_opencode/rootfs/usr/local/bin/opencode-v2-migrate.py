@@ -131,7 +131,7 @@ def parse_args() -> argparse.Namespace:
 
 def path_details(path: Path, expected: str) -> tuple[str, ...]:
     # Metadata only: do not dereference links, include targets or read contents.
-    name = re.sub(r"[^A-Za-z0-9/._-]", "_", str(path)[-160:])
+    name = re.sub(r"[^A-Za-z0-9/._-]", "_", path.as_posix()[-160:])
     try:
         info = path.lstat()
     except OSError as error:
@@ -531,6 +531,36 @@ def json_equal(left: object, right: object) -> bool:
     return type(left) is type(right) and left == right
 
 
+def message_data_field(expected: dict, actual: dict) -> str:
+    """Locate a known field on failure; never report keys inside provider or user data."""
+    missing = object()
+    for field in ("content", "text", "time", "model", "agent", "files", "agents", "snapshot",
+                  "finish", "cost", "tokens", "error", "reason", "status", "summary", "metadata"):
+        left, right = expected.get(field, missing), actual.get(field, missing)
+        if json_equal(left, right):
+            continue
+        if field == "content" and isinstance(left, list) and isinstance(right, list):
+            for index, (a, b) in enumerate(zip(left, right)):
+                if json_equal(a, b):
+                    continue
+                path = f"data.content[{index}]"
+                if isinstance(a, dict) and isinstance(b, dict):
+                    for key in ("type", "id", "name", "text", "native", "state", "time"):
+                        if not json_equal(a.get(key, missing), b.get(key, missing)):
+                            return f"{path}.{key}"
+                return path
+        return f"data.{field}"
+    return "data"
+
+
+def message_mismatch(session_id: str, sequence: int, field: str) -> MigrationError:
+    return MigrationError(
+        "message_projection_mismatch", fields=(field,),
+        details=(f"session_hash={hashlib.sha256(session_id.encode()).hexdigest()[:12]}",
+                 f"message_seq={sequence}"),
+    )
+
+
 def decode_node_base64(value: str) -> bytes:
     compact = "".join(character for character in value if not character.isspace()).replace("-", "+").replace("_", "/")
     if not re.fullmatch(r"[A-Za-z0-9+/]*={0,2}", compact) or "=" in compact[:-2]:
@@ -594,7 +624,7 @@ def migrate_tool(part: dict, fallback: int) -> dict:
     state = part["state"]
     result = {"type": "tool", "id": part["callID"], "name": part["tool"]}
     if "metadata" in part:
-        result["providerState"] = part["metadata"]
+        result["native"] = part["metadata"]
     if state["status"] == "completed":
         content = [{"type": "text", "text": state["output"]}]
         if "compacted" in state["time"]:
@@ -722,15 +752,12 @@ def legacy_tool_notice(messages: list[dict]) -> str | None:
     return "\n\n".join(("The available tools have changed.", *parts)) if parts else None
 
 
-def v1_message_sort_key(message: dict) -> tuple:
-    # OpenCode 2.0.13 sorts equal-timestamp V1 messages by id.localeCompare().
-    # Python's default ordering puts uppercase before lowercase; for the
-    # base62 message IDs used by V1, localeCompare orders case-insensitively
-    # first and lowercase before uppercase when the folded IDs are equal.
-    identifier = message["id"]
-    if re.fullmatch(r"msg_[0-9A-Za-z]+", identifier):
-        return (message["time_created"], identifier.lower(), tuple(c.isupper() for c in identifier))
-    return (message["time_created"], identifier, ())
+def v1_id_sort_key(identifier: str) -> tuple:
+    # V1 generates base62 suffixes. The pinned converter's localeCompare
+    # compares letters case-insensitively first, then lowercase before uppercase.
+    if re.fullmatch(r"(?:msg|prt)_[0-9A-Za-z]+", identifier):
+        return (identifier.lower(), tuple(c.isupper() for c in identifier))
+    return (identifier, ())
 
 
 def serialize_recent(messages: list[dict], parts_by_message: dict[str, list[dict]]) -> str:
@@ -775,7 +802,7 @@ def project_session(
                 "value": value,
             }
         )
-    messages.sort(key=v1_message_sort_key)
+    messages.sort(key=lambda m: (m["time_created"], v1_id_sort_key(m["id"])))
     message_ids = {message["id"] for message in messages}
     parts_by_message: dict[str, list[dict]] = {}
     validated_parts = 0
@@ -790,7 +817,7 @@ def project_session(
         parts_by_message.setdefault(message_id, []).append(part)
         validated_parts += int(counted_source_part(part))
     for parts in parts_by_message.values():
-        parts.sort(key=lambda item: item["_id"])
+        parts.sort(key=lambda item: v1_id_sort_key(item["_id"]))
 
     paired: set[str] = set()
     used = set(message_ids)
@@ -931,12 +958,12 @@ def project_session(
             if part["type"] == "text":
                 item = {"type": "text", "text": part["text"]}
                 if "metadata" in part:
-                    item["state"] = part["metadata"]
+                    item["native"] = part["metadata"]
                 content.append(item)
             elif part["type"] == "reasoning":
                 item = {"type": "reasoning", "text": part["text"]}
                 if "metadata" in part:
-                    item["state"] = part["metadata"]
+                    item["native"] = part["metadata"]
                 item["time"] = {"created": part["time"]["start"]}
                 if "end" in part["time"]:
                     item["time"]["completed"] = part["time"]["end"]
@@ -1078,9 +1105,10 @@ def validate_session_projection(
     expected_count = 0
     processed_messages = 0
     processed_parts = 0
+    source_sessions = source.cursor()
     try:
         source_session_count = int(source.execute("SELECT count(*) FROM session").fetchone()[0])
-        source_sessions = source.execute(
+        source_sessions.execute(
             f"SELECT {', '.join(SOURCE_SESSION_COLUMNS)} FROM session ORDER BY id"
         )
         target_session_count = int(target.execute("SELECT count(*) FROM session_v2").fetchone()[0])
@@ -1181,21 +1209,16 @@ def validate_session_projection(
                 message_id, target_session, target_type, sequence, created, updated, raw_target = actual
                 if message_id != wanted["id"]:
                     raise MigrationError("message_identity_mismatch")
-                if (
-                    target_session != wanted["session_id"]
-                    or target_type != wanted["type"]
-                    or sequence != wanted["seq"]
-                    or created != wanted["time_created"]
-                    or updated != wanted["time_updated"]
-                ):
-                    raise MigrationError("message_projection_mismatch")
+                for field, value in (("session_id", target_session), ("type", target_type),
+                                     ("seq", sequence), ("time_created", created), ("time_updated", updated)):
+                    if value != wanted[field]:
+                        raise message_mismatch(session_id, wanted["seq"], field)
                 target_data = decode_object(raw_target, "invalid_target_message")
-                if "id" in target_data or "type" in target_data:
-                    raise MigrationError("message_projection_mismatch")
-                hydrated = {"id": message_id, "type": target_type, **target_data}
-                wanted_hydrated = {"id": wanted["id"], "type": wanted["type"], **wanted["data"]}
-                if not json_equal(wanted_hydrated, hydrated):
-                    raise MigrationError("message_projection_mismatch")
+                for field in ("id", "type"):
+                    if field in target_data:
+                        raise message_mismatch(session_id, wanted["seq"], f"data.{field}")
+                if not json_equal(wanted["data"], target_data):
+                    raise message_mismatch(session_id, wanted["seq"], message_data_field(wanted["data"], target_data))
         if processed_messages != int(source.execute("SELECT count(*) FROM message").fetchone()[0]):
             raise MigrationError("invalid_source_message")
         if processed_parts != int(source.execute("SELECT count(*) FROM part").fetchone()[0]):
@@ -1203,6 +1226,7 @@ def validate_session_projection(
         if expected_count != target_count:
             raise MigrationError("message_count_mismatch")
     finally:
+        source_sessions.close()
         source.close()
         target.close()
     return target_session_count, target_count, validated_parts

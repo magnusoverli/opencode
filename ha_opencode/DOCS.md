@@ -367,6 +367,13 @@ values); include the error and field names when reporting a failure. A corrected
 app update retries migration on restart. Do not delete the old database or the
 migration journal to force startup.
 
+`message_projection_mismatch` means a converted message did not match the validator's
+expectation. In 3.5.2, preserved provider metadata or mixed-case part IDs could
+trigger a false alarm ([#228](https://github.com/magnusoverli/opencode/issues/228)).
+Keep a backup and update the same add-on when the fix is released. If the error
+persists, share the field path, `session_hash` and zero-based `message_seq` from
+the new log. No conversation contents or database are needed.
+
 **Current limitations:** user-added custom skills may survive restart without
 appearing in the V2 skill catalog; shipped Home Assistant skills are available.
 The former browser-terminal quit overlay is not included in V2; use the terminal's

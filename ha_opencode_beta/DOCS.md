@@ -2,12 +2,13 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.5.3b1** improves terminal reconnection, OpenChamber asset caching,
+Beta **3.5.3b2** fixes two causes of `message_projection_mismatch` during V1 history migration ([#228](https://github.com/magnusoverli/opencode/issues/228)).
+Beta **3.5.3b1** improved terminal reconnection, OpenChamber asset caching,
 access to migrated conversations, and reporting when pinned decision notes do
 not fit. It retains [direct desktop HTTP](#direct-desktop-http-no-proxy) and
 HTTPS without a reverse proxy. LAN access is off by default.
 
-Beta `3.5.3b1` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
+Beta `3.5.3b2` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
 private-model discovery. It now includes stable 3.5.0's Zigporter compatibility,
 HAB registry-cache and project-upgrade fixes. Beta keeps its own app identity and persistent storage; installing
@@ -1451,6 +1452,7 @@ These failures share a startup pipeline, but require different evidence:
 | --- | --- | --- |
 | `session_projection_mismatch` with `project_id` or `path` (#211/#217) | Converted conversation placement differs from the preserved source. | The current beta restores source placement before exact validation. Retest against the affected history after a supported upgrade of that same app. |
 | `message_projection_mismatch` involving compaction (#195) | Compaction event shape differs from the validator's expectation. | The included fix preserves compaction summaries and retained context; deletion is not required. Other message mismatches need their own diagnosis. |
+| `message_projection_mismatch` after V1 conversion (#228) | Beta 3.5.3b2 fixes validation of provider metadata and mixed-case part ID order. | For an affected beta installation, keep a backup and update to 3.5.3b2. If a mismatch persists, share only the field path, `session_hash` and zero-based `message_seq` from the new log. |
 | `unexpected_migration_work` (#202) | An unrecognized object exists in the private migration work directory. | Share the startup line containing entry, bounded path, type, ownership and mode. Leave the object intact. |
 | `unsafe_path_type` (#207) | A required file/directory has a different filesystem type. | Share the failing path and expected/actual type from the startup log. Do not treat this as a permissions-only error. |
 

@@ -402,11 +402,11 @@ with tempfile.TemporaryDirectory(prefix="opencode-v2-validation-") as temporary:
             "content": [
                 {"type": "tool", "id": "pending", "name": "read", "state": {"status": "error", "input": {"a": 1}, "error": {"type": "tool.interrupted", "message": "Tool execution was interrupted before V2 migration"}}, "time": {"created": 20}},
                 {"type": "tool", "id": "running", "name": "read", "state": {"status": "error", "input": {"b": 2}, "error": {"type": "tool.interrupted", "message": "Tool execution was interrupted before V2 migration"}, "metadata": {"phase": "read"}}, "time": {"created": 30}},
-                {"type": "tool", "id": "completed", "name": "read", "providerState": {"provider": True}, "state": {"status": "completed", "input": {"c": 3}, "content": [{"type": "text", "text": "done"}, {"type": "file", "uri": "file:///out.txt", "mime": "text/plain", "name": "out.txt"}], "metadata": {"result": True}}, "time": {"created": 31, "completed": 32}},
+                {"type": "tool", "id": "completed", "name": "read", "native": {"provider": True}, "state": {"status": "completed", "input": {"c": 3}, "content": [{"type": "text", "text": "done"}, {"type": "file", "uri": "file:///out.txt", "mime": "text/plain", "name": "out.txt"}], "metadata": {"result": True}}, "time": {"created": 31, "completed": 32}},
                 {"type": "tool", "id": "compacted", "name": "read", "state": {"status": "completed", "input": {}, "content": [{"type": "text", "text": "[Old tool result content cleared]"}], "metadata": {}}, "time": {"created": 33, "completed": 34}},
                 {"type": "tool", "id": "failed", "name": "read", "state": {"status": "error", "input": {"e": 5}, "error": {"type": "tool.execution", "message": "boom"}, "content": [{"type": "text", "text": "partial"}], "metadata": {"output": "partial"}}, "time": {"created": 36, "completed": 37}},
-                {"type": "reasoning", "text": "think", "state": {"provider": 1}, "time": {"created": 21, "completed": 22}},
-                {"type": "text", "text": "answer", "state": {"separator": True}},
+                {"type": "reasoning", "text": "think", "native": {"provider": 1}, "time": {"created": 21, "completed": 22}},
+                {"type": "text", "text": "answer", "native": {"separator": True}},
             ],
             "snapshot": {"start": "snap_start", "end": "snap_end", "files": ["a.ts", "b.ts"]},
             "finish": "unknown",
@@ -701,8 +701,21 @@ with tempfile.TemporaryDirectory(prefix="opencode-v2-validation-") as temporary:
         value = target_data(target, user_id)
         value["type"] = "user"
         set_target_data(target, user_id, value)
-        expect_error("message_projection_mismatch", lambda: MIGRATOR.validate_session_projection(source_path, target_path))
+        error = expect_error("message_projection_mismatch", lambda: MIGRATOR.validate_session_projection(source_path, target_path))
+        assert error.fields == ("data.type",)
         set_target_data(target, user_id, user_target)
+
+        # Provider metadata is opaque. Identify the affected item, never its keys or values.
+        for idx in (2, 5, 6):
+            value = target_data(target, assistant_id)
+            value["content"][idx]["native"] = {"private fixture key": "private fixture value"}
+            set_target_data(target, assistant_id, value)
+            error = expect_error("message_projection_mismatch", lambda: MIGRATOR.validate_session_projection(source_path, target_path))
+            assert error.fields == (f"data.content[{idx}].native",)
+            assert error.details == (
+                f"session_hash={MIGRATOR.hashlib.sha256(tool_session.encode()).hexdigest()[:12]}", "message_seq=1",
+            )
+            set_target_data(target, assistant_id, assistant_target)
 
         value = target_data(target, user_id)
         value.pop("files")

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix V1 history migration falsely stopping at `message_projection_mismatch` for assistant provider metadata or mixed-case part IDs. Remaining message mismatches report a field path and row locator without exposing conversation contents ([#228](https://github.com/magnusoverli/opencode/issues/228)).
+
 ## 3.5.2
 
 - Connect the official OpenCode desktop app to the LAN API by enabling `server_desktop_app` (off by default). This allows the exact `oc://renderer` origin on the API frontend; the LAN password or a paired device token is still required.

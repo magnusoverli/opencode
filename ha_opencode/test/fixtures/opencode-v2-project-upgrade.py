@@ -2,6 +2,7 @@
 """Exercise converter startup maintenance using only synthetic project state."""
 
 import importlib.util
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import sys
@@ -63,7 +64,7 @@ def qualify(binary):
             try:
                 deadline = time.monotonic() + 10
                 while time.monotonic() < deadline:
-                    with sqlite3.connect(database) as connection:
+                    with closing(sqlite3.connect(database)) as connection:
                         archived = connection.execute(
                             "SELECT time_archived FROM project WHERE id='missing'"
                         ).fetchone()[0]
@@ -81,7 +82,7 @@ def qualify(binary):
             MIGRATOR.convert_candidate(candidate, binary, 30, None)
         finally:
             MIGRATOR.stop_process = stop_process
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection:
             assert connection.execute(
                 "SELECT time_archived FROM project WHERE id='missing'"
             ).fetchone()[0] is not None, "real converter did not exercise startup archive sweep"
@@ -93,7 +94,7 @@ def qualify(binary):
 
         # The sweep can also adopt a surviving main checkout. Restore only its
         # placement/archive fields; names, timestamps and records stay checked.
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute("UPDATE project SET worktree='/synthetic-replacement' WHERE id='missing'")
         MIGRATOR.restore_project_maintenance(baseline, database)
         MIGRATOR.validate_v2_upgrade(baseline, database)
@@ -102,14 +103,14 @@ def qualify(binary):
             "UPDATE project SET time_updated=999 WHERE id='missing'",
             "DELETE FROM project WHERE id='missing'",
         ):
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 connection.execute(statement)
                 connection.commit()
             MIGRATOR.restore_project_maintenance(baseline, database)
             expect_mismatch(baseline, database)
             # Restore the synthetic baseline for the next independent injection.
-            with sqlite3.connect(baseline.resolve().as_uri() + "?mode=ro", uri=True) as source:
-                with sqlite3.connect(database) as target:
+            with closing(sqlite3.connect(baseline.resolve().as_uri() + "?mode=ro", uri=True)) as source:
+                with closing(sqlite3.connect(database)) as target:
                     source.backup(target)
         MIGRATOR.validate_v2_upgrade(baseline, database)
 
