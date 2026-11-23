@@ -65,8 +65,8 @@ test("beta preserves stable project-upgrade repair and HAB cache integration", (
   assert.equal(beta(migration), stable(migration).replace('"2.1.4", "2.2.5"}', '"2.1.4", "2.2.5", "2.3.0"}')
     .replace('V2_UPGRADE_TARGET = "2.3.0"', 'V2_UPGRADE_TARGET = "2.4.0"'));
   const server = "rootfs/opt/ha-mcp-server/index.js";
-  const normalized = patternChannel(stable(server)).replace("Run pinned hab 1.8.0", "Run pinned hab 1.10.0");
-  assert.equal(beta(server), normalized);
+  const normalizeHabCard = text => text.replace(/(name: "hab_run",\n +title: "[^"]+",\n +description: )"[^\n]+",/, '$1"<version-specific guidance>",');
+  assert.equal(normalizeHabCard(beta(server)), normalizeHabCard(patternChannel(stable(server))));
   for (const file of ["test/fixtures/opencode-v2-project-upgrade.py", "test/hab-cli-fixture.mjs"]) {
     assert.equal(beta(file), stable(file).replace('"1.8.0"', '"1.10.0"'), `${file} must retain the stable behavioral coverage`);
   }

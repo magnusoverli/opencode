@@ -401,6 +401,8 @@ RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-project-up
         /usr/local/libexec/opencode-v2
 
 RUN --network=none --mount=type=bind,source=test/hab-cli-fixture.mjs,target=/tmp/hab-cli-fixture.mjs,readonly \
+    --mount=type=bind,source=test/hab-guidance-contract.mjs,target=/tmp/hab-guidance-contract.mjs,readonly \
+    node /tmp/hab-guidance-contract.mjs && \
     timeout --signal=TERM --kill-after=10s 120s node /tmp/hab-cli-fixture.mjs
 
 RUN --network=none --mount=type=bind,source=test/v2-openchamber-browser.mjs,target=/tmp/v2-openchamber-browser.mjs,readonly \

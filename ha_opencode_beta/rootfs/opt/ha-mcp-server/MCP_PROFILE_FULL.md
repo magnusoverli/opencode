@@ -13,7 +13,18 @@ warnings. `--plan` may be static; read back after applying. A timeout leaves the
 outcome unverified, so check state before retrying. Use dedicated ESPHome tools
 for long-running builds/uploads rather than the bounded CLI gateway.
 
-hab 1.8.0's entity/device/area/floor/label updates preview live metadata with
+**HAB 1.10.0 administration:** choose `guide apps` for Supervisor app lifecycle,
+repositories, logs, options validation and protected mode; `guide management` for
+host/OS, IP/Wi-Fi, mounts, users, OAuth application credentials, backup transfers,
+instance settings, media and integration flows. Check `capability probe` when
+support is uncertain. Prefer `supervisor_app_inspect` and the guarded preview/apply
+tools for the app operations they cover; use `hab_run_read_only` for its dashboard/helper
+reads. Sidecar auth is managed: do not log in or update HAB. Never pass secrets in
+tool arguments or request secret-bearing output (e.g. `application-credential list`).
+Use the HA UI for the secret-handling step. For the task map and verification
+examples see `/opt/ha-mcp-server/INSTRUCTIONS.md` → **HAB task routing**.
+
+HAB's entity/device/area/floor/label updates preview live metadata with
 `--plan`; review `changes` before approval. Omitted fields stay; empty supported
 overrides clear. Labels/aliases replace collections; explicit `--disabled=false`
 enables. Check `saved` / `verified` or `error.details.result`: registry verification
