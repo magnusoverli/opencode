@@ -18,10 +18,11 @@ const { createUiAuth } = await import("/opt/openchamber-preview/packages/web/ser
 const { createRemoteClientAuthRuntime } = await import("/opt/openchamber-preview/packages/web/server/lib/client-auth/remote-clients.js");
 const clientAuth = createRemoteClientAuthRuntime({ fsPromises: fs, path, crypto, storePath: path.join(root, "clients.json") });
 const password = "fixture-ui-password-not-real";
-const makeAuth = () => createUiAuth({ password, clientAuthController: clientAuth, readSettingsFromDiskMigrated: async () => ({}) });
+const publicOrigin = "https://code.fixture.test";
+const alias = new URL("https://tail.fixture.test:4097");
+const makeAuth = () => createUiAuth({ password, clientAuthController: clientAuth, readSettingsFromDiskMigrated: async () => ({ publicOrigin }) });
 let auth = makeAuth();
 const appOrigin = "openchamber-ui://app";
-const publicOrigin = "https://code.fixture.test";
 const app = express();
 // Match the pinned server's inline CORS middleware. Password, cookie and client
 // token handling below use its real modules, not an authentication test double.
@@ -40,6 +41,8 @@ app.use(express.json());
 app.post("/auth/session", (req, res) => auth.handleSessionCreate(req, res));
 app.get("/auth/session", (req, res) => auth.handleSessionStatus(req, res));
 app.use((req, res, next) => auth.requireAuth(req, res, next));
+app.get("/fixture/passkeys", (req, res) => auth.handlePasskeyStatus(req, res));
+app.post("/fixture/reset-auth", (req, res) => auth.handleResetAuth(req, res));
 app.post("/api/fixture", (_req, res) => res.json({ ok: true }));
 app.get("/api/event", (_req, res) => { res.writeHead(200, { "content-type": "text/event-stream" }); res.write("data: ready\n\n"); });
 const upstream = http.createServer(app);
@@ -54,7 +57,7 @@ let proxy;
 let strict;
 try {
   const upstreamPort = await listen(upstream);
-  const options = { mode: "ui", origin: publicOrigin, proxies: ["127.0.0.1"], password, upstreamPort };
+  const options = { mode: "ui", origin: publicOrigin, aliases: [alias.origin], proxies: ["127.0.0.1"], password, upstreamPort };
   proxy = createLanProxy({ ...options, nativeApps: true });
   strict = createLanProxy(options);
   const port = await listen(proxy.server);
@@ -83,6 +86,21 @@ try {
   assert.ok(loggedIn.headers["set-cookie"].some(value => value.includes("HttpOnly") && value.includes("Secure") && value.includes("SameSite=Strict")));
   const cookie = loggedIn.headers["set-cookie"].map(value => value.split(";")[0]).join("; ");
   const headers = { origin: appOrigin, authorization: `Bearer ${clientToken}` };
+  const aliasHeaders = { host: alias.host, origin: alias.origin };
+  const aliasLogin = await login(password, aliasHeaders, strictPort);
+  assert.equal(aliasLogin.status, 200);
+  assert.match(aliasLogin.headers["set-cookie"][0], /^oc_ui_session_4097=/);
+  const aliasCookie = aliasLogin.headers["set-cookie"][0].split(";")[0];
+  for (const [origin, host, jar, foreign] of [
+    [publicOrigin, new URL(publicOrigin).host, cookie, alias.origin],
+    [alias.origin, alias.host, aliasCookie, publicOrigin],
+  ]) {
+    const h = { host, origin, cookie: jar };
+    const status = await request({ route: "/fixture/passkeys", headers: h });
+    assert.equal(status.status, 200);
+    assert.equal(JSON.parse(status.text).rpID, new URL(origin).hostname);
+    assert.equal((await request({ method: "POST", route: "/api/fixture", headers: { ...h, origin: foreign } })).status, 403);
+  }
   const preflight = await request({ method: "OPTIONS", route: "/api/fixture", headers: { origin: appOrigin,
     "access-control-request-method": "POST", "access-control-request-headers": "authorization,content-type" } });
   assert.equal(preflight.status, 204);
@@ -109,6 +127,10 @@ try {
   assert.equal((await upgrade({ ...headers, origin: "https://evil.test" })).status, 403);
   const ws = await upgrade(headers);
   assert.equal(ws.status, 101);
+  assert.equal((await upgrade({ ...aliasHeaders, origin: publicOrigin, cookie: aliasCookie })).status, 403);
+  const aliasWs = await upgrade({ ...aliasHeaders, cookie: aliasCookie });
+  assert.equal(aliasWs.status, 101);
+  aliasWs.socket.destroy();
   const stream = await new Promise((resolve, reject) => {
     const req = http.get({ host: "127.0.0.1", port, path: "/api/event", headers: { ...base, ...headers } }, resolve);
     req.on("error", reject);
@@ -124,6 +146,10 @@ try {
   const nextLogin = await login(password, { origin: publicOrigin });
   assert.equal(nextLogin.status, 200);
   const nextToken = JSON.parse(nextLogin.text).clientToken;
+  const reset = await request({ method: "POST", route: "/fixture/reset-auth", headers: { ...aliasHeaders, cookie: aliasCookie } });
+  assert.equal(reset.status, 200);
+  assert.match(reset.headers["set-cookie"][0], /^oc_ui_session_4097=/);
+  assert.equal((await request({ headers: { ...aliasHeaders, cookie: aliasCookie } })).status, 401);
   auth.dispose();
   await fs.rm(root, { recursive: true, force: true });
   auth = makeAuth();

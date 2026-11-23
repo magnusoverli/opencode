@@ -12,6 +12,7 @@ try {
   const directProtocol = direct ? new URL(config.apiOrigin).protocol : null;
   const tls = directProtocol === "https:" ? { cert: readRuntimeFile("direct-cert"), key: readRuntimeFile("direct-key") } : undefined;
   const proxy = createLanProxy({ ...config, mode, origin: mode === "api" ? config.apiOrigin : config.uiOrigin,
+    aliases: mode === "api" ? config.apiAliases : config.uiAliases,
     backendPassword, upstreamPort: mode === "api" ? 4100 : 3010, tls });
   proxy.server.on("error", () => { console.error("Managed LAN listener could not start"); process.exit(1); });
   proxy.server.listen(mode === "api" ? 4096 : 4097, "0.0.0.0", () => console.log(`Managed ${mode} LAN frontend ready; ${direct ? `direct ${directProtocol.slice(0, -1).toUpperCase()} for configured subnet` : "HTTPS reverse proxy required"}`));

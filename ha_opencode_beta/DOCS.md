@@ -2,13 +2,13 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.5.3b2** fixes two causes of `message_projection_mismatch` during V1 history migration ([#228](https://github.com/magnusoverli/opencode/issues/228)).
+Beta **3.5.4b0** builds on stable **3.5.3** and adds [multiple reverse-proxy addresses](#multiple-reverse-proxy-addresses) for the API and OpenChamber ([#221](https://github.com/magnusoverli/opencode/issues/221)).
 Beta **3.5.3b1** improved terminal reconnection, OpenChamber asset caching,
 access to migrated conversations, and reporting when pinned decision notes do
 not fit. It retains [direct desktop HTTP](#direct-desktop-http-no-proxy) and
 HTTPS without a reverse proxy. LAN access is off by default.
 
-Beta `3.5.3b2` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
+Beta `3.5.4b0` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
 private-model discovery. It now includes stable 3.5.0's Zigporter compatibility,
 HAB registry-cache and project-upgrade fixes. Beta keeps its own app identity and persistent storage; installing
@@ -1281,6 +1281,31 @@ Leave `server_direct_subnet` empty to switch back to proxy mode. OpenChamber LAN
 still requires its own HTTPS reverse proxy.
 
 ## OpenChamber LAN Web UI (Beta)
+
+### Multiple reverse-proxy addresses
+
+To use both a Tailscale hostname and a custom domain for the same web UI,
+keep the primary URL and add an optional list (not a comma-separated string):
+
+```yaml
+openchamber_public_url: "https://ha.example.ts.net:4097"
+openchamber_public_url_aliases:
+  - "https://oc.example.com"
+```
+
+Each URL must be an exact HTTPS origin without a path. You can add up to seven
+unique aliases per frontend. The API has its own `server_public_url_aliases`;
+leave it empty if using direct-subnet API access. Adding a UI alias does not
+enable the API. Neither list grants CORS access between sites.
+
+Route each hostname to the relevant listener using the reverse-proxy settings
+below. Each proxy must preserve the public `Host` (including non-default port),
+overwrite the forwarded protocol and client IP, and appear in `lan_trusted_proxies`.
+If it sends `X-Forwarded-Host`, it must identify the same destination. Cloudflare
+Access protects only the route on which it is configured. The add-on's LAN
+authentication is still required on both routes. Sign in separately at each
+hostname; register browser passkeys per hostname and redeem API pairing links
+at the address where they were issued.
 
 Set `interface_mode: openchamber`, enable `enable_openchamber_lan`, and configure
 `openchamber_public_url` plus the shared LAN password/proxy settings above. Point

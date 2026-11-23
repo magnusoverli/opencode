@@ -1,8 +1,8 @@
-# Next beta baseline: stable 3.5.3
+# Beta 3.5.4b0 baseline: stable 3.5.3
 
-Start the next beta from [`v3.5.3`](https://github.com/magnusoverli/opencode/releases/tag/v3.5.3).
-It promotes [`beta-v3.5.3b2`](https://github.com/magnusoverli/opencode/releases/tag/beta-v3.5.3b2),
-which remains the latest published beta until the next beta is cut.
+[`beta-v3.5.4b0`](https://github.com/magnusoverli/opencode/releases/tag/beta-v3.5.4b0)
+starts from [`v3.5.3`](https://github.com/magnusoverli/opencode/releases/tag/v3.5.3).
+It adds optional HTTPS aliases for the two reverse-proxied LAN frontends (#221).
 
 Both channels ship OpenCode 2.3.0, OpenChamber 2.7.2 and HAB 1.8.0.
 Carry forward stable's V1 migration validation, terminal reconnection,

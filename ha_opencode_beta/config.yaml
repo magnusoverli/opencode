@@ -1,7 +1,7 @@
 ---
 name: "OpenCode Beta"
 description: "Beta channel for OpenCode - AI coding agent for Home Assistant. May contain experimental features."
-version: "3.5.3b2"
+version: "3.5.4b0"
 slug: "ha_opencode_beta"
 image: "ghcr.io/magnusoverli/ha_opencode_beta"
 url: "https://github.com/magnusoverli/opencode"
@@ -134,6 +134,8 @@ options:
   lan_trusted_proxies: []
   server_public_url: ""
   openchamber_public_url: ""
+  server_public_url_aliases: []
+  openchamber_public_url_aliases: []
   # Additional exact HTTPS browser origins for the API frontend.
   cors_origins: []
   # Let the OpenCode desktop app connect to the API frontend.
@@ -224,6 +226,10 @@ schema:
     - str
   server_public_url: str?
   openchamber_public_url: str?
+  server_public_url_aliases:
+    - str
+  openchamber_public_url_aliases:
+    - str
   cors_origins:
     - str
   server_desktop_app: bool?

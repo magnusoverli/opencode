@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.4b0
+
+- Based on stable **3.5.3**. Use one OpenChamber UI or OpenCode API through multiple trusted HTTPS reverse proxies, for example Tailscale and a custom domain ([#221](https://github.com/magnusoverli/opencode/issues/221)). Add up to seven addresses to `openchamber_public_url_aliases` or `server_public_url_aliases`; existing primary URLs still work.
+- Each alias retains its own browser origin checks. API pairing codes must be redeemed at their issuing address. Direct-subnet API access remains single-address.
+
 ## 3.5.3b2
 
 - Fix V1 history migration falsely stopping at `message_projection_mismatch` for assistant provider metadata or mixed-case part IDs. Remaining message mismatches report a field path and row locator without exposing conversation contents ([#228](https://github.com/magnusoverli/opencode/issues/228)).
