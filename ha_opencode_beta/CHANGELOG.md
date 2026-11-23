@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.5.3b1
+
+- The web terminal now recovers when Home Assistant Ingress reports an interrupted connection as a normal close. Automatic retries can only reattach to that page’s surviving tmux session; a deliberate exit or detach still requires a manual reconnect ([#224](https://github.com/magnusoverli/opencode/issues/224)).
+
+- OpenChamber's **Add Project → From OpenCode** picker now offers **Home Assistant conversation history** when retained sessions belong to the managed migration workspace. Adding it makes those conversations browsable without copying, moving or rewriting them ([#226](https://github.com/magnusoverli/opencode/issues/226)).
+
+- OpenChamber Ingress compresses rewritten fingerprinted JavaScript and CSS and revalidates the browser's private copy instead of retransmitting unchanged bundles. Validators account for the Ingress prefix and the actual rewritten content ([#225](https://github.com/magnusoverli/opencode/issues/225)).
+
+- Decision-note writes and `ha-context refresh` now identify pinned notes omitted from the 2 KiB session digest. Omitted notes remain saved and retrievable; background startup logs report only the count ([#227](https://github.com/magnusoverli/opencode/issues/227)).
+
 ## 3.5.3b0
 
 - Connect OpenCode Desktop directly to the add-on over a private IPv4 LAN. Set `server_direct_subnet` and use an `http://` server URL for access without a proxy or certificates. HTTP sends the LAN password and session traffic unencrypted. Direct HTTPS is also supported.

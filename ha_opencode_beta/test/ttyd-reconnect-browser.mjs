@@ -10,15 +10,18 @@ import { createRequire } from "node:module";
 const puppeteer = createRequire("/opt/ha-mcp-server/package.json")("puppeteer-core");
 
 const root = await mkdtemp("/tmp/ttyd-reconnect-");
-const socketPath = `${root}/tmux.sock`;
+const env = { ...process.env, TMUX_TMPDIR: root };
+const tmux = (...args) => spawnSync("tmux", args, { env, encoding: "utf8" });
+const pane = () => tmux("display-message", "-p", "-t", "=opencode:", "#{pid}:#{session_id}:#{pane_pid}").stdout.trim();
 const reservation = createServer(); reservation.listen(0, "127.0.0.1"); await once(reservation, "listening");
 const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
-const ttyd = spawn("ttyd", ["-W", "-i", "lo", "-p", String(port), "-I", "/opt/ttyd/index.html",
-  "tmux", "-S", socketPath, "new-session", "-A", "-s", "fixture", "sh -c 'stty -echo; cat'"],
-{ stdio: "ignore" });
+const ttyd = spawn("ttyd", ["-W", "--url-arg", "-i", "lo", "-p", String(port), "-I", "/opt/ttyd/index.html",
+  "python3", "-I", "-c", `import runpy,sys; sys.exit(runpy.run_path('/opt/ttyd/tmux-client.py')['main'](sys.argv[1:], 'stty -echo; cat'))`],
+{ env, stdio: "ignore" });
 const prefix = "/api/hassio_ingress/terminal-fixture";
 const upstreams = new Set();
 let upgrades = 0;
+const maskClose = new WeakSet();
 const proxy = createServer((req, res) => {
   const next = request({ host: "127.0.0.1", port, path: req.url.slice(prefix.length) || "/", method: req.method, headers: req.headers },
     reply => { res.writeHead(reply.statusCode, reply.headers); reply.pipe(res); });
@@ -30,11 +33,15 @@ proxy.on("upgrade", (req, socket, head) => {
     next.write(`${req.method} ${req.url.slice(prefix.length)} HTTP/1.1\r\n`);
     for (const [key, value] of Object.entries(req.headers)) next.write(`${key}: ${value}\r\n`);
     next.write("\r\n"); if (head.length) next.write(head);
-    next.pipe(socket); socket.pipe(next);
+    next.pipe(socket, { end: false }); socket.pipe(next);
   });
   upstreams.add(next);
   next.on("error", () => socket.destroy());
-  next.on("close", () => { upstreams.delete(next); socket.destroy(); });
+  next.on("close", () => {
+    upstreams.delete(next);
+    if (maskClose.has(next) && !socket.destroyed) socket.end(Buffer.from([0x88, 2, 3, 232])); // HA reports 1000
+    else socket.destroy();
+  });
   socket.on("error", () => next.destroy()); socket.on("close", () => next.destroy());
 });
 let browser;
@@ -56,35 +63,72 @@ try {
       constructor(...args) {
         super(...args); window.__ttydSocket = this;
         window.__ttydConnections = (window.__ttydConnections || 0) + 1;
+        this.addEventListener("close", e => { window.__ttydLastClose = e.code; });
+        this.addEventListener("message", e => { if (new Uint8Array(e.data)[0] === 48) this.testHasPtyOutput = true; });
       }
     };
   });
   await page.goto(`http://127.0.0.1:${proxy.address().port}${prefix}/`);
-  await page.waitForFunction(() => window.term?.rows > 0);
+  await page.waitForFunction(() => window.term?.rows > 0 && window.__ttydSocket.testHasPtyOutput);
   await page.keyboard.type("BEFORE_DISCONNECT\n");
   const contains = text => page.waitForFunction(needle => {
     const buffer = window.term?.buffer.active;
     return buffer && Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i)?.translateToString()).join("\n").includes(needle);
   }, { timeout: 15000 }, text);
   await contains("BEFORE_DISCONNECT");
+  const identity = pane();
+  assert.match(identity, /^\d+:\$\d+:\d+$/);
   // Inject the reported error-before-close sequence, then sever the real
   // transport. TCP teardown alone does not reliably emit an error in Chromium.
   // No Enter key is sent to dismiss the overlay; the tmux session must survive.
   await page.evaluate(() => window.__ttydSocket.dispatchEvent(new Event("error")));
   for (const socket of upstreams) socket.destroy();
-  await page.waitForFunction(() => window.__ttydConnections >= 2 && window.__ttydSocket.readyState === WebSocket.OPEN,
+  await page.waitForFunction(() => window.__ttydConnections >= 2 && window.__ttydSocket.testHasPtyOutput,
     { timeout: 15000 });
   assert.ok(upgrades >= 2, "must automatically reconnect through the Ingress path");
   await contains("BEFORE_DISCONNECT");
   await page.keyboard.type("AFTER_DISCONNECT\n");
   await contains("AFTER_DISCONNECT");
-  assert.equal(spawnSync("tmux", ["-S", socketPath, "list-sessions", "-F", "#{session_name}"], { encoding: "utf8" }).stdout.trim(), "fixture");
-  console.log("PASS: abrupt Ingress socket loss reconnects automatically and preserves tmux state/input");
+  assert.equal(pane(), identity);
+  for (const socket of upstreams) { maskClose.add(socket); socket.destroy(); }
+  await page.waitForFunction(() => window.__ttydLastClose === 1000 && window.__ttydConnections === 3 && window.__ttydSocket.testHasPtyOutput);
+  await contains("AFTER_DISCONNECT");
+  await page.keyboard.type("AFTER_MASKED_CLOSE\n");
+  await contains("AFTER_MASKED_CLOSE");
+  assert.equal(pane(), identity);
+  const manual = () => page.waitForFunction(() => document.body.innerText.includes("to Reconnect"), { timeout: 12000 });
+  assert.equal(tmux("detach-client", "-s", "opencode").status, 0);
+  await manual();
+  assert.equal(tmux("list-clients").stdout.trim(), "");
+  await page.keyboard.press("Enter"); // deliberate, may open/attach again
+  await contains("AFTER_MASKED_CLOSE");
+  // Wait for fresh PTY output rather than an old screen buffer.
+  await page.waitForFunction(() => window.__ttydConnections >= 5 && window.__ttydSocket.testHasPtyOutput);
+  await page.keyboard.type("MANUAL_REATTACH\n");
+  await contains("MANUAL_REATTACH");
+  assert.equal(tmux("kill-session", "-t", "opencode").status, 0);
+  await manual();
+  assert.notEqual(tmux("has-session", "-t", "opencode").status, 0);
+  assert.equal(tmux("new-session", "-d", "-s", "opencode", "cat").status, 0);
+  const refused = await page.evaluate(() => new Promise((resolve, reject) => {
+    const url = window.__ttydSocket.url;
+    if (!new URL(url).searchParams.get("arg")?.startsWith("resume-")) return reject(Error("expected resume URL"));
+    const socket = new WebSocket(url, "tty");
+    const timer = setTimeout(() => { socket.close(); reject(Error("stale page attached")); }, 5000);
+    socket.binaryType = "arraybuffer";
+    let output = false;
+    socket.onopen = () => socket.send(new TextEncoder().encode(JSON.stringify({ AuthToken: "", columns: 80, rows: 24 })));
+    socket.onmessage = e => { if (new Uint8Array(e.data)[0] === 48) output = true; };
+    socket.onclose = () => { clearTimeout(timer); resolve(!output); };
+  }));
+  assert.ok(refused);
+  assert.equal(tmux("list-clients").stdout.trim(), "");
+  console.log("PASS: both Ingress losses reattach; detach, exit and session replacement do not");
 } finally {
   await browser?.close();
   for (const socket of upstreams) socket.destroy();
   proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve));
-  spawnSync("tmux", ["-S", socketPath, "kill-server"]);
+  tmux("kill-server");
   if (ttyd.exitCode === null) { const exited = once(ttyd, "exit"); ttyd.kill(); await exited; }
   await rm(root, { recursive: true, force: true });
 }

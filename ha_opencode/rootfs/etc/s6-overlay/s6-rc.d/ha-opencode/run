@@ -138,6 +138,7 @@ bashio::log.info "Starting ttyd on loopback port 8100 (behind Home Assistant ing
 # spammed the add-on log ~4300 lines a day. Errors and warnings still surface.
 exec ttyd \
     -W \
+    --url-arg \
     -d 3 \
     -i lo \
     -p 8100 \
@@ -154,4 +155,4 @@ exec ttyd \
     -t macOptionClickForcesSelection=true \
     -t scrollback=10000 \
     -t "theme=${THEME_JSON}" \
-    tmux new-session -A -s opencode /usr/local/bin/opencode-session.sh
+    python3 -I /opt/ttyd/tmux-client.py

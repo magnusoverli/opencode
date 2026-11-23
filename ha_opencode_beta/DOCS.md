@@ -2,11 +2,12 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.5.3b0** adds [direct desktop HTTP](#direct-desktop-http-no-proxy)
-and HTTPS without a reverse proxy. It also checks LAN settings before starting
-services and lists invalid fields together. LAN access is off by default.
+Beta **3.5.3b1** improves terminal reconnection, OpenChamber asset caching,
+access to migrated conversations, and reporting when pinned decision notes do
+not fit. It retains [direct desktop HTTP](#direct-desktop-http-no-proxy) and
+HTTPS without a reverse proxy. LAN access is off by default.
 
-Beta `3.5.3b0` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
+Beta `3.5.3b1` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
 private-model discovery. It now includes stable 3.5.0's Zigporter compatibility,
 HAB registry-cache and project-upgrade fixes. Beta keeps its own app identity and persistent storage; installing
@@ -370,6 +371,25 @@ at `/usr/share/doc/ha-opencode/NOTICE` and in this repository's
 - **Provider sign-in**: Real provider/OAuth flows in the new V2 preview still need qualification. See [Connecting a provider with browser sign-in](#connecting-a-provider-with-browser-sign-in).
 
 ## Startup and history troubleshooting
+
+**Terminal reconnect (3.5.3b1):** If Ingress drops an active terminal, the
+page tries to reattach to the same tmux session. If you deliberately exit
+or detach, **Enter** opens the terminal again. If the page says to reopen
+the terminal in Home Assistant, use the sidebar or **Open Web UI** to renew
+Ingress access. Reload any terminal tab left open across the add-on upgrade.
+
+**OpenChamber: older conversations missing from the sidebar (3.5.3b1).** Open
+**Add Project → From OpenCode**, select **Home Assistant conversation history**,
+then **Add selected**. Expand the `workspace` project in the sidebar. This adds
+the existing project directory to OpenChamber; the conversations keep their
+original IDs and messages. Archived conversations stay in Archive.
+
+The option appears when the backend lists a root conversation in
+`/run/opencode-v2/workspace`, that directory is available, and it has not
+already been added. If it is already registered, expand its existing project.
+A message-search hit alone does not establish that the backend can open the
+conversation. Stable and beta have separate history: use the channel where the
+conversation was created.
 
 | Symptom | What to check |
 | --- | --- |

@@ -39,6 +39,7 @@ import { extractSecretValues } from "/opt/ha-mcp-server/lib/context-budget.js";
 import {
   DECISION_DIGEST_PATH,
   DECISION_NOTES_PATH,
+  omittedPinWarning,
 } from "/opt/ha-mcp-server/lib/decision-notes.js";
 import { createDecisionStore } from "/opt/ha-mcp-server/lib/decision-store.js";
 
@@ -133,6 +134,8 @@ async function generateDecisionDigest() {
     log("decisions.yaml could not be fully parsed or read safely; published readable notes or an explicit unavailability notice");
   }
   if (digest.withheldNotes.length) log(`withheld ${digest.withheldNotes.length} note(s) containing credential-shaped text`);
+  const warning = omittedPinWarning(digest, process.argv.includes("--show-omitted-pins"));
+  if (warning) log(warning);
   if (digest.markdown) {
     log(`decision notes digest: ${digest.includedNotes.length} active note(s), ${digest.bytes} bytes${result.changed ? "" : " (unchanged)"}`);
   }

@@ -39,6 +39,8 @@ RUN node /tmp/patch-usage-model.cjs /opt/openchamber-preview
 COPY rootfs/opt/openchamber/patch-workspace-recovery.cjs /tmp/patch-workspace-recovery.cjs
 COPY rootfs/opt/openchamber/workspace-recovery /tmp/workspace-recovery
 RUN node /tmp/patch-workspace-recovery.cjs /opt/openchamber-preview
+COPY rootfs/opt/openchamber/patch-managed-history.cjs /tmp/patch-managed-history.cjs
+RUN node /tmp/patch-managed-history.cjs /opt/openchamber-preview
 COPY rootfs/opt/openchamber/patch-provider-signin.cjs /tmp/patch-provider-signin.cjs
 RUN node /tmp/patch-provider-signin.cjs /opt/openchamber-preview
 # Skip desktop/mobile lifecycle scripts; explicitly build only the SDK/web assets.
@@ -55,6 +57,8 @@ RUN --mount=type=bind,source=test/openchamber-model-fixture.cjs,target=/tmp/open
     && node --test /tmp/openchamber-usage.mjs
 RUN --mount=type=bind,source=test/openchamber-workspace-gate.test.tsx,target=/opt/openchamber-preview/packages/ui/src/components/auth/WorkspaceRecoveryGate.test.tsx,readonly \
     cd packages/ui && bun test src/components/auth/WorkspaceRecoveryGate.test.tsx
+RUN --mount=type=bind,source=test/openchamber-managed-history.test.ts,target=/opt/openchamber-preview/packages/ui/src/components/session/project-import/managedHistory.test.ts,readonly \
+    cd packages/ui && bun test src/components/session/project-import/managedHistory.test.ts src/components/session/project-import/openCodeProjectCandidates.test.ts
 RUN --mount=type=bind,source=test/openchamber-provider-signin.test.tsx,target=/opt/openchamber-preview/packages/ui/src/components/sections/providers/ha-provider-signin.test.tsx,readonly \
     cd packages/ui && bun test src/components/sections/providers/ha-provider-signin.test.tsx
 RUN timeout --signal=TERM --kill-after=10s 180s bun run --cwd packages/web test server/lib/git server/lib/opencode-trust server/opencode-trust-proxy.test.js

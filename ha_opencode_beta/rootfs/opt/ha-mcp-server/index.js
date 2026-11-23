@@ -186,6 +186,7 @@ import {
   DECISION_NOTES_PATH,
   DECISION_DIGEST_PATH,
   LIMITS as DECISION_LIMITS,
+  omittedPinWarning,
   activeNotes,
   addNote,
   supersedeNotes,
@@ -2231,7 +2232,8 @@ function decisionRefreshMessage(result) {
     sendLog("warning", "decision-notes", { action: "digest_refresh_failed" });
     return `**${result.digestError}**${lockNotice}`;
   }
-  return `Standing context refreshed automatically (2 KiB maximum). ${describeDigestCoverage(result.digest)}${lockNotice}`;
+  const warning = omittedPinWarning(result.digest);
+  return `Standing context refreshed automatically (2 KiB maximum). ${describeDigestCoverage(result.digest)}${warning ? `\n\n${warning}` : ""}${lockNotice}`;
 }
 
 // ============================================================================

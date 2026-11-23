@@ -9,31 +9,34 @@ splice our script in before </body>. Usage:
 """
 
 import sys
+from pathlib import Path
 
 
 def patch_reconnect(html: str) -> str:
     """Bounded recovery for errors on established ttyd 1.7.7 connections."""
     replacements = (
-        # An initial failed connection still requires manual retry. Only a
-        # previously opened terminal may automatically reattach its tmux client.
-        ('(()=>this.doReconnect=!1)',
-         '(()=>this.doReconnect=this.opened&&this.reconnect)'),
-        ('this.doReconnect=this.reconnect,this.initListeners()',
-         'this.haReconnectAttempts=0,this.doReconnect=this.reconnect,this.initListeners()'),
-        ('1e3!==e.code&&s)r.showOverlay("Reconnecting..."),t().then(i);else',
-         '1e3!==e.code&&s&&(this.haReconnectAttempts||0)<5){'
-         'this.haReconnectAttempts=(this.haReconnectAttempts||0)+1;'
-         'r.showOverlay("Reconnecting...");'
-         'setTimeout(()=>t().then(i),Math.min(1000*2**(this.haReconnectAttempts-1),8000))'
-         '}else'),
-        ('s.dispose(),r.showOverlay("Reconnecting..."),t().then(i)',
-         's.dispose(),this.haReconnectAttempts=0,r.showOverlay("Reconnecting..."),t().then(i)'),
+        ('connect(){this.socket=new WebSocket(this.options.wsUrl,["tty"])',
+         'connect(){this.haRecovery??=new HaTerminalReconnect(this);'
+         'this.socket=new WebSocket(this.haRecovery.url(this.options.wsUrl),["tty"])'),
+        ('i.reset(),i.options.disableStdin=!1,s.showOverlay("Reconnected",300)',
+         'this.haRecovery.redraw=true,i.options.disableStdin=!0'),
+        ('case f.OUTPUT:this.writeFunc(r);break;',
+         'case f.OUTPUT:r.byteLength&&this.haRecovery.output();this.writeFunc(r);break;'),
+        ('const{refreshToken:t,connect:i,doReconnect:s,overlayAddon:r}=this;'
+         'if(r.showOverlay("Connection Closed"),this.dispose(),1e3!==e.code&&s)'
+         'r.showOverlay("Reconnecting..."),t().then(i);else{const{terminal:e}=this,'
+         's=e.onKey((e=>{"Enter"===e.domEvent.key&&(s.dispose(),r.showOverlay("Reconnecting..."),'
+         't().then(i))}));r.showOverlay("Press ⏎ to Reconnect")}',
+         'this.haRecovery.closed(e)'),
     )
     for before, after in replacements:
         if html.count(before) != 1:
             raise ValueError("unexpected pinned ttyd reconnect source")
         html = html.replace(before, after)
-    return html
+    helper = Path(__file__).with_name("reconnect.js").read_text(encoding="utf-8")
+    if "<script" not in html or "</script" in helper.lower():
+        raise ValueError("unexpected ttyd script layout")
+    return html.replace("<script", f"<script>{helper}</script><script", 1)
 
 
 def main() -> None:

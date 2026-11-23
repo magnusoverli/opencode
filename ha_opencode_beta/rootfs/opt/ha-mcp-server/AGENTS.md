@@ -151,7 +151,7 @@ Not worth recording — do not write these:
 - Anything already readable from the configuration files
 - Anything the user has not explicitly approved
 
-**Pinning** (`pin: true`) keeps a note in the digest when older notes stop fitting. It is for the small number of constraints where being forgotten causes real damage — something deliberately removed, something that must be left alone. Ask for the pin as well as for the note, and use it rarely: pinning everything pins nothing.
+**Pinning** (`pin: true`) gives a note priority, not guaranteed space. If a write or `ha-context refresh` reports that a pinned decision did not fit, tell the user; it is still saved and can be retrieved with `recall_decisions`. Ask for the pin as well as for the note, and reserve pins for constraints that matter most.
 
 **Never** put passwords, tokens, or any value from `secrets.yaml` into a note. The tool rejects them, and a note is sent to the model in every future session.
 

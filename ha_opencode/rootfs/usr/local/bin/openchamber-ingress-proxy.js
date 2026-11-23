@@ -2,7 +2,7 @@
 const http = require("http");
 const net = require("net");
 const zlib = require("zlib");
-const { randomBytes } = require("crypto");
+const { createHash, randomBytes } = require("crypto");
 const { routeHaMcp } = require("./ha-mcp-ingress.js");
 const { validEditorIngressOrigin } = require("./editor-ingress-origin.js");
 const { installBrowserStorageScope } = require("./openchamber-browser-storage.js");
@@ -102,6 +102,59 @@ function noStoreHeaders(extra = {}) {
     pragma: "no-cache",
     expires: "0",
   };
+}
+
+// Only Vite's fingerprinted JS/CSS, and only if the upstream independently
+// identifies the response as public immutable build output.
+function cacheableAsset(headers) {
+  const directives = String(headers["cache-control"] || "").toLowerCase().split(",").map(s => s.trim());
+  return directives.includes("public") && directives.includes("immutable") &&
+    !directives.some(d => /^(?:private|no-store|no-cache|no-transform)(?:=|$)/.test(d)) &&
+    !headers["set-cookie"] && !headers["content-range"] && !String(headers.vary || "").includes("*");
+}
+
+function assetEncoding(header) {
+  const weights = new Map();
+  for (const item of String(header || "").toLowerCase().split(",")) {
+    const match = /^\s*(br|gzip|identity|\*)\s*(?:;\s*q\s*=\s*(0(?:\.\d{0,3})?|1(?:\.0{0,3})?))?\s*$/.exec(item);
+    if (match) weights.set(match[1], Number(match[2] ?? 1));
+  }
+  const weight = name => weights.get(name) ?? weights.get("*") ?? 0;
+  const enc = weight("br") >= weight("gzip") ? "br" : "gzip";
+  if (weight(enc) > 0 && weight(enc) >= (weights.get("identity") ?? 0)) return enc;
+  return (weights.get("identity") ?? (weights.get("*") === 0 ? 0 : 1)) > 0 ? "identity" : null;
+}
+
+function sendRewrittenAsset(req, res, headers, body, ingressPath) {
+  const encoding = assetEncoding(req.headers["accept-encoding"]);
+  if (!encoding) {
+    res.writeHead(406, noStoreHeaders({ vary: "Accept-Encoding" }));
+    return res.end();
+  }
+  // Upstream's validators describe different bytes. Revalidate private browser
+  // entries even for hashed URLs: our patches can change between add-on builds.
+  const tag = `"${createHash("sha256").update(ingressPath).update("\0").update(body).digest("base64url")}"`;
+  headers.etag = `W/${tag}`;
+  headers["cache-control"] = "private, no-cache";
+  const vary = new Set(String(headers.vary || "").toLowerCase().split(",").map(s => s.trim()).filter(Boolean));
+  vary.add("accept-encoding");
+  headers.vary = [...vary].join(", ");
+  for (const key of ["last-modified", "accept-ranges", "transfer-encoding", "expires", "pragma"]) delete headers[key];
+  if (encoding !== "identity") headers["content-encoding"] = encoding;
+  const matches = String(req.headers["if-none-match"] || "").split(",").map(s => s.trim());
+  if (matches.some(value => value === "*" || value.replace(/^W\//, "") === tag)) {
+    res.writeHead(304, headers);
+    return res.end();
+  }
+  res.writeHead(200, headers);
+  if (req.method === "HEAD") return res.end();
+  if (encoding === "identity") return res.end(body);
+  const stream = encoding === "gzip" ? zlib.createGzip({ level: 1 }) :
+    zlib.createBrotliCompress({ params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 3 } });
+  stream.on("error", () => res.destroy());
+  res.once("close", () => stream.destroy());
+  stream.pipe(res);
+  stream.end(body);
 }
 
 function transformRootAssetUrls(content, ingressPath) {
@@ -905,6 +958,13 @@ function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oaut
   // never has to trust caller-supplied X-Forwarded-* claims or a bypass header.
   if (editorRequest) headers.origin = `http://${headers.host}`;
   headers["accept-encoding"] = "identity";
+  const asset = !TERMINAL && ["GET", "HEAD"].includes(req.method) &&
+    /^\/assets\/[\w.-]+-[\w-]{8,}\.(?:js|css)$/.test(upstreamPath);
+  if (asset) {
+    // Evaluate conditions on the rewritten representation. Ignore Range (serve
+    // a full 200); a byte range of upstream JS isn't safe to rewrite.
+    for (const key of ["if-none-match", "if-modified-since", "range", "if-range"]) delete headers[key];
+  }
   headers["x-forwarded-host"] = req.headers["x-forwarded-host"] || req.headers.host || "";
   headers["x-forwarded-proto"] = forwardedProto(req);
   headers["x-forwarded-for"] = req.headers["x-forwarded-for"]
@@ -916,7 +976,7 @@ function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oaut
   const upstreamReq = http.request({
     host: UPSTREAM_HOST,
     port: UPSTREAM_PORT,
-    method: req.method,
+    method: asset ? "GET" : req.method,
     path: upstreamPath,
     headers,
   }, (response) => {
@@ -961,7 +1021,12 @@ function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oaut
     });
     upstreamRes.on("end", () => {
       if (clientClosed || !canWriteResponse(res)) return;
-      const decoded = decodeBody(Buffer.concat(chunks), responseHeaders["content-encoding"]);
+      let decoded;
+      try { decoded = decodeBody(Buffer.concat(chunks), responseHeaders["content-encoding"]); }
+      catch {
+        res.writeHead(502, noStoreHeaders());
+        return res.end("Invalid upstream encoding\n");
+      }
       const text = decoded.toString("utf8");
       const body = isHtml
         ? transformHtml(text, ingressPath)
@@ -971,6 +1036,9 @@ function forwardRequest(req, res, { ingressPath, upstreamPath, body = null, oaut
       delete responseHeaders["content-length"];
       delete responseHeaders["content-encoding"];
       delete responseHeaders.etag;
+      if (asset && upstreamRes.statusCode === 200 && !isHtml && (isCss || isJavaScript) && cacheableAsset(responseHeaders)) {
+        return sendRewrittenAsset(req, res, responseHeaders, body, ingressPath);
+      }
       Object.assign(responseHeaders, noStoreHeaders());
       res.writeHead(upstreamRes.statusCode || 200, responseHeaders);
       res.end(body);

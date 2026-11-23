@@ -53,8 +53,7 @@ export const DECISION_DIGEST_BUDGET_BYTES = 2048;
 
 export const LIMITS = {
   /**
-   * Pinned notes lead the digest, so they are the notes that survive when the
-   * budget runs out. Capped because pinning everything pins nothing.
+   * Pins get first choice of digest space, not a reserved allocation.
    */
   maxPinned: 10,
   /** Storage safety bound, independent of the 2 KiB prompt budget. Never prune. */
@@ -78,8 +77,8 @@ const FILE_HEADER = `# OpenCode decision notes
 # notes while the file cannot be parsed, so nothing is silently overwritten.
 #
 # Set a note's status to "superseded" (or delete it) to drop it from the digest.
-# Add "pin: true" to a note to keep it in the digest when older notes no longer
-# fit — use it for the decisions that must never be reversed by accident.
+# Add "pin: true" to give a note priority in the digest. Even pinned notes can
+# be omitted when space runs out; ha-context refresh reports which ones.
 `;
 
 /** Collapse whitespace and strip control characters from user/model text. */
@@ -762,7 +761,7 @@ export function searchNoteMatches(notes = [], options = {}) {
  * Pinned first, then newest first. Without pinning the budget evicts by age,
  * which is backwards: the oldest standing constraints are usually the ones most
  * likely to be reversed by accident precisely because everyone has forgotten
- * them. Pinning is how a user says "this one always travels".
+ * them. Pinning gives these constraints first choice of space.
  */
 function digestOrder(notes) {
   return [...notes].sort((a, b) => {
@@ -889,6 +888,7 @@ function packNoteLines(active, available) {
   const lines = [];
   const includedNotes = [];
   const droppedNotes = [];
+  const droppedPinnedNotes = [];
   let used = 0;
 
   for (const note of active) {
@@ -896,6 +896,7 @@ function packNoteLines(active, available) {
     const cost = byteLength(line) + (lines.length ? 1 : 0);
     if (used + cost > available) {
       droppedNotes.push(note.id);
+      if (note.pin) droppedPinnedNotes.push(note.id);
       continue;
     }
     lines.push(line);
@@ -903,7 +904,18 @@ function packNoteLines(active, available) {
     used += cost;
   }
 
-  return { lines, includedNotes, droppedNotes };
+  return { lines, includedNotes, droppedNotes, droppedPinnedNotes };
+}
+
+// Use only the packer's secret-screened IDs. Show names to the caller, not
+// in startup logs; hand-edited IDs may be very long or contain terminal markup.
+export function omittedPinWarning(digest, showIds = true) {
+  const ids = digest.droppedPinnedNotes;
+  if (!ids.length) return "";
+  const labels = ids.slice(0, LIMITS.maxPinned).map(id =>
+    /^[a-zA-Z0-9._-]{1,120}$/.test(id) ? id : "(custom ID; see notes file)");
+  const detail = showIds ? `: ${labels.join(", ")}${ids.length > labels.length ? `, and ${ids.length - labels.length} more` : ""}` : "";
+  return `Warning: ${ids.length} pinned decision${ids.length === 1 ? "" : "s"} did not fit the session digest${detail}. Still saved and available via recall_decisions.`;
 }
 
 /**
@@ -938,7 +950,7 @@ export function renderDecisionDigest(notes = [], options = {}) {
     // Everything withheld or unreadable is still worth saying: silence would
     // leave the user believing their notes are in play when none of them are.
     if (!caveats.length) {
-      return { markdown: "", bytes: 0, includedNotes: [], droppedNotes: [], withheldNotes: [], totalActive: 0 };
+      return { markdown: "", bytes: 0, includedNotes: [], droppedNotes: [], droppedPinnedNotes: [], withheldNotes: [], totalActive: 0 };
     }
     const document = `${DIGEST_INTRO}\n\n${caveats.join("\n\n")}\n`;
     const markdown = byteLength(document) <= budgetBytes ? document : "";
@@ -947,6 +959,7 @@ export function renderDecisionDigest(notes = [], options = {}) {
       bytes: byteLength(markdown),
       includedNotes: [],
       droppedNotes: [],
+      droppedPinnedNotes: [],
       withheldNotes,
       totalActive: 0,
     };
@@ -974,6 +987,7 @@ export function renderDecisionDigest(notes = [], options = {}) {
       bytes: byteLength(document),
       includedNotes: packed.includedNotes,
       droppedNotes: packed.droppedNotes,
+      droppedPinnedNotes: packed.droppedPinnedNotes,
       withheldNotes,
       totalActive: total,
     };
@@ -995,6 +1009,7 @@ function fallbackDigest(total, active, withheldNotes, budgetBytes) {
     bytes: byteLength(markdown),
     includedNotes: [],
     droppedNotes: allDropped,
+    droppedPinnedNotes: active.filter(note => note.pin).map(note => note.id),
     withheldNotes,
     totalActive: total,
   };

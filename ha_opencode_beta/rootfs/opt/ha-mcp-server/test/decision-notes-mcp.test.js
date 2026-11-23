@@ -10,7 +10,7 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from "fs/promises";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { parseDecisionNotes } from "../lib/decision-notes.js";
+import { parseDecisionNotes, renderDecisionDigest } from "../lib/decision-notes.js";
 
 const SERVER = join(dirname(fileURLToPath(import.meta.url)), "..", "index.js");
 const STARTUP_TIMEOUT_MS = 20000;
@@ -235,6 +235,29 @@ describe("recording a decision end to end", () => {
     expect(digest).toContain("Node-RED automations are off limits");
     expect(Buffer.byteLength(digest)).toBeLessThanOrEqual(2048);
     expect(textOf(recorded)).toContain("refreshed automatically");
+  }, STARTUP_TIMEOUT_MS + 5000);
+
+  it("names an existing pin displaced by an approved write, without losing the decision (#227)", async () => {
+    const decision = "Conserver le réglage prévu. ".repeat(11);
+    const notes = Array.from({ length: 17 }, (_, i) => ({ id: `constraint-${i}`, date: "2025-01-01",
+      status: "active", title: `Keep setting ${i}`, decision, pin: i < 7 }));
+    const file = join(notesDir, "decisions.yaml");
+    await writeFile(file, JSON.stringify({ version: 1, notes }));
+    const before = renderDecisionDigest(notes);
+    const [recorded] = await converse(env, [callTool("remember_decision", {
+      title: "Keep the new setting", decision, pin: true, user_approved: true,
+    })]);
+    expect(recorded.isError).toBeFalsy();
+    const after = renderDecisionDigest(parseDecisionNotes(await readFile(file, "utf8")).notes);
+    const displaced = before.includedNotes.find(id => after.droppedPinnedNotes.includes(id));
+    expect(displaced).toBeTruthy();
+    expect(textOf(recorded)).toContain("pinned decisions did not fit");
+    for (const id of after.droppedPinnedNotes) expect(textOf(recorded)).toContain(id);
+    const published = await readFile(digestPath, "utf8");
+    expect(published).toBe(after.markdown);
+    expect(Buffer.byteLength(published)).toBeLessThanOrEqual(2048);
+    const [recalled] = await converse(env, [callTool("recall_decisions", { id: displaced })]);
+    expect(textOf(recalled)).toContain(decision.trim());
   }, STARTUP_TIMEOUT_MS + 5000);
 
   it("removes obsolete standing context when the last active note is superseded", async () => {

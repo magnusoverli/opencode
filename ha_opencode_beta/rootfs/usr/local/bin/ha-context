@@ -193,7 +193,7 @@ cmd_refresh() {
     HOME_CONTEXT_SINGLE_PASS=true \
     OPENCODE_HOME_BRIEFING="${OPENCODE_HOME_BRIEFING:-true}" \
     OPENCODE_DECISION_NOTES="${OPENCODE_DECISION_NOTES:-true}" \
-        node "${GENERATOR}"
+        node "${GENERATOR}" --show-omitted-pins
     echo ""
     echo "Regeneration finished — the lines above say what was rebuilt and what was left alone."
     echo "The managed V2 backend uses refreshed context on subsequent model requests, including open sessions."

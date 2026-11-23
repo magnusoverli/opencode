@@ -63,8 +63,8 @@ beforeEach(async () => {
   await mkdir(join(configDir, "custom_components", "hacs"), { recursive: true });
 });
 
-function invoke(env) {
-  return run(process.execPath, [script], {
+function invoke(env, args = []) {
+  return run(process.execPath, [script, ...args], {
     env: {
       ...process.env,
       HOME_CONTEXT_SINGLE_PASS: "true",
@@ -138,6 +138,24 @@ describe("generate-home-context", () => {
     const digest = await readFile(digestPath(), "utf8");
     expect(digest).toContain("Node-RED automations are off limits");
     expect(digest).not.toContain("maintained outside Home Assistant");
+  });
+
+  it("identifies only safe omitted pins on manual refresh, including unchanged refreshes", async () => {
+    const env = { OPENCODE_HOME_BRIEFING: "false", OPENCODE_DECISION_NOTES: "true" };
+    const note = { id: "keep-heating", date: "2026-01-01", title: "Heating", decision: "été ".repeat(600), pin: true };
+    const withheld = { ...note, id: "private-pin", decision: "do-not-publish-secret-0123456789" };
+    await writeFile(join(configDir, "secrets.yaml"), `fixture: ${withheld.decision}\n`);
+    await writeFile(notesPath, JSON.stringify({ version: 1, notes: [note, withheld] }));
+    const startup = await invoke(env);
+    expect(startup.stdout).toContain("1 pinned decision did not fit");
+    expect(startup.stdout).not.toContain(note.id);
+    const manual = await invoke(env, ["--show-omitted-pins"]);
+    expect(manual.stdout).toContain("1 pinned decision did not fit the session digest: keep-heating");
+    expect(manual.stdout).toContain("(unchanged)");
+    for (const { stdout } of [startup, manual]) {
+      expect(stdout).not.toContain(withheld.id);
+      expect(stdout).not.toContain(withheld.decision);
+    }
   });
 
   it("writes no digest when there are no notes yet", async () => {

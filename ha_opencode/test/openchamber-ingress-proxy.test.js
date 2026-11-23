@@ -14,6 +14,7 @@ const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
+const zlib = require("node:zlib");
 
 const PROXY_SCRIPT = path.join(__dirname, "..", "rootfs", "usr", "local", "bin", "openchamber-ingress-proxy.js");
 const STABLE_PROXY_SCRIPT = path.join(__dirname, "..", "..", "ha_opencode", "rootfs", "usr", "local", "bin", "openchamber-ingress-proxy.js");
@@ -62,11 +63,10 @@ function request(port, options, body) {
     const req = http.request({ host: "127.0.0.1", port, ...options }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => resolve({
-        statusCode: res.statusCode,
-        headers: res.headers,
-        body: Buffer.concat(chunks).toString("utf8"),
-      }));
+      res.on("end", () => {
+        const raw = Buffer.concat(chunks);
+        resolve({ statusCode: res.statusCode, headers: res.headers, body: raw.toString("utf8"), raw });
+      });
     });
     req.on("error", reject);
     req.end(body);
@@ -834,7 +834,7 @@ describe("openchamber ingress proxy: remote allowlist", () => {
   });
 });
 
-describe("openchamber ingress proxy: disconnected clients", () => {
+describe("openchamber ingress proxy: response forwarding", () => {
   let proxy;
   let proxyExit;
   let proxyPort;
@@ -900,6 +900,113 @@ describe("openchamber ingress proxy: disconnected clients", () => {
     assert.equal(response.body, "ok:/still-alive");
     assert.equal(proxyExit, null, `proxy exited after a client disconnect: ${JSON.stringify(proxyExit)}`);
   };
+
+  it("compresses and privately revalidates rewritten build assets by content and ingress prefix (#225)", async () => {
+    const asset = "/assets/main-B11_hqBQ.js";
+    let source = 'const icon="/assets/icon.svg";if("serviceWorker"in navigator){};\n'.repeat(1200);
+    handleRequest = (req, res) => {
+      assert.equal(req.headers["if-none-match"], undefined);
+      assert.equal(req.headers.range, undefined);
+      res.writeHead(200, { "content-type": "application/javascript", "cache-control": "public, max-age=31536000, immutable",
+        vary: "Origin", etag: '"original"' });
+      res.end(source);
+    };
+    const get = (headers = {}, prefix = INGRESS_PATH, method = "GET") => request(proxyPort,
+      { method, path: prefix + asset, headers: { "x-ingress-path": prefix, ...headers } });
+    const cold = await get({ "accept-encoding": "gzip, br" });
+    assert.equal(cold.statusCode, 200);
+    assert.equal(cold.headers["content-encoding"], "br");
+    assert.equal(cold.headers["cache-control"], "private, no-cache");
+    assert.match(cold.headers.vary, /origin.*accept-encoding/i);
+    const decoded = zlib.brotliDecompressSync(cold.raw).toString();
+    assert.ok(decoded.includes(`"${INGRESS_PATH}/assets/icon.svg"`));
+    assert.ok(decoded.includes('if(false&&"serviceWorker"in navigator)'));
+    assert.ok(cold.raw.length < Buffer.byteLength(decoded));
+    const etag = cold.headers.etag;
+    assert.notEqual(etag, '"original"');
+    const warm = await get({ "accept-encoding": "br", "if-none-match": etag });
+    assert.equal(warm.statusCode, 304);
+    assert.equal(warm.raw.length, 0);
+    assert.equal(warm.headers.etag, etag);
+    const gzip = await get({ "accept-encoding": "br;q=0,gzip", range: "bytes=0-5" });
+    assert.equal(zlib.gunzipSync(gzip.raw).toString(), decoded);
+    assert.equal((await get({ "accept-encoding": "gzip;q=0,br;q=0" })).body, decoded);
+    assert.equal((await get({ "accept-encoding": "identity;q=0,*;q=0" })).statusCode, 406);
+    const head = await get({}, INGRESS_PATH, "HEAD");
+    assert.equal(head.headers.etag, etag);
+    assert.equal(head.raw.length, 0);
+    const other = await get({ "if-none-match": etag }, "/api/hassio_ingress/other");
+    assert.equal(other.statusCode, 200);
+    assert.ok(!other.body.includes(INGRESS_PATH));
+    source += "/* new packaged patch, same upstream URL */";
+    const updated = await get({ "if-none-match": etag });
+    assert.equal(updated.statusCode, 200);
+    assert.notEqual(updated.headers.etag, etag);
+  });
+
+  it("loads a rewritten module from Chrome's private cache on a return visit", async t => {
+    const executablePath = process.env.HA_ASSIST_BROWSER_EXECUTABLE || process.env.HA_MCP_BROWSER_EXECUTABLE;
+    if (!executablePath) return t.skip("set HA_ASSIST_BROWSER_EXECUTABLE for browser cache verification");
+    const asset = "/assets/app-AbCd1234.js";
+    handleRequest = (req, res) => {
+      if (req.url === asset) {
+        res.writeHead(200, { "content-type": "application/javascript", "cache-control": "public, immutable, max-age=31536000" });
+        res.end('window.loadedIcon="/assets/icon.svg";');
+      } else {
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end(`<html><head><script type="module" src="${asset}"></script></head></html>`);
+      }
+    };
+    const browser = await require("../rootfs/opt/ha-mcp-server/node_modules/puppeteer-core")
+      .launch({ executablePath, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    const network = await page.createCDPSession();
+    await network.send("Network.enable");
+    const assets = new Set();
+    const statuses = [];
+    network.on("Network.requestWillBeSent", e => {
+      if (e.request.url.endsWith(asset)) assets.add(e.requestId);
+    });
+    network.on("Network.responseReceivedExtraInfo", e => {
+      if (assets.has(e.requestId)) statuses.push(e.statusCode);
+    });
+    const url = `http://127.0.0.1:${proxyPort}${INGRESS_PATH}/`;
+    for (let i = 0; i < 2; i++) {
+      await page.goto(url);
+      assert.equal(await page.evaluate(() => window.loadedIcon), `${INGRESS_PATH}/assets/icon.svg`);
+      await page.goto("about:blank");
+    }
+    assert.deepEqual(statuses, [200, 304]);
+  });
+
+  it("does not cache private, dynamic, HTML, or error responses as build assets", async () => {
+    let policy = "public, immutable";
+    let extra = {};
+    let status = 200;
+    handleRequest = (_req, res) => {
+      res.writeHead(status, { "content-type": "text/css", "cache-control": policy, ...extra });
+      res.end('body{background:url("/assets/bg.svg")}');
+    };
+    const get = async (pathname) => request(proxyPort, { path: INGRESS_PATH + pathname,
+      headers: { "x-ingress-path": INGRESS_PATH } });
+    const css = "/assets/main-AbCd1234.css";
+    assert.ok((await get(css)).body.includes(INGRESS_PATH));
+    for (const pathname of ["/api/main-AbCd1234.css", "/assets/manifest.css", "/__openchamber_ingress_runtime.js", "/sw.js"]) {
+      assert.match((await get(pathname)).headers["cache-control"], /no-store/);
+    }
+    for (const [directive, headers, code] of [
+      ["private, immutable", {}, 200], ["public, immutable, no-store", {}, 200],
+      ["public, immutable", { "set-cookie": "test=1" }, 200],
+      ["public, immutable", { "content-type": "text/html" }, 200], ["public, immutable", {}, 403],
+    ]) {
+      policy = directive; extra = headers; status = code;
+      const res = await get(css);
+      assert.equal(res.statusCode, status);
+      assert.match(res.headers["cache-control"], /no-store/);
+      assert.equal(res.headers.etag, undefined);
+    }
+  });
 
   it("cancels a streaming HTTP response when the client disconnects", async () => {
     let upstreamClosed = false;
