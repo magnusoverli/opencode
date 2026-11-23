@@ -124,8 +124,10 @@ test("minimatch bounds globparts amplification at optimization level two", () =>
     import assert from 'node:assert/strict';
     import { Minimatch } from ${JSON.stringify(pathToFileURL(entry).href)};
     const pattern = 'a/**/../'.repeat(18) + 'b/c';
-    const matcher = new Minimatch(pattern, { optimizationLevel: 2, braceExpandMax: 32 });
-    assert.ok(matcher.globParts.length <= 32);
+    const compile = () => new Minimatch(pattern, { optimizationLevel: 2, braceExpandMax: 32 });
+    ${process.env.HA_DEPENDENCY_TEST_ADDON === "ha_opencode"
+      ? "assert.ok(compile().globParts.length <= 32);"
+      : "assert.throws(compile, { name: 'RangeError', message: /too many patterns/ });"}
   `], { encoding: "utf8", timeout: 3000 });
   assert.equal(result.status, 0, result.stderr || String(result.error));
 });

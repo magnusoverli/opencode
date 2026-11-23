@@ -55,8 +55,11 @@ for (const lan of [false, true]) {
         const service = createRelayService({
           crypto, allowPassiveHost, relayKeyStore,
           readSettingsFromDiskMigrated: readSettings,
-          readSettingsStrict: readSettings,
-          writeSettingsToDisk: writeSettings,
+          updateSettingsFromDisk: async (mutate) => {
+            const next = await mutate(await readSettings());
+            await writeSettings(next);
+            return next;
+          },
           getLocalPort: () => 1,
           hasRelayDemand: () => clients.hasActiveRelayClients(),
           logger: { warn() {} },

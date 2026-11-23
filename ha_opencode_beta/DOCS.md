@@ -8,7 +8,7 @@ access to migrated conversations, and reporting when pinned decision notes do
 not fit. It retains [direct desktop HTTP](#direct-desktop-http-no-proxy) and
 HTTPS without a reverse proxy. LAN access is off by default.
 
-Beta `3.5.4b0` pins OpenCode `2.3.0`, OpenChamber `2.7.2`, and HAB `1.8.0`, retaining
+Beta `3.5.4b1` pins OpenCode `2.4.0`, OpenChamber `2.8.0`, and HAB `1.10.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
 private-model discovery. It now includes stable 3.5.0's Zigporter compatibility,
 HAB registry-cache and project-upgrade fixes. Beta keeps its own app identity and persistent storage; installing
@@ -16,7 +16,7 @@ beta does not transfer stable conversations or sign-ins. HA 2026.10 integration 
 forwarding and an experimental native Assist/AI data-task adapter. The roadmap
 is tracked in [#45](https://github.com/magnusoverli/opencode/issues/45).
 
-The next beta targets OpenCode CLI/plugin `2.4.0`, OpenChamber `2.8.0` and HAB `1.10.0`.
+Agent guidance covers all 48 HAB command families, including which operations use the add-on's guarded tools.
 OpenChamber uses immutable commit
 `30c70496a5ca0105e04e60a783964576973edc8f`, built with Bun `1.4.5` and the reviewed
 security lock. The app retains its Ingress asset/API/terminal-WebAssembly and
