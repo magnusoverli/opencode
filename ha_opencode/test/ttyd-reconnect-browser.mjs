@@ -20,6 +20,7 @@ const ttyd = spawn("ttyd", ["-W", "--url-arg", "-i", "lo", "-p", String(port), "
 { env, stdio: "ignore" });
 const prefix = "/api/hassio_ingress/terminal-fixture";
 const upstreams = new Set();
+const upgradedClients = new Set();
 let upgrades = 0;
 const maskClose = new WeakSet();
 const proxy = createServer((req, res) => {
@@ -29,6 +30,8 @@ const proxy = createServer((req, res) => {
 });
 proxy.on("upgrade", (req, socket, head) => {
   upgrades++;
+  upgradedClients.add(socket);
+  socket.once("close", () => upgradedClients.delete(socket));
   const next = connect(port, "127.0.0.1", () => {
     next.write(`${req.method} ${req.url.slice(prefix.length)} HTTP/1.1\r\n`);
     for (const [key, value] of Object.entries(req.headers)) next.write(`${key}: ${value}\r\n`);
@@ -123,12 +126,22 @@ try {
   }));
   assert.ok(refused);
   assert.equal(tmux("list-clients").stdout.trim(), "");
-  console.log("PASS: both Ingress losses reattach; detach, exit and session replacement do not");
 } finally {
-  await browser?.close();
+  console.log("Cleanup: closing test proxy and upgraded sockets");
+  const closed = new Promise(resolve => proxy.close(resolve));
+  for (const socket of upgradedClients) socket.destroy();
   for (const socket of upstreams) socket.destroy();
-  proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve));
+  proxy.closeAllConnections();
+  await closed;
+  console.log("Cleanup: closing browser");
+  await browser?.close();
+  console.log("Cleanup: stopping tmux and ttyd");
   tmux("kill-server");
-  if (ttyd.exitCode === null) { const exited = once(ttyd, "exit"); ttyd.kill(); await exited; }
+  if (ttyd.exitCode === null && ttyd.signalCode === null) {
+    const exited = once(ttyd, "exit");
+    const force = setTimeout(() => ttyd.kill("SIGKILL"), 3000);
+    try { ttyd.kill(); await exited; } finally { clearTimeout(force); }
+  }
   await rm(root, { recursive: true, force: true });
 }
+console.log("PASS: both Ingress losses reattach; detach, exit and session replacement do not");
