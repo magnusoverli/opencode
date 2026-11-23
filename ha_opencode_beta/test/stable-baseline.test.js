@@ -1,4 +1,4 @@
-// Shared implementation matches stable 3.5.2. Only exact, reviewed channel
+// Shared implementation matches stable 3.5.3. Only exact, reviewed channel
 // substitutions are permitted; new feature differences need explicit review.
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");

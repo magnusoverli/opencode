@@ -3,6 +3,18 @@
 Your Home Assistant configuration assistant, powered by OpenCode V2. Use the
 terminal or OpenChamber web workspace with one shared, app-managed backend.
 
+## Upgrading to 3.5.3
+
+Stable **3.5.3** promotes **3.5.3b2**. Back up and update your existing
+**OpenCode** app in place to keep its conversations, settings and sign-ins.
+If a 2.x history migration stopped at `message_projection_mismatch`, this update
+retries from the preserved history. Leave the database and migration journal intact.
+
+Reload any terminal tab left open during the update. To find retained migrated
+conversations in OpenChamber, choose **Add Project → From OpenCode → Home
+Assistant conversation history → Add selected**. Stable and beta still use
+separate storage; installing stable does not import beta's conversations.
+
 ## Upgrading to 3.5.2
 
 Stable **3.5.2** promotes the desktop LAN API fix from **3.5.2b0**. To use it,
@@ -370,7 +382,7 @@ migration journal to force startup.
 `message_projection_mismatch` means a converted message did not match the validator's
 expectation. In 3.5.2, preserved provider metadata or mixed-case part IDs could
 trigger a false alarm ([#228](https://github.com/magnusoverli/opencode/issues/228)).
-Keep a backup and update the same add-on when the fix is released. If the error
+Keep a backup and update the same stable add-on to 3.5.3 or later. If the error
 persists, share the field path, `session_hash` and zero-based `message_seq` from
 the new log. No conversation contents or database are needed.
 
