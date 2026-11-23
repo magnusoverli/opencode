@@ -4,7 +4,8 @@
 starts from [`v3.5.3`](https://github.com/magnusoverli/opencode/releases/tag/v3.5.3).
 It adds optional HTTPS aliases for the two reverse-proxied LAN frontends (#221).
 
-Both channels ship OpenCode 2.3.0, OpenChamber 2.7.2 and HAB 1.8.0.
+The next beta targets OpenCode CLI/plugin 2.4.0, OpenChamber 2.8.0 and HAB 1.10.0.
+The published 3.5.4b0 and stable 3.5.3 images still contain 2.3.0, 2.7.2 and 1.8.0.
 Carry forward stable's V1 migration validation, terminal reconnection,
 OpenChamber caching and history picker, decision-note diagnostics and LAN
 configuration before adding new beta features.

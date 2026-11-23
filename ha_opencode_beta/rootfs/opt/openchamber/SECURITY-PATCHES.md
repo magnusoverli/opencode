@@ -1,9 +1,8 @@
 # Pinned OpenChamber security dependencies
 
-Stable 3.5.0 uses OpenChamber 2.7.2 at the revision in `build.yaml`, promoted
-from the validated 3.5.0b5 source.
+The beta build uses OpenChamber 2.8.0 at the immutable revision in `build.yaml`.
 `patch-security-dependencies.cjs` merges `security-overrides.json` into that
-checkout; `security.bun.lock` is its generated, committed Bun 1.4.4 lock.
+checkout; `security.bun.lock` is its generated, committed Bun 1.4.5 lock.
 Both build-time and production installs use this lock with `--frozen-lockfile`.
 
 To refresh: start from that exact upstream revision, run the patcher, then

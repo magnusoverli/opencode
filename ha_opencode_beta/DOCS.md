@@ -16,8 +16,9 @@ beta does not transfer stable conversations or sign-ins. HA 2026.10 integration 
 forwarding and an experimental native Assist/AI data-task adapter. The roadmap
 is tracked in [#45](https://github.com/magnusoverli/opencode/issues/45).
 
+The next beta targets OpenCode CLI/plugin `2.4.0`, OpenChamber `2.8.0` and HAB `1.10.0`.
 OpenChamber uses immutable commit
-`1a151518c95cc5ff3578bab593d2f96862ff3bb8`, built with Bun `1.4.4` and the reviewed
+`30c70496a5ca0105e04e60a783964576973edc8f`, built with Bun `1.4.5` and the reviewed
 security lock. The app retains its Ingress asset/API/terminal-WebAssembly and
 private-backend adaptations, rebases the editor/mobile recovery patches, and uses
 upstream's Git 4 environment policy and streaming-proxy fix.

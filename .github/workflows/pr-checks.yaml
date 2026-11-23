@@ -26,7 +26,7 @@ jobs:
     outputs:
       matrix: ${{ steps.channels.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: channels
@@ -42,18 +42,18 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24.15.0
+          node-version: ${{ matrix.channel == 'beta' && '26.13.1' || '24.21.0' }}
 
       - name: Channel contracts, audits and root boundaries
         shell: bash
         run: bash scripts/ci-checks.sh "${{ matrix.channel }}" 2>&1 | tee "${RUNNER_TEMP}/contracts.log"
       - name: Retain contract diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: contracts-${{ matrix.channel }}
           path: ${{ runner.temp }}/contracts.log
@@ -62,10 +62,10 @@ jobs:
     name: Shared channel contracts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24.15.0
+          node-version: 26.13.1
       - name: HA-facing MCP discovery and service lifecycle contracts
         run: node --test scripts/ha-facing-discovery.test.mjs scripts/ci-channels.test.mjs
 
@@ -88,16 +88,16 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24.15.0
+          node-version: ${{ matrix.channel == 'beta' && '26.13.1' || '24.21.0' }}
       - name: Install pinned OpenCode runtime
         working-directory: ${{ matrix.addon }}/rootfs/opt/opencode-v2-homeassistant
         run: npm ci --no-audit --no-fund
       - name: Install shared Assist authentication dependencies
         working-directory: ${{ matrix.addon }}/rootfs/opt/ha-mcp-server
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: npm ${{ matrix.channel == 'beta' && 'ci' || 'install' }} --ignore-scripts --no-audit --no-fund
       - name: Exercise actual HA ChatLog and companion contracts
         env:
           ADDON_CHANNEL: ${{ matrix.channel }}
@@ -116,14 +116,14 @@ jobs:
       run:
         working-directory: ${{ matrix.addon }}/rootfs/opt/ha-mcp-server
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24.15.0
+          node-version: ${{ matrix.channel == 'beta' && '26.13.1' || '24.21.0' }}
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ${{ matrix.channel == 'beta' && 'ci' || 'install' }} --no-audit --no-fund
 
       - name: Run tests
         env:
@@ -138,14 +138,14 @@ jobs:
       run:
         working-directory: ha_opencode_beta/rootfs/opt/ha-lsp-server
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24.15.0
+          node-version: 26.13.1
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Run tests
         run: npm test
@@ -154,11 +154,11 @@ jobs:
     name: Shell scripts and service definitions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24.15.0
+          node-version: 26.13.1
 
       - name: Syntax-check every shipped shell script
         run: |
