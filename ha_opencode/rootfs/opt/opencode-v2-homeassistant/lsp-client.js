@@ -4,7 +4,7 @@ import { createConnection } from "node:net";
 import { once } from "node:events";
 import { posix } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node.js";
+import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node";
 
 export const LSP_SOCKET = "/run/opencode-v2/lsp.sock";
 export const MAX_DOCUMENT_BYTES = 1024 * 1024;

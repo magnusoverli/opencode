@@ -14,7 +14,7 @@ test("the patched minimatch and glob pair shares a compatible brace-expansion", 
   // previously broke older minimatch's CommonJS default-export assumption.
   const fromRimraf = createRequire(require.resolve("rimraf"));
   const fromGlob = createRequire(fromRimraf.resolve("glob"));
-  assert.equal(fromGlob("minimatch/package.json").version, "11.0.1");
+  assert.equal(fromGlob("minimatch/package.json").version, "11.0.9");
   assert.deepEqual(fromGlob("minimatch").braceExpand("file-{a,b}.txt"), ["file-a.txt", "file-b.txt"]);
   assert.equal(fromGlob.resolve("minimatch"), require.resolve("minimatch"));
 });

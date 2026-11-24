@@ -1,6 +1,6 @@
 # Global ARGs (available in FROM instructions)
 ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
-ARG NODE_VERSION=24.21.0
+ARG NODE_VERSION=26.13.1
 
 # Home Assistant does not publish a Node-specific Debian base. Keep its s6 and
 # Bashio runtime as the final base, and copy an exact official Node toolchain in.
@@ -8,9 +8,9 @@ FROM node:${NODE_VERSION}-trixie-slim AS node-runtime
 
 # OpenChamber's web release is independently pinned; its desktop CLI is never
 # installed. Build with the reviewed security lock, on the target's native runner.
-FROM oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4 AS openchamber-bun
+FROM oven/bun:1.4.5-slim@sha256:b780593f3e10918cbdaec3d5a08d52224b9198069a65eb47812085c2ec007643 AS openchamber-bun
 FROM node-runtime AS openchamber-builder
-ARG OPENCHAMBER_REVISION=1a151518c95cc5ff3578bab593d2f96862ff3bb8
+ARG OPENCHAMBER_REVISION=30c70496a5ca0105e04e60a783964576973edc8f
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client python3 g++ make \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=openchamber-bun /usr/local/bin/bun /usr/local/bin/bun
@@ -20,7 +20,7 @@ RUN git init \
     && git -c http.version=HTTP/1.1 fetch --depth 1 origin "${OPENCHAMBER_REVISION}" \
     && git checkout --detach FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = "${OPENCHAMBER_REVISION}" \
-    && test "$(bun --version)" = 1.4.4
+    && test "$(bun --version)" = 1.4.5
 COPY rootfs/opt/openchamber/patch-security-dependencies.cjs rootfs/opt/openchamber/security-overrides.json /tmp/
 RUN node /tmp/patch-security-dependencies.cjs /opt/openchamber-preview
 COPY rootfs/opt/openchamber/security.bun.lock /opt/openchamber-preview/bun.lock
@@ -43,6 +43,8 @@ COPY rootfs/opt/openchamber/patch-managed-history.cjs /tmp/patch-managed-history
 RUN node /tmp/patch-managed-history.cjs /opt/openchamber-preview
 COPY rootfs/opt/openchamber/patch-provider-signin.cjs /tmp/patch-provider-signin.cjs
 RUN node /tmp/patch-provider-signin.cjs /opt/openchamber-preview
+COPY rootfs/opt/openchamber/patch-managed-backend.cjs /tmp/patch-managed-backend.cjs
+RUN node /tmp/patch-managed-backend.cjs /opt/openchamber-preview/packages/web
 # Skip desktop/mobile lifecycle scripts; explicitly build only the SDK/web assets.
 RUN bun install --frozen-lockfile --ignore-scripts \
     && node /tmp/patch-git-environment.cjs /opt/openchamber-preview/packages/web \
@@ -64,8 +66,6 @@ RUN --mount=type=bind,source=test/openchamber-provider-signin.test.tsx,target=/o
 RUN timeout --signal=TERM --kill-after=10s 180s bun run --cwd packages/web test server/lib/git server/lib/opencode-trust server/opencode-trust-proxy.test.js
 COPY rootfs/opt/openchamber/patch-ingress.js /tmp/patch-ingress.cjs
 RUN node /tmp/patch-ingress.cjs /opt/openchamber-preview/packages/web
-COPY rootfs/opt/openchamber/patch-managed-backend.cjs /tmp/patch-managed-backend.cjs
-RUN node /tmp/patch-managed-backend.cjs /opt/openchamber-preview/packages/web
 RUN rm -rf node_modules packages/*/node_modules \
     && bun install --frozen-lockfile --production --ignore-scripts \
         --filter @openchamber/web --filter @openchamber/sdk
@@ -77,7 +77,7 @@ RUN node /tmp/patch-braces-depth.cjs /opt/openchamber-preview/packages/web
 COPY rootfs/opt/openchamber/audit-installed.mjs /tmp/audit-openchamber.mjs
 RUN node /tmp/audit-openchamber.mjs
 RUN node -e 'require("./packages/web/node_modules/node-pty").spawn("/bin/true", []).onExit(e => process.exit(e.exitCode))' \
-    && node --input-type=module -e 'await import("./packages/web/server/index.js"); process.exit(0)'
+    && node --input-type=module -e 'await import("./packages/web/build/server/index.js"); process.exit(0)'
 RUN --mount=type=bind,source=test/openchamber-request-body.mjs,target=/tmp/openchamber-request-body.mjs,readonly \
     --mount=type=bind,source=test/openchamber-managed-backend.mjs,target=/tmp/openchamber-managed-backend.mjs,readonly \
     --mount=type=bind,source=test/openchamber-security.mjs,target=/tmp/openchamber-security.mjs,readonly \
@@ -88,11 +88,11 @@ RUN --mount=type=bind,source=test/openchamber-request-body.mjs,target=/tmp/openc
 ## Build hab CLI from source (pinned release)
 # Pinned to the build host's platform — Go cross-compiles via GOARCH below,
 # so this stage never needs to run under emulation
-FROM --platform=$BUILDPLATFORM golang:1.24-trixie AS hab-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS hab-builder
 
 ARG BUILD_ARCH
-ARG HAB_VERSION=1.8.0
-ARG HAB_REVISION=f200a763798bc2a305c7fe0fad58dc0946e07861
+ARG HAB_VERSION=1.10.0
+ARG HAB_REVISION=7c2883b7cca0d57db87eea82ed7e8dfefcbcceb2
 RUN git clone --depth 1 --branch "${HAB_VERSION}" https://github.com/balloob/home-assistant-build-cli.git /src \
     && test "$(git -C /src rev-parse HEAD)" = "${HAB_REVISION}"
 WORKDIR /src
@@ -114,11 +114,11 @@ ARG NODE_VERSION
 ARG ADDON_CHANNEL=stable
 ARG TTYD_VERSION=1.7.7
 # One pinned V2 runtime and its matching plugin API. No V1 runtime is installed.
-ARG OPENCODE_V2_VERSION=2.3.0
-ARG OPENCHAMBER_VERSION=2.7.2
-ARG TINFOIL_VERSION=1.2.1
+ARG OPENCODE_V2_VERSION=2.4.1
+ARG OPENCHAMBER_VERSION=2.8.0
+ARG TINFOIL_VERSION=1.4.0
 ARG TSX_VERSION=4.23.15
-ARG YQ_VERSION=v4.54.1
+ARG YQ_VERSION=v4.54.3
 ARG ZIGPORTER_VERSION=1.4.2
 
 # Environment for better Node.js performance
@@ -288,8 +288,8 @@ RUN cd /opt/ppq-private-runtime \
 # by its verify:versions script and the add-on runtime contract tests.
 RUN set -e; \
     (cd /opt/opencode-v2-homeassistant && npm ci --omit=dev --no-audit --no-fund) & V2_INSTALL_PID=$!; \
-    (cd /opt/ha-mcp-server && npm install --omit=dev --no-audit --no-fund) & MCP_INSTALL_PID=$!; \
-    (cd /opt/ha-lsp-server && npm install --omit=dev --no-audit --no-fund) & LSP_INSTALL_PID=$!; \
+    (cd /opt/ha-mcp-server && npm ci --omit=dev --no-audit --no-fund) & MCP_INSTALL_PID=$!; \
+    (cd /opt/ha-lsp-server && npm ci --omit=dev --no-audit --no-fund) & LSP_INSTALL_PID=$!; \
     wait "${V2_INSTALL_PID}"; \
     wait "${MCP_INSTALL_PID}"; \
     wait "${LSP_INSTALL_PID}" \
@@ -401,6 +401,8 @@ RUN --network=none --mount=type=bind,source=test/fixtures/opencode-v2-project-up
         /usr/local/libexec/opencode-v2
 
 RUN --network=none --mount=type=bind,source=test/hab-cli-fixture.mjs,target=/tmp/hab-cli-fixture.mjs,readonly \
+    --mount=type=bind,source=test/hab-guidance-contract.mjs,target=/tmp/hab-guidance-contract.mjs,readonly \
+    node /tmp/hab-guidance-contract.mjs && \
     timeout --signal=TERM --kill-after=10s 120s node /tmp/hab-cli-fixture.mjs
 
 RUN --network=none --mount=type=bind,source=test/v2-openchamber-browser.mjs,target=/tmp/v2-openchamber-browser.mjs,readonly \

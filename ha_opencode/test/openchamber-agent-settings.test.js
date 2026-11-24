@@ -12,13 +12,13 @@ import { AgentSettingsError } from '../rootfs/opt/opencode-v2-homeassistant/agen
 const require = createRequire(process.env.HA_EDITOR_TEST_DEPS ? resolve(process.env.HA_EDITOR_TEST_DEPS, 'package.json') : new URL('../rootfs/opt/ha-mcp-server/package.json', import.meta.url));
 const express = require('express');
 const { patchAgentSettings } = createRequire(import.meta.url)('../rootfs/opt/openchamber/patch-agent-settings.cjs');
-const relative = 'packages/web/server/lib/opencode/bootstrap-runtime.js';
+const relative = 'packages/web/server/lib/server-frame/bootstrap-runtime.ts';
 const source = `export const createBootstrapRuntime = () => {
-    registerAuthAndAccessRoutes(app, {
+    const { requireApiAuth } = registerAuthAndAccessRoutes(app, {
       normalizeTunnelSessionTtlMs,
     });
 
-    notificationEmitRoutes.registerApiRoute();
+    notificationEmitRoutes.registerApiRoute(requireApiAuth);
 
     registerTtsRoutes(app, { sayTTSCapability });
 };`;
@@ -34,7 +34,7 @@ test('source patch fails closed on missing/duplicate/reordered auth anchors and 
       assert.equal(await readFile(target, 'utf8'), input);
       patchAgentSettings(root);
       const updated = await readFile(target, 'utf8');
-      assert.ok(updated.indexOf('    registerAuthAndAccessRoutes') < updated.indexOf('    registerManagedAgentRoutes'));
+      assert.ok(updated.indexOf('    const { requireApiAuth } = registerAuthAndAccessRoutes') < updated.indexOf('    registerManagedAgentRoutes'));
       assert.ok(updated.indexOf('    registerManagedAgentRoutes') < updated.indexOf('    registerTtsRoutes'));
       await access(join(dirname(target), 'ha-agent-settings-routes.mjs'));
       assert.throws(() => patchAgentSettings(root));

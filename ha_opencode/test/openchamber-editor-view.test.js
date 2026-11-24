@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
-import { readFile, writeFile, mkdtemp, rm, copyFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm, copyFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,7 +13,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 test('real CodeMirror unsaved-draft diagnostics, completion and lifecycle', { skip: !process.env.HA_EDITOR_TEST_DEPS }, async (t) => {
   const root = process.env.HA_EDITOR_TEST_DEPS;
   const require = createRequire(join(root, 'package.json'));
-  const ts = require('typescript');
   const { JSDOM } = require('jsdom');
   const esm = (name) => import(pathToFileURL(join(dirname(require.resolve(name)), 'index.js')).href);
   const { EditorState, Compartment } = await esm('@codemirror/state');
@@ -21,8 +21,10 @@ test('real CodeMirror unsaved-draft diagnostics, completion and lifecycle', { sk
   const { startCompletion, closeCompletion, currentCompletions, acceptCompletion } = await esm('@codemirror/autocomplete');
   const generated = await mkdtemp(join(root, 'editor-test-'));
   t.after(() => rm(generated, { recursive: true, force: true }));
-  const source = await readFile(new URL('../rootfs/opt/openchamber/editor-lsp/editor.ts', import.meta.url), 'utf8');
-  await writeFile(join(generated, 'editor.mjs'), ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText);
+  // Use the installed compiler CLI; TypeScript 7 no longer exports transpileModule.
+  await copyFile(new URL('../rootfs/opt/openchamber/editor-lsp/editor.ts', import.meta.url), join(generated, 'editor.mts'));
+  execFileSync(process.execPath, [join(dirname(require.resolve('typescript/package.json')), 'bin/tsc'),
+    '--noCheck', '--module', 'esnext', '--target', 'ES2022', join(generated, 'editor.mts')]);
   await copyFile(new URL('../rootfs/opt/openchamber/editor-lsp/editor-core.mjs', import.meta.url), join(generated, 'editor-core.mjs'));
   const { createHaEditorLsp } = await import(pathToFileURL(join(generated, 'editor.mjs')).href);
   const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true, url: 'http://localhost/' });

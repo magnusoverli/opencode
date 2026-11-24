@@ -73,6 +73,58 @@ test("LAN options fail closed without logging values and allow a disabled legacy
   }
 });
 
+test("aliases are optional, bounded, canonical and scoped to the enabled frontend", async () => {
+  const { parseLanOptions } = await import(`${root}lan-config.js`);
+  const options = { enable_server: true, lan_password: password, lan_trusted_proxies: ["127.0.0.1"], server_public_url: origin };
+  const alias = "https://ALIAS.test:443/";
+  assert.deepEqual(parseLanOptions({ ...options, server_public_url_aliases: [alias] }).apiAliases, ["https://alias.test"]);
+  for (const values of [alias, [alias, "https://alias.test"], [origin], Array(8).fill(alias),
+    ["http://alias.test"], [null], ["https://*.test"], ["https://alias.test/path/.."], ["https://alias.test?"]]) {
+    assert.throws(() => parseLanOptions({ ...options, server_public_url_aliases: values }), /server_public_url_aliases/);
+  }
+  const direct = { ...options, server_public_url: "http://192.168.5.33:4096", server_direct_subnet: "192.168.5.0/24",
+    server_desktop_app: true, enable_openchamber_lan: true, interface_mode: "openchamber",
+    openchamber_public_url: origin, openchamber_public_url_aliases: [alias] };
+  assert.deepEqual(parseLanOptions(direct).uiAliases, ["https://alias.test"]);
+  assert.throws(() => parseLanOptions({ ...direct, server_public_url_aliases: [alias] }), /requires reverse-proxy/);
+});
+
+test("each HTTPS alias routes to its own authority without granting cross-origin credentials", async t => {
+  const alias = "https://tail.example.test:4097";
+  for (const mode of ["api", "ui"]) {
+    const { port, calls } = await fixture(t, { mode, aliases: [alias] });
+    for (const [here, other] of [[alias, origin], [origin, alias]]) {
+      const host = new URL(here).host;
+      const headers = { host, "x-forwarded-host": host, origin: here };
+      assert.equal((await request(port, { method: "POST", headers })).status, 200);
+      assert.equal(calls.at(-1).headers.host, host);
+      assert.equal(calls.at(-1).headers["x-forwarded-host"], host);
+      const before = calls.length;
+      for (const method of ["GET", "OPTIONS", "POST"]) {
+        const res = await request(port, { method, headers: { ...headers, origin: other, "access-control-request-method": "POST" } });
+        assert.equal(res.status, 403);
+        assert.equal(res.headers["access-control-allow-origin"], undefined);
+      }
+      assert.equal((await request(port, { headers: { ...headers, "x-forwarded-host": new URL(other).host } })).status, 403);
+      assert.equal(calls.length, before);
+    }
+    if (mode === "api") {
+      const atAlias = { host: new URL(alias).host, origin: alias };
+      const issued = await request(port, { path: "/api/pair", method: "POST", headers: atAlias });
+      const path = `/auth/connect/${JSON.parse(issued.text).code}`;
+      assert.equal((await request(port, { path })).status, 401); // wrong address cannot consume the code
+      const redeemed = await request(port, { path, headers: { ...atAlias, accept: "text/html" } });
+      assert.equal(redeemed.status, 303);
+      const cookie = redeemed.headers["set-cookie"][0].split(";")[0];
+      assert.match(cookie, /^opencode_session_4097=/);
+      assert.equal((await request(port, { headers: { ...atAlias, authorization: "", cookie } })).status, 200);
+      assert.equal((await request(port, { headers: { authorization: "", cookie: cookie.replace("_4097=", "=") } })).status, 401);
+      const cross = await request(port, { headers: { ...atAlias, origin: "https://client.example.test" } });
+      assert.equal(cross.headers["access-control-allow-origin"], "https://client.example.test");
+    }
+  }
+});
+
 test("startup preflight reports all invalid LAN prerequisites together without disclosing saved values", (t) => {
   const fs = require("node:fs");
   const path = require("node:path");

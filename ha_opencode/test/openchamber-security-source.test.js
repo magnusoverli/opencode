@@ -13,11 +13,11 @@ async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'ha-security-source-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const files = {
-    'package.json': JSON.stringify({ name: 'openchamber-monorepo', version: '2.7.2', overrides: {} }),
-    'packages/web/server/lib/git/service.js': [
-      "import { simpleGit } from 'simple-git';", 'const simpleGitEnvOptions = (env) => {',
+    'package.json': JSON.stringify({ name: 'openchamber-monorepo', version: '2.8.0', overrides: {} }),
+    'packages/web/server/lib/git/service.ts': [
+      "import { simpleGit } from 'simple-git';", 'const simpleGitEnvOptions = (env: NodeJS.ProcessEnv) => {',
       'return { allowEnvironment: Object.keys(env), unsafe };', '!isKeptOutOfGitOverlay(name)',
-      "env.GIT_OPTIONAL_LOCKS = '0';", '}).env(env);',
+      "env.GIT_OPTIONAL_LOCKS = '0';", 'return createSimpleGit(options).env(env);',
     ].join('\n'),
     [oauthTest]: [
       "  test('resolves a trusted enterprise host cli account id to a host-pinned octokit only after the instance is activated', async () => {",
@@ -56,7 +56,7 @@ test('security source patch preserves upstream fixture fixes and assertions', as
   assert.ok(oauth.includes('process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;'));
   assert.ok(oauth.includes('else process.env.PATH = previousPath;'));
   assert.ok(oauth.includes('expect(resolved).not.toBeNull()'));
-  assert.equal(await readFile(join(root, 'packages/web/server/lib/git/service.js'), 'utf8'), files['packages/web/server/lib/git/service.js']);
+  assert.equal(await readFile(join(root, 'packages/web/server/lib/git/service.ts'), 'utf8'), files['packages/web/server/lib/git/service.ts']);
 });
 
 for (const drifted of [gitTest, oauthTest]) {

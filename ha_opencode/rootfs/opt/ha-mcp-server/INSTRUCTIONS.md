@@ -226,7 +226,7 @@ Use these prompts for complex tasks:
 
 The `hab_run` MCP tool provides access to the full Home Assistant admin CLI. It wraps the `hab` (Home Assistant Builder) CLI as a native MCP tool.
 
-The app pins **hab 1.8.0**. Prefer `hab_run(args=[...])`: each argument stays literal,
+The app pins **hab 1.10.0**. Prefer `hab_run(args=[...])`: each argument stays literal,
 including JSON, templates, apostrophes and spaces. The legacy `command` string is
 also accepted; pass exactly one form. The gateway defaults to JSON and disables
 CLI update checks. Shell hab defaults to JSON when non-interactive, text otherwise.
@@ -324,6 +324,58 @@ for long builds/uploads/logs. JSON streams are NDJSON, not one final envelope.
 - **Use existing MCP tools** for: safe config writing, anomaly detection, entity diagnostics, firmware updates, history queries
 - **Use hab_run** for: dashboard management, area/floor/zone/person/category CRUD, helper creation, todo and notification management, integration control, repair issues, event firing, template rendering, backups, blueprints, search. Editor-managed automations/scripts/scenes use supported editor API commands; direct YAML uses `write_config_safe` or reviewed `patch_config_safe`. Check command help and supported payload/file options; do not improvise JSON quoting or switch paths merely because YAML needs a reload.
 
+### HAB task routing
+
+Use this map to pick a family, then ask the installed binary for **one** leaf
+schema. For example, for “how much CPU is my MQTT app using?”, discover the
+installed slug with `app list --search mqtt --brief`, then use `app stats <slug>`.
+No logs, options or restart are needed. For named app state/options use
+`supervisor_app_inspect`; for supported changes use `supervisor_app_preview` and
+the approved `supervisor_app_apply` path. Use `get_support_logs` for bounded
+redacted logs. Never use HAB to bypass a withheld value, blocked current-app
+change, expired preview, or missing permission. If a capability is absent,
+report it rather than substituting raw HTTP or shell HAB.
+
+| Task | HAB families | How to choose and verify |
+| --- | --- | --- |
+| Find the right resource | `overview`, `search`, `id`, `entity`, `device`, `area`, `floor`, `label`, `zone`, `person`, `category` | Start with a filtered read. Use `guide discovery` or `guide registry`; retain exact IDs and scopes. |
+| Edit HA behavior or UI | `automation`, `script`, `scene`, `blueprint`, `helper`, `dashboard`, `template`, `action`, `event` | Discover the supported editor operation. Rendering a template is different from calling an action or firing an event. For supported dashboard/helper reads prefer `hab_run_read_only`. |
+| Organize daily activity | `calendar`, `todo`, `notification` | Use `guide calendar-todo`; preserve the selected list/calendar and discovery window. |
+| Operate Supervisor apps | `app` | `guide apps`. Installed apps and the available store are different: `app list --available` browses the store. Use `stats` for usage and `logs` only when needed. `validate` checks an options object; `configure` writes it. Preserve unspecified options, preview the complete candidate, then verify the installed app's state. |
+| Maintain app sources and lifecycle | `app repository`, `app refresh`, `app security`, `app rebuild`; `marketplace` | Supervisor repositories/store are separate from Marketplace items. Refreshing the store does not install an app. Disabling protected mode, rebuilds, stop/restart and uninstall have different effects. Uninstall normally preserves configuration; `--remove-config` is separate data loss. |
+| Manage the host and connectivity | `host`, `network`, `mount` | Requires Supervisor; OS update/sync and data-disk operations require HAOS. Identify the interface, mount or disk first. IP/Wi-Fi changes, data-disk moves, power and OS operations can interrupt the only connection. Agree on recovery access, then reconnect and check the targeted state. |
+| Change instance settings | `system` | `system config get` reads current values, `detect` suggests defaults, `update` applies selected settings. A suggestion is not the current configuration. Verify the requested fields afterwards without echoing private location data. |
+| Manage identities | `user`, `application-credential` | HA user accounts, local login credentials and an integration's OAuth client are distinct. `application-credential config` discovers supported domains; **`list` includes client secrets**. Do not call it for routine discovery. Complete password/client-secret steps privately in the HA UI. |
+| Transfer or recover a backup | `backup` | List agents and identify the archive first. Upload takes an existing sidecar-readable file; download writes to a **new** file, not a chat attachment. Keep encryption unless decryption is explicitly required; never put a password in argv/chat. Verify the archive on the selected agent or the destination file. Transfer does not restore. |
+| Browse or manage media | `media` | Browse a parent or search first; use its returned media content ID. Resolving returns a playback URL, not playback. Upload/delete are local-media changes: verify by browsing the same parent. Treat resolved URLs as private. |
+| Configure integrations and resolve issues | `integration`, `repairs`, `diagnostics` | `guide management` covers multi-step forms. Start the appropriate config/options/subentry or repair flow; inspect its returned type, fields and flow ID before each next step. Hand browser authentication to the user. Verify the entry or repair after completion. Diagnostics and logs can include private data. |
+| Voice, energy, recorder and radios | `assist`, `energy`, `statistics`, `thread`, `esphome` | Distinguish Assist exposure from pipeline selection; query/validate before changing energy preferences or repairing statistics. Thread dataset details can contain network credentials. Prefer dedicated ESPHome tools for long builds, firmware and logs. |
+| Discover commands and capabilities | `guide`, `schema`, `capability`, `version`, `help` | `guide list` indexes workflows; use `capability probe` when installation support is unclear. |
+| Managed by the add-on | `auth`, `update` | The gateway blocks these families: the sidecar supplies credentials and HAB ships with the add-on. Skip upstream login and CLI self-update steps. |
+
+Three distinctions matter in practice:
+
+- **Apps:** `app validate` takes the options object itself. `app configure` takes
+  a settings object: omit top-level fields to preserve them, but supplied `options`
+  and `network` objects **replace** their existing values. App lifecycle plans
+  perform local checks, not Supervisor validation. A successful configure does
+  not automatically restart the app. `app get` may expose secret options.
+- **Host and storage:** `network configure` selects adapters for Core;
+  `network interfaces update` changes host IP/Wi-Fi settings. `mount update`
+  takes the existing name as an argument and the complete replacement settings
+  without `name`. `host os sync` imports from external media; it is not a status read.
+- **Accounts and backups:** creating a HA user does not create local login
+  credentials. For archive downloads select exactly one backup agent and an unused
+  destination path; uploads can target several agents. Verify each destination.
+
+For disruptive operations, inspect the leaf's confirmation and timeout behavior
+**before** planning. `--force` answers a CLI confirmation; it is not user approval.
+An app command may allow ten minutes while `hab_run` allows at most 120 seconds:
+if the gateway disconnects, check the app, job, archive or host state before any
+retry. Do not restart the OpenCode app to verify its configuration. Full HAB
+output is not a redaction boundary: keep passwords, Wi-Fi keys, Thread datasets
+and backup decryption material out of calls, previews, artifacts and chat.
+
 ### Common hab_run Commands
 
 ```
@@ -332,6 +384,26 @@ hab_run(args=["schema", "--index", "--search", "dashboard patch", "--limit", "10
 hab_run(args=["schema", "dashboard", "patch", "--compact"])
 hab_run(args=["schema", "dashboard", "card", "update"])
 hab_run(args=["guide", "dashboard"])
+
+# Supervisor apps: discover the installed slug, inspect the contract, validate before writing.
+hab_run(args=["guide", "apps"])
+hab_run(args=["app", "list", "--search", "mqtt", "--brief", "--limit", "5"])
+hab_run(args=["schema", "app", "validate"])
+hab_run(args=["app", "stats", "<installed-slug>"])
+hab_run(args=["app", "repository", "list"])
+
+# Management: inspect the relevant resource or schema only. These examples do not apply changes.
+hab_run(args=["guide", "management"])
+hab_run(args=["capability", "probe"])
+hab_run(args=["host", "os", "info"])
+hab_run(args=["schema", "network", "interfaces", "update"])
+hab_run(args=["schema", "mount", "create"])
+hab_run(args=["schema", "user", "update"])
+hab_run(args=["application-credential", "config"])
+hab_run(args=["backup", "agents"])
+hab_run(args=["schema", "backup", "download"])
+hab_run(args=["schema", "system", "config", "update"])
+hab_run(args=["media", "browse"])
 
 # Focused reads
 hab_run(args=["id", "list", "device"])

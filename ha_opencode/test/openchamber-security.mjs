@@ -42,7 +42,7 @@ test("updated Git runtime preserves local repository operations and rejects unsa
     assert.equal((await git.status()).isClean(), true);
     // Exercise the actual service's new read-only GIT_OPTIONAL_LOCKS control,
     // not just the dependency factory (which would miss a stale allowlist).
-    const { getStatus } = await import(pathToFileURL(join(source, "packages/web/server/lib/git/service.js")));
+    const { getStatus } = await import(pathToFileURL(join(source, "packages/web/build/server/lib/git/service.js")));
     assert.equal((await getStatus(root)).isClean, true);
     await writeFile(join(root, "file with spaces.txt"), "second\n");
     assert.match(await git.diff(), /\+second/);

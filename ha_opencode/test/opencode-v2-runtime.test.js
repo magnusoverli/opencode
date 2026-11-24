@@ -81,7 +81,8 @@ describe("real OpenCode V2 readiness probe", () => {
         timeout: 30_000,
       });
       assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout.trim(), /(?:^|\sv?)2\.3\.0$/);
+      const manifest = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8"));
+      assert.equal(result.stdout.trim().replace(/^opencode v?/, ""), manifest.dependencies["@opencode/cli"]);
       assert.doesNotMatch(result.stdout + result.stderr, new RegExp(SENTINEL));
       for (const [name, path] of Object.entries(v1Roots)) {
         assert.deepEqual(await readdir(path), [`${name}.sentinel`]);

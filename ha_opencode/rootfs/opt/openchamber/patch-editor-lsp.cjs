@@ -15,28 +15,33 @@ function patchEditorLsp(root, support = path.join(__dirname, 'editor-lsp')) {
     changes.push([target, source]);
   }
   stage('packages/ui/src/components/views/FilesView.tsx', [
-    ["import { runtimeFetch } from '@/lib/runtime-fetch';", "import { runtimeFetch } from '@/lib/runtime-fetch';\nimport { createHaEditorLsp } from '@/lib/ha-editor-lsp/editor';"],
-    ['    const language = staticLanguageExtension ?? dynamicLanguageExtension;',
-      '    if (canEdit) extensions.push(createHaEditorLsp(selectedFile.path, runtimeFetch));\n    const language = staticLanguageExtension ?? dynamicLanguageExtension;'],
-    ['}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension]);',
-      '}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension, canEdit, runtimeKey]);'],
+    ['useFileEditorExtensions({ editor,', 'useFileEditorExtensions({ canEdit: fileKinds.canEdit, editor,'],
   ]);
-  stage('packages/web/server/lib/opencode/bootstrap-runtime.js', [
-    ['export const createBootstrapRuntime = (dependencies) => {',
-      "import { registerEditorLspRoutes } from './ha-editor-lsp-routes.mjs';\n\nexport const createBootstrapRuntime = (dependencies) => {"],
+  stage('packages/ui/src/components/views/files/view/useFileEditorExtensions.tsx', [
+    ["import React from 'react';", "import React from 'react';\nimport { runtimeFetch } from '@/lib/runtime-fetch';\nimport { createHaEditorLsp } from '@/lib/ha-editor-lsp/editor';"],
+    ['function useFileEditorExtensions({ editor,', 'function useFileEditorExtensions({ canEdit, editor,'],
+    ["  editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewRef' | 'fileEditorKeymap'", "  canEdit: boolean;\n  editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewRef' | 'fileEditorKeymap'"],
+    ["'panelRoot' | 'root'>", "'panelRoot' | 'root' | 'runtimeKey'>"],
+    ['    const language = staticLanguageExtension ?? dynamicLanguageExtension;',
+      '    if (canEdit && selectedFile) extensions.push(createHaEditorLsp(selectedFile.path, runtimeFetch));\n    const language = staticLanguageExtension ?? dynamicLanguageExtension;'],
+    ['importLinksExtension, codeSelectionComment.extension]);', 'importLinksExtension, codeSelectionComment.extension, canEdit, scope.runtimeKey]);'],
+  ]);
+  stage('packages/web/server/lib/server-frame/bootstrap-runtime.ts', [
+    ['export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {',
+      "import { registerEditorLspRoutes } from './ha-editor-lsp-routes.mjs';\n\nexport const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {"],
     ['    registerTtsRoutes(app, { sayTTSCapability });',
       '    registerEditorLspRoutes(app, { express });\n\n    registerTtsRoutes(app, { sayTTSCapability });'],
   ]);
   // Assert the mount remains behind the existing auth registration.
-  const backend = changes[1][1];
-  if (backend.indexOf('    registerAuthAndAccessRoutes(app, {') < 0
-      || backend.indexOf('    registerAuthAndAccessRoutes(app, {') > backend.indexOf('    registerEditorLspRoutes(app, {')) {
+  const backend = changes[2][1];
+  if (backend.indexOf('const { requireApiAuth } = registerAuthAndAccessRoutes(app, {') < 0
+      || backend.indexOf('const { requireApiAuth } = registerAuthAndAccessRoutes(app, {') > backend.indexOf('    registerEditorLspRoutes(app, {')) {
     throw new Error('Editor LSP auth mount changed');
   }
   for (const file of ['editor.ts', 'editor-core.mjs', 'editor-core.d.mts']) {
     changes.push([path.join(root, 'packages/ui/src/lib/ha-editor-lsp', file), fs.readFileSync(path.join(support, file), 'utf8')]);
   }
-  changes.push([path.join(root, 'packages/web/server/lib/opencode/ha-editor-lsp-routes.mjs'), fs.readFileSync(path.join(support, 'routes.mjs'), 'utf8')]);
+  changes.push([path.join(root, 'packages/web/server/lib/server-frame/ha-editor-lsp-routes.mjs'), fs.readFileSync(path.join(support, 'routes.mjs'), 'utf8')]);
   for (const [target, content] of changes) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, content);

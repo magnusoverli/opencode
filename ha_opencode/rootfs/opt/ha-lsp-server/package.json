@@ -19,14 +19,14 @@
     "opencode"
   ],
   "devDependencies": {
-    "vitest": "^3.1.1"
+    "vitest": "^5.1.1"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "vscode-languageserver": "^9.0.1",
-    "vscode-languageserver-textdocument": "^1.0.15",
+    "vscode-languageserver": "^11.0.1",
+    "vscode-languageserver-textdocument": "^1.0.16",
     "yaml": "^2.9.1"
   },
   "author": "OpenCode App",

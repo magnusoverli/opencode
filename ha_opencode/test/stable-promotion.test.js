@@ -38,14 +38,15 @@ test("stable promotion aligns the native runtime and immutable UI pins", () => {
   const build = yaml("build.yaml");
   const pkg = JSON.parse(read("rootfs/opt/opencode-v2-homeassistant/package.json"));
   const lock = JSON.parse(read("rootfs/opt/opencode-v2-homeassistant/package-lock.json"));
-  assert.equal(build.args.OPENCODE_V2_VERSION, "2.3.0");
+  assert.equal(build.args.OPENCODE_V2_VERSION, "2.4.1");
   assert.equal(pkg.dependencies["@opencode/cli"], build.args.OPENCODE_V2_VERSION);
   assert.equal(pkg.dependencies["@opencode/plugin"], build.args.OPENCODE_V2_VERSION);
   assert.deepEqual(lock.packages[""].dependencies, pkg.dependencies);
   assert.equal(pkg.devDependencies["opencode-upgrade-previous"], "npm:@opencode/cli@2.0.26");
   assert.equal(pkg.devDependencies["opencode-stable-previous"], "npm:@opencode/cli@2.1.4");
-  assert.equal(build.args.OPENCHAMBER_VERSION, "2.7.2");
-  assert.equal(build.args.OPENCHAMBER_REVISION, "1a151518c95cc5ff3578bab593d2f96862ff3bb8");
+  assert.equal(pkg.devDependencies["opencode-353-previous"], "npm:@opencode/cli@2.3.0");
+  assert.equal(build.args.OPENCHAMBER_VERSION, "2.8.0");
+  assert.equal(build.args.OPENCHAMBER_REVISION, "30c70496a5ca0105e04e60a783964576973edc8f");
   const docker = read("Dockerfile");
   assert.ok(docker.includes(`ARG OPENCODE_V2_VERSION=${build.args.OPENCODE_V2_VERSION}`));
   assert.ok(docker.includes(`ARG OPENCHAMBER_VERSION=${build.args.OPENCHAMBER_VERSION}`));
@@ -63,7 +64,8 @@ test("stable promotion preserves the reviewed Zigporter compatibility overlay an
   assert.match(migration, /^V2_UPGRADE_SOURCES = .*"2\.0\.26"/m);
   assert.match(migration, /^V2_UPGRADE_SOURCES = .*"2\.1\.2"/m);
   assert.match(migration, /^V2_UPGRADE_SOURCES = .*"2\.1\.4"/m);
-  assert.match(migration, /^V2_UPGRADE_TARGET = "2\.3\.0"$/m);
+  assert.match(migration, /^V2_UPGRADE_SOURCES = .*"2\.3\.0"/m);
+  assert.match(migration, /^V2_UPGRADE_TARGET = "2\.4\.1"$/m);
   assert.match(migration, /restore_project_maintenance\(baseline, target\)/);
   assert.match(read("rootfs/opt/ha-mcp-server/index.js"), /withHabRegistryInvalidation/);
   assert.match(read("rootfs/etc/s6-overlay/s6-rc.d/init-opencode/run"), /agents-importer\.js "\$\{V2_CONFIG_TEMP\}"/);

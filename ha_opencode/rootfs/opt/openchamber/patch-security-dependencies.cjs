@@ -4,16 +4,16 @@ const root = process.argv[2];
 if (!root) throw new Error("Provide the pinned OpenChamber source directory");
 const file = path.join(root, "package.json");
 const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
-if (pkg.name !== "openchamber-monorepo" || pkg.version !== "2.7.2") {
+if (pkg.name !== "openchamber-monorepo" || pkg.version !== "2.8.0") {
   throw new Error("Review dependency overrides for this OpenChamber release");
 }
 // 2.5.3 implements Git 4's named import, own-key environment propagation and
 // project-variable filtering upstream. Do not apply the obsolete 2.5.0 service
 // rewrite over this policy. Fail closed if the reviewed implementation drifts.
-const gitSource = fs.readFileSync(path.join(root, "packages/web/server/lib/git/service.js"), "utf8");
-for (const anchor of ["import { simpleGit } from 'simple-git';", "const simpleGitEnvOptions = (env) => {",
+const gitSource = fs.readFileSync(path.join(root, "packages/web/server/lib/git/service.ts"), "utf8");
+for (const anchor of ["import { simpleGit } from 'simple-git';", "const simpleGitEnvOptions = (env: NodeJS.ProcessEnv) => {",
   "return { allowEnvironment: Object.keys(env), unsafe };", "!isKeptOutOfGitOverlay(name)",
-  "env.GIT_OPTIONAL_LOCKS = '0';", "}).env(env);"]) {
+  "env.GIT_OPTIONAL_LOCKS = '0';", "return createSimpleGit(options).env(env);"]) {
   if (gitSource.split(anchor).length !== 2) throw new Error("Review upstream Git 4 environment policy");
 }
 const overrides = JSON.parse(fs.readFileSync(path.join(__dirname, "security-overrides.json"), "utf8"));
@@ -21,7 +21,7 @@ for (const [name, version] of Object.entries(overrides)) {
   if (Object.hasOwn(pkg.overrides || {}, name)) throw new Error(`Upstream already overrides ${name}; review before replacing it`);
   pkg.overrides[name] = version;
 }
-// 2.7.2 supplies the previously patched fixture preconditions upstream.
+// 2.8.0 supplies the previously patched fixture preconditions upstream.
 // Verify them before writing dependency overrides; do not patch them twice.
 const testFile = path.join(root, "packages/web/server/lib/github/octokit.test.js");
 const testSource = fs.readFileSync(testFile, "utf8");

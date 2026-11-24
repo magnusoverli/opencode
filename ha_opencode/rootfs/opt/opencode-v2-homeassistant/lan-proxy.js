@@ -27,7 +27,7 @@ export const NATIVE_APP_ORIGINS = Object.freeze(["openchamber-ui://app", "capaci
 // Ordinary web pages cannot claim it; authentication is still required.
 export const OPENCODE_DESKTOP_ORIGINS = Object.freeze(["oc://renderer"]);
 
-export function createLanProxy({ mode, origin, proxies, corsOrigins = [], nativeApps = false, desktopApps = false, password, backendPassword, upstreamPort, directSubnet, tls }) {
+export function createLanProxy({ mode, origin, aliases = [], proxies, corsOrigins = [], nativeApps = false, desktopApps = false, password, backendPassword, upstreamPort, directSubnet, tls }) {
   if (!["api", "ui"].includes(mode)) throw new Error("Invalid LAN proxy mode");
   const publicUrl = new URL(origin);
   const direct = mode === "api" && Boolean(directSubnet);
@@ -35,6 +35,15 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
   const plainHttp = direct && publicUrl.protocol === "http:";
   if (!plainHttp && publicUrl.protocol !== "https:") throw new Error("Invalid LAN protocol");
   if (direct && (!clients || !desktopApps || (!plainHttp && (!tls?.cert || !tls?.key)))) throw new Error("Incomplete direct LAN settings");
+  if (direct && aliases.length) throw new Error("Direct LAN does not support aliases");
+  const byHost = new Map();
+  for (const address of [origin, ...aliases]) {
+    const url = new URL(address);
+    if (address !== url.origin || (!direct && url.protocol !== "https:") || byHost.has(url.host)) throw new Error("Invalid LAN origin");
+    byHost.set(url.host, url);
+    if (!url.port) byHost.set(`${url.host}:${plainHttp ? 80 : 443}`, url);
+  }
+  const destination = Symbol("validated LAN destination");
   const trusted = new BlockList();
   for (const value of proxies) {
     const ip = normalizeIp(value);
@@ -43,7 +52,9 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
   const nativeApp = mode === "ui" && nativeApps === true;
   const nativeOrigins = new Set(nativeApp ? NATIVE_APP_ORIGINS : []);
   const desktopOrigins = mode === "api" && desktopApps === true ? OPENCODE_DESKTOP_ORIGINS : [];
-  const allowedOrigins = new Set([origin, ...(mode === "api" ? corsOrigins : []), ...desktopOrigins, ...nativeOrigins]);
+  // Aliases are destinations, not cross-origin browser permissions.
+  const clientOrigins = new Set([...(mode === "api" ? corsOrigins : []), ...desktopOrigins, ...nativeOrigins]);
+  const allowsOrigin = req => req[destination] && (req.headers.origin === req[destination].origin || clientOrigins.has(req.headers.origin));
   const lanAuthorization = hash(`Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`);
   const upstreamAuthorization = mode === "api" ? `Basic ${Buffer.from(`opencode:${backendPassword}`).toString("base64")}` : null;
   const sockets = new Set();
@@ -52,34 +63,37 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
   const requestPath = Symbol("lanPath");
   const administrator = Symbol("lanAdministrator");
   const device = Symbol("lanDevice");
-  const cookieName = publicUrl.port ? `opencode_session_${publicUrl.port}` : "opencode_session";
+  const cookieName = url => url.port ? `opencode_session_${url.port}` : "opencode_session";
   const pairing = mode === "api" ? createLanPairing({ onRevoke(id) {
     for (const [socket, ids] of deviceSockets) if (ids.has(id)) socket.destroy();
   } }) : null;
 
   function authorize(req, upgrade) {
     const remote = normalizeIp(req.socket.remoteAddress);
-    if (req.headers.host?.toLowerCase() !== publicUrl.host) return 403;
+    const matched = byHost.get(req.headers.host?.toLowerCase());
+    if (!matched || req.headersDistinct.host?.length !== 1) return 403;
     if (direct) {
       if ((!plainHttp && !req.socket.encrypted) || isIP(remote) !== 4 || !clients.check(remote, "ipv4")) return 403;
       if (Object.keys(req.headers).some(name => name === "forwarded" || name.startsWith("x-forwarded-"))) return 403;
     } else {
       if (!isIP(remote) || !trusted.check(remote, isIP(remote) === 6 ? "ipv6" : "ipv4")) return 403;
       if (req.headers["x-forwarded-proto"] !== "https") return 403;
-      if (req.headers["x-forwarded-host"] && req.headers["x-forwarded-host"].toLowerCase() !== publicUrl.host) return 403;
+      const forwardedHost = req.headers["x-forwarded-host"];
+      if (forwardedHost !== undefined && byHost.get(forwardedHost.toLowerCase()) !== matched) return 403;
       // Use a single overwritten client IP, never an untrusted forwarding chain.
       if (typeof req.headers["x-forwarded-for"] !== "string" || !isIP(req.headers["x-forwarded-for"])) return 403;
     }
+    req[destination] = matched;
     const originHeader = req.headers.origin;
-    if (originHeader !== undefined && !allowedOrigins.has(originHeader)) return 403;
-    if (mode === "ui" && (upgrade || !["GET", "HEAD", "OPTIONS"].includes(req.method)) && originHeader !== origin
+    if (originHeader !== undefined && !allowsOrigin(req)) return 403;
+    if (mode === "ui" && (upgrade || !["GET", "HEAD", "OPTIONS"].includes(req.method)) && originHeader !== matched.origin
       // The desktop shell logs in without Origin; its renderer uses a packaged
       // origin. OpenChamber still authenticates the password/cookie/client token.
       && !(nativeApp && (originHeader === undefined || nativeOrigins.has(originHeader)))) return 403;
     let path;
     try {
       if (!req.url.startsWith("/") || req.url.startsWith("//") || /[\\\x00-\x20]/.test(req.url)) return 400;
-      path = decodeURIComponent(new URL(req.url, origin).pathname);
+      path = decodeURIComponent(new URL(req.url, matched.origin).pathname);
       if (path.includes("%") || path.includes("\\")) return 400;
     } catch { return 400; }
     req[requestPath] = path;
@@ -97,9 +111,10 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
         let id = decoded.startsWith("opencode:") ? pairing.authenticate(decoded.slice(9)) : null;
         if (!id) {
           const cookies = String(req.headers.cookie ?? "").split(";").map(value => value.trim());
-          const matches = cookies.filter(value => value.startsWith(`${cookieName}=`));
-          if (matches.length === 1) id = pairing.authenticate(matches[0].slice(cookieName.length + 1));
-          if (id && (upgrade || !["GET", "HEAD"].includes(req.method)) && originHeader !== origin) return 403;
+          const name = cookieName(matched);
+          const matches = cookies.filter(value => value.startsWith(`${name}=`));
+          if (matches.length === 1) id = pairing.authenticate(matches[0].slice(name.length + 1), matched.origin);
+          if (id && (upgrade || !["GET", "HEAD"].includes(req.method)) && originHeader !== matched.origin) return 403;
         }
         if (!id) return 401;
         req[device] = id;
@@ -116,7 +131,7 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
   }
 
   function cors(req) {
-    return mode === "api" && allowedOrigins.has(req.headers.origin) ? {
+    return mode === "api" && allowsOrigin(req) ? {
       "access-control-allow-origin": req.headers.origin,
       "access-control-allow-credentials": "true",
       "access-control-allow-methods": "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS",
@@ -127,8 +142,8 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
 
   function headers(req, upgrade = false) {
     const result = cleanHeaders(req.headers, upgrade);
-    result.host = publicUrl.host;
-    result["x-forwarded-host"] = publicUrl.host;
+    result.host = req[destination].host;
+    result["x-forwarded-host"] = req[destination].host;
     result["x-forwarded-proto"] = plainHttp ? "http" : "https";
     result["x-forwarded-for"] = direct ? normalizeIp(req.socket.remoteAddress) : req.headers["x-forwarded-for"];
     if (mode === "api") {
@@ -173,16 +188,16 @@ export function createLanProxy({ mode, origin, proxies, corsOrigins = [], native
       };
       if (path === "/api/pair") {
         if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
-        const code = pairing.issue();
+        const code = pairing.issue(req[destination].origin);
         return json(code ? 200 : 429, code ?? { error: "pairing_capacity_reached" });
       }
       if (path.startsWith("/auth/connect/")) {
-        const result = pairing.consume(path.slice("/auth/connect/".length));
+        const result = pairing.consume(path.slice("/auth/connect/".length), req[destination].origin);
         if (!result) return json(401, { error: "pairing_expired_or_used" });
         if (req.headers.accept?.includes("text/html")) {
           req.resume();
           res.writeHead(303, { location: "/api/info", "cache-control": "no-store", "referrer-policy": "no-referrer",
-            "set-cookie": `${cookieName}=${result.token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000` });
+             "set-cookie": `${cookieName(req[destination])}=${result.token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000` });
           return res.end();
         }
         return json(200, { token: result.token });

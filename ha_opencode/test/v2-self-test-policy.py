@@ -16,7 +16,7 @@ ADDON = Path(__file__).resolve().parents[1]
 with patch.dict(sys.modules, {"resource": types.ModuleType("resource")} if os.name == "nt" else {}):
     POLICY = runpy.run_path(str(ADDON / "rootfs/usr/local/bin/opencode-v2-self-test"))
 EXERCISE = POLICY["exercise_policy"]
-VERSION = "2.3.0"
+VERSION = "2.4.1"
 AGENT = POLICY["READ_ONLY_AGENT"]
 
 

@@ -5,20 +5,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 const { patchEditorLsp } = createRequire(import.meta.url)('../rootfs/opt/openchamber/patch-editor-lsp.cjs');
-const front = 'packages/ui/src/components/views/FilesView.tsx';
-const back = 'packages/web/server/lib/opencode/bootstrap-runtime.js';
-const frontend = `import { runtimeFetch } from '@/lib/runtime-fetch';
+const view = 'packages/ui/src/components/views/FilesView.tsx';
+const front = 'packages/ui/src/components/views/files/view/useFileEditorExtensions.tsx';
+const back = 'packages/web/server/lib/server-frame/bootstrap-runtime.ts';
+const frontend = `import React from 'react';
+function useFileEditorExtensions({ editor,
+  editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewRef' | 'fileEditorKeymap'
+  scope: Pick<ReturnType<typeof useFileScope>, 'currentDirectory' | 'panelRoot' | 'root'>
     const language = staticLanguageExtension ?? dynamicLanguageExtension;
-}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension]);`;
-const backend = `export const createBootstrapRuntime = (dependencies) => {
-    registerAuthAndAccessRoutes(app, {
+}, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension, codeSelectionComment.extension]);`;
+const backend = `export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
+    const { requireApiAuth } = registerAuthAndAccessRoutes(app, {
     });
     registerTtsRoutes(app, { sayTTSCapability });
 };`;
 async function fixture(t, files = {}) {
   const root = await mkdtemp(join(tmpdir(), 'editor-source-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const [path, text] of Object.entries({ [front]: frontend, [back]: backend, ...files })) {
+  for (const [path, text] of Object.entries({ [view]: "useFileEditorExtensions({ editor,", [front]: frontend, [back]: backend, ...files })) {
     await mkdir(join(root, path, '..'), { recursive: true });
     await writeFile(join(root, path), text);
   }
@@ -30,10 +34,10 @@ test('source patch installs both editor views through shared extensions and moun
   patchEditorLsp(root);
   const ui = await readFile(join(root, front), 'utf8');
   const server = await readFile(join(root, back), 'utf8');
-  assert.match(ui, /if \(canEdit\) extensions.push\(createHaEditorLsp\(selectedFile.path, runtimeFetch\)\)/);
-  assert.match(ui, /fileEditorKeymap, t, importLinksExtension, canEdit, runtimeKey\]/);
-  assert.ok(server.indexOf('    registerAuthAndAccessRoutes') < server.indexOf('    registerEditorLspRoutes'));
-  const routes = await readFile(join(root, 'packages/web/server/lib/opencode/ha-editor-lsp-routes.mjs'), 'utf8');
+  assert.match(ui, /if \(canEdit && selectedFile\) extensions.push\(createHaEditorLsp\(selectedFile.path, runtimeFetch\)\)/);
+  assert.match(ui, /fileEditorKeymap, t, importLinksExtension, codeSelectionComment.extension, canEdit, scope.runtimeKey\]/);
+  assert.ok(server.indexOf('    const { requireApiAuth } = registerAuthAndAccessRoutes') < server.indexOf('    registerEditorLspRoutes'));
+  const routes = await readFile(join(root, 'packages/web/server/lib/server-frame/ha-editor-lsp-routes.mjs'), 'utf8');
   assert.match(routes, /loadClient = \(\) => import\("\/opt\/opencode-v2-homeassistant\/lsp-client.js"\)/);
   assert.doesNotMatch(routes, /@opencode\/plugin/);
   for (const file of ['editor.ts', 'editor-core.mjs', 'editor-core.d.mts']) await access(join(root, 'packages/ui/src/lib/ha-editor-lsp', file));

@@ -87,7 +87,7 @@ describe(`${CHANNEL} runtime pin`, () => {
   });
 
   it("copies one exact supported Node runtime into the Home Assistant base", () => {
-    assert.match(dockerfileNodePin, /^24\.\d+\.\d+$/);
+    assert.match(dockerfileNodePin, /^26\.\d+\.\d+$/);
     assert.equal(buildYamlNodePin, dockerfileNodePin);
     assert.match(dockerfile, /FROM node:\$\{NODE_VERSION\}-trixie-slim AS node-runtime/);
     assert.match(dockerfile, /test "\$\(node --version\)" = "v\$\{NODE_VERSION\}"/);
