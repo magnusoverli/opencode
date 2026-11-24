@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.5.4b3
 
 - Update the OpenCode CLI and plugin to **2.4.1**. Installations on 2.4.0 upgrade using the existing copy-on-write history validation.
 
