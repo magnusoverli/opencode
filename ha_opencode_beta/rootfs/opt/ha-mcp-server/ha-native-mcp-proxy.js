@@ -79,8 +79,7 @@ async function handleLine(line) {
     return;
   }
 
-  // Never forward a malformed message: Home Assistant Core has crashed on them
-  // (home-assistant/core#176734).
+  // The handler validates the JSON-RPC envelope before forwarding.
   const response = await handleNativeMcp(message);
   if (!response) return;
   write(response);

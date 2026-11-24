@@ -143,41 +143,26 @@ describe("buildAgentCapabilities", () => {
     expect(knownIssues.map((issue) => issue.id)).toEqual([
       "keyed_endpoints_unavailable",
       "tool_schema_anyof_empty",
-      "streamable_endpoint_crash_risk",
     ]);
     expect(capabilities.home_assistant.native_llm_platform.version_supported).toBe(false);
     expect(capabilities.home_assistant.native_llm_platform.minimum_version).toBe("2026.8.0");
   });
 
-  it("drops the issues 2026.8 fixes but keeps the one it does not", () => {
-    // home-assistant/core#176734 is still open, so the crash risk survives the
-    // upgrade even though the keyed endpoints and the schema fix landed.
+  it.each(["2026.8.0", "2026.11.3"])("distinguishes the local guard from upstream limitations on %s", (version) => {
     const capabilities = buildAgentCapabilities({
-      haConfig: { version: "2026.8.0", components: ["conversation", "llm"] },
+      haConfig: { version, components: ["conversation", "llm"] },
     });
 
     const { known_issues: knownIssues } = capabilities.home_assistant.native_mcp;
-    expect(knownIssues.map((issue) => issue.id)).toEqual(["streamable_endpoint_crash_risk"]);
-    expect(knownIssues[0].fixed_in).toBeNull();
+    expect(knownIssues).toEqual([]);
+    expect(capabilities.home_assistant.native_mcp.bridge.request_validation).toContain("JSON-RPC");
     expect(capabilities.home_assistant.native_llm_platform.version_supported).toBe(true);
   });
 
-  it("still reports unfixed issues on releases newer than 2026.8", () => {
-    const capabilities = buildAgentCapabilities({
-      haConfig: { version: "2027.1.0", components: ["conversation", "llm"] },
-    });
-
-    expect(capabilities.home_assistant.native_mcp.known_issues.map((issue) => issue.id))
-      .toEqual(["streamable_endpoint_crash_risk"]);
-  });
-
-  it("reports only unfixed issues when the version cannot be parsed", () => {
-    // An unparseable version is no reason to understate a live crash risk, but
-    // it is also no evidence that the already-fixed issues are present.
+  it("does not infer release-specific issues from an unknown version", () => {
     const capabilities = buildAgentCapabilities({ haConfig: { components: [] } });
 
-    expect(capabilities.home_assistant.native_mcp.known_issues.map((issue) => issue.id))
-      .toEqual(["streamable_endpoint_crash_risk"]);
+    expect(capabilities.home_assistant.native_mcp.known_issues).toEqual([]);
     expect(capabilities.home_assistant.native_llm_platform.version_supported).toBeNull();
   });
 

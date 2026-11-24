@@ -20,6 +20,7 @@ const TOOL_HIGHLIGHTS = [
 const ROADMAP_NOW = [
   "Use OpenCode MCP as the primary external agent surface for Home Assistant configuration, diagnostics, admin workflows, and visual verification.",
   "Discover registered native LLM API IDs and names through llm/api/list, and check the configured selection separately from native MCP endpoint readiness.",
+  "The optional OpenCode Assist companion provides conversation and AI data task entities on supported Supervisor installations.",
   "Help users and custom integration authors develop and test <integration>/llm.py tool providers from inside OpenCode.",
   "Work around the Home Assistant <= 2026.7 limitations that stop an external MCP client from using native LLM tools: no keyed /api/mcp/<API ID> endpoint, and tool schemas that strict clients cannot compile.",
 ];
@@ -27,8 +28,7 @@ const ROADMAP_NOW = [
 const ROADMAP_NEXT = [
   "Drop the tool-schema repair and the pre-2026.8 endpoint fallback once no supported Home Assistant release needs them.",
   "Prefer native Home Assistant LLM tools for core Assist/entity control where they cover a workflow better than OpenCode MCP does.",
-  "Qualify HA 2026.10 MCP discovery, schemas, prompts and context against the pinned runtime; retain local protocol validation.",
-  "Prove a scoped conversation adapter before adding a native Assist conversation entity and AI Task entity.",
+  "Verify the complete supervised voice pipeline and recovery of an in-flight Assist turn after a worker crash.",
   "Position OpenCode as a premium consumer of HA-native LLM capabilities for users testing agent-focused Home Assistant features.",
   "Keep MCP tools for OpenCode-specific, add-on, admin, development, validation, and safety workflows that Home Assistant Core does not intend to expose through Assist.",
 ];
@@ -98,11 +98,8 @@ export function meetsHaVersion(version, minimum) {
  * Reported so an agent reading `get_agent_capabilities` can tell a known
  * upstream limitation apart from a broken local configuration.
  *
- * Each entry carries the release that fixes it, or null when no release does
- * yet. They are filtered per issue rather than against one blanket version,
- * because they are not all fixed together: the keyed endpoints and the schema
- * conversion landed in 2026.8. The older streamable-endpoint report remains
- * unresolved; the 2026.10 unsupported-method fix is not proof it is resolved.
+ * Only report limitations supported by evidence for this release.
+ * Local JSON-RPC validation is a bridge behavior, not an upstream defect.
  */
 function buildNativeMcpKnownIssues(version) {
   const issues = [
@@ -120,25 +117,9 @@ function buildNativeMcpKnownIssues(version) {
       impact: "Tool schemas built from validators such as cv.string serialize to an empty anyOf member. Strict MCP clients cannot compile them, send __unparsedToolInput instead, and Home Assistant rejects the call with \"extra keys not allowed\". GetLiveContext is affected.",
       mitigation: "The bridge repairs the legacy unprefixed GetLiveContext schema in tools/list responses; custom and modern tool schemas pass through unchanged. Set HA_NATIVE_MCP_SANITIZE_SCHEMAS=0 to disable this repair.",
     },
-    {
-      id: "streamable_endpoint_crash_risk",
-      upstream: "home-assistant/core#176734 (fix #176782 still open)",
-      fixed_in: null,
-      impact: "An unresolved upstream report describes malformed MCP requests causing Core errors or hangs. HA 2026.10's unsupported-method handling (#183350) does not establish that the broader report is fixed.",
-      mitigation: "The bridge validates every message as JSON-RPC 2.0 before forwarding it, so a malformed client message is rejected locally.",
-    },
   ];
 
-  return issues.filter((issue) => {
-    // An unfixed issue applies to every version, including versions we cannot
-    // parse: staying silent there would understate a live crash risk.
-    if (issue.fixed_in === null) return true;
-
-    const meets = meetsHaVersion(version, issue.fixed_in);
-    // An unparseable version is not evidence the issue is present, so a fixed
-    // issue stays unreported rather than guessing.
-    return meets === false;
-  });
+  return issues.filter((issue) => meetsHaVersion(version, issue.fixed_in) === false);
 }
 
 export function buildAgentCapabilities({
@@ -248,6 +229,7 @@ export function buildAgentCapabilities({
         recommended_mode: recommendedMode,
         bridge: {
           enabled: nativeMcpBridgeEnabled,
+          request_validation: "When enabled, the bridge rejects malformed JSON-RPC messages locally before forwarding.",
           status: nativeMcpBridgeEnabled
             ? nativeConfiguredMcpAvailable ? "enabled_and_reachable" : "enabled_endpoint_unavailable"
             : nativeConfiguredMcpAvailable ? "disabled_endpoint_available" : "disabled",

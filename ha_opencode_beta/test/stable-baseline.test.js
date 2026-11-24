@@ -2,6 +2,7 @@
 // substitutions are permitted; new feature differences need explicit review.
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
+const { createHash } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 const { test } = require("node:test");
@@ -10,6 +11,13 @@ const repo = resolve(__dirname, "../..");
 const beta = file => readFileSync(join(repo, "ha_opencode_beta", file), "utf8").replace(/\r\n/g, "\n");
 const stable = file => readFileSync(join(repo, "ha_opencode", file), "utf8").replace(/\r\n/g, "\n");
 const patternChannel = source => source.replace("/main/ha_opencode/rootfs/", "/main/ha_opencode_beta/rootfs/");
+// Reviewed #45 reporting delta. Pin both sides until the next stable promotion.
+const reportingDelta = new Map(Object.entries({
+  "ha-native-mcp-proxy.js": ["5ba01a5c0c78c7b9c5a05bfca15698ecc57ca3b126bd0d6d505151ded3d18f51", "5dee586d95a3b31c187c054cdb0c261b2ade4f9da56c9dd0eb625bdd20ef6db9"],
+  "lib/agent-capabilities.js": ["d6953e68b0aa457924e3351b21fea519422c073386937103e6531ab6a9b8ae83", "e88697a86dc443c52eb630dc1751ebdd0ba6b310f42a8d0522a2f24618aec41f"],
+  "lib/ha-native-mcp.js": ["fd1b402f2901bf4c102eda05e051cf5d5b13cfeac9dcc79592551209f5a8d959", "dc3dfec45a39d183f56b30d463d158de186cf59eb3ebd2f08285a2f200e2bb59"],
+  "test/agent-capabilities.test.js": ["c2112f42136a9aa9026cc22ab777298cb131692fec4469d1fe871022b58cb0f4", "3899c24a9d11368140c5217f5158e42841be828611b22492287ad4701481006b"],
+}).map(([file, hashes]) => [`rootfs/opt/ha-mcp-server/${file}`, hashes]));
 const reviewed = new Map([
   ["rootfs/etc/s6-overlay/s6-rc.d/ha-opencode-v2-mcp-sidecar/run", source => source
     .replace("ADDON_CHANNEL=stable", "ADDON_CHANNEL=beta")
@@ -30,6 +38,11 @@ test("beta carries every shared stable runtime/build file except reviewed diverg
   for (const file of files) {
     const relative = file.slice("ha_opencode/".length);
     const current = beta(relative); // Missing files fail, even for reviewed paths.
+    if (reportingDelta.has(relative)) {
+      assert.deepEqual([stable(relative), current].map(text => createHash("sha256").update(text).digest("hex")),
+        reportingDelta.get(relative), `Review the #45 changes in ${relative}`);
+      continue;
+    }
     const expected = reviewed.has(relative) ? reviewed.get(relative)(stable(relative)) : stable(relative);
     assert.equal(current, expected, `Unreviewed stable/beta divergence: ${relative}`);
   }

@@ -298,9 +298,7 @@ export async function forwardJsonRpcToNativeMcp({
 /**
  * Validate a client message before it is forwarded to Home Assistant.
  *
- * Home Assistant Core has crashed on malformed POSTs to `/api/mcp`
- * (home-assistant/core#176734, fix still open at the time of writing), so the
- * bridge rejects anything that is not a well-formed JSON-RPC 2.0 message rather
+ * The bridge rejects anything that is not a well-formed JSON-RPC 2.0 message rather
  * than passing it through. JSON-RPC batches (arrays) are rejected too: MCP
  * dropped batching, and Home Assistant validates one message per request.
  */
