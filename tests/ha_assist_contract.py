@@ -19,6 +19,7 @@ from homeassistant import loader
 from homeassistant.components import conversation, ai_task, persistent_notification
 from aiohasupervisor.models import Discovery
 from homeassistant.config_entries import ConfigEntries, ConfigSubentry, ConfigEntryState, FlowType
+from homeassistant.const import MAJOR_VERSION, MINOR_VERSION, __version__ as core_version
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er, llm
@@ -34,6 +35,14 @@ from custom_components.opencode_assist.entity import history_payload
 from custom_components.opencode_assist import async_setup_entry, async_unload_entry, async_remove_entry
 from custom_components.opencode_assist.diagnostics import async_get_config_entry_diagnostics
 from custom_components.opencode_assist.supervisor import AppDiscovery, async_discover_apps
+
+
+if core_version != os.environ["HA_ASSIST_TEST_VERSION"]:
+    raise RuntimeError(f"Expected Core {os.environ['HA_ASSIST_TEST_VERSION']}, running {core_version}")
+
+requires_november = unittest.skipUnless(
+    (MAJOR_VERSION, MINOR_VERSION) >= (2026, 11), "requires Core 2026.11 or newer"
+)
 
 
 class FixtureTool(llm.Tool):
@@ -56,7 +65,7 @@ class FixtureAPI(llm.API):
 
 
 class ContractTests(unittest.IsolatedAsyncioTestCase):
-    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    @requires_november
     async def test_november_cached_tools_keep_current_caller_context(self):
         entity = self.entity()
         log, calls = self.log(tools=True)
@@ -83,7 +92,7 @@ class ContractTests(unittest.IsolatedAsyncioTestCase):
         await entity.async_run_chat(log)
         self.assertIs(calls[0][1].context, second.context)
 
-    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    @requires_november
     async def test_november_admin_api_refuses_nonadmin_before_tools(self):
         entity = self.entity()
         entity.subentry = ConfigSubentry(data=MappingProxyType({"model": "fixture/coding", "llm_hass_api": ["fixture-admin"]}),
@@ -102,7 +111,7 @@ class ContractTests(unittest.IsolatedAsyncioTestCase):
             instance.assert_not_awaited()
             run_chat.assert_not_awaited()
 
-    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    @requires_november
     async def test_november_merged_tool_names_roundtrip_through_companion(self):
         entity = self.entity()
         log, first_calls = self.log(tools=True)
@@ -129,7 +138,7 @@ class ContractTests(unittest.IsolatedAsyncioTestCase):
         result = next(message for message in messages if message["role"] == "tool")
         self.assertEqual(result["content"][0]["name"], "second__FixtureRead")
 
-    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    @requires_november
     async def test_november_native_mcp_readonly_filters_listing_and_dispatch(self):
         from homeassistant.components.mcp_server.server import async_get_api_instance
         log, calls = self.log(tools=True)
@@ -149,7 +158,7 @@ class ContractTests(unittest.IsolatedAsyncioTestCase):
             await configured.async_call_tool(llm.ToolInput(id="blocked", tool_name="FixtureWrite", tool_args={"name": "Fixture"}))
         self.assertEqual(calls, [])
 
-    @unittest.skipUnless(os.environ.get("HA_ASSIST_TEST_VERSION") == "2026.11.1", "HA November contract")
+    @requires_november
     async def test_november_failed_turn_retained_and_parallel_turn_rejected(self):
         from homeassistant.components.conversation.chat_log import async_get_chat_log, ConversationBusyError
         entity = self.entity()
@@ -348,6 +357,40 @@ class ContractTests(unittest.IsolatedAsyncioTestCase):
                 await client.info()
             with self.assertRaises(AssistAuthError):
                 await bootstrap.onboard("a" * 43)
+
+
+class McpRediscoveryContract(unittest.IsolatedAsyncioTestCase):
+    async def test_unchanged_announcement_after_app_restart(self):
+        from homeassistant.components.mcp.config_flow import ModelContextProtocolConfigFlow
+
+        with tempfile.TemporaryDirectory() as temp:
+            hass = HomeAssistant(temp)
+            try:
+                entries = hass.config_entries = ConfigEntries(hass, {})
+                await entries.async_initialize()
+                # Supervisor 2026.11.0 forwards the first unchanged message after
+                # app restart. Core stays running with the same entry manager.
+                message = HassioServiceInfo(config={"url": "http://fixture:8766/mcp"},
+                    slug="fixture", name="OpenCode", uuid="f" * 32)
+                async def announce():
+                    return await entries.flow.async_init("mcp", context={"source": "hassio"}, data=message)
+
+                with patch("homeassistant.config_entries._async_get_flow_handler", return_value=ModelContextProtocolConfigFlow), \
+                     patch("homeassistant.config_entries._support_single_config_entry_only", return_value=False), \
+                     patch("homeassistant.components.mcp.config_flow.validate_input", new=AsyncMock(return_value={"title": "OpenCode"})), \
+                     patch.object(entries, "async_setup", new=AsyncMock(return_value=True)):
+                    form = await announce()
+                    self.assertEqual(form["step_id"], "hassio_confirm")
+                    self.assertEqual(entries.async_entries("mcp"), [])
+                    created = await entries.flow.async_configure(form["flow_id"], {})
+                    self.assertEqual(created["type"], "create_entry")
+                    existing = created["result"]
+                    again = await announce()
+                    self.assertEqual((again["type"], again["reason"]), ("abort", "already_configured"))
+                    self.assertEqual(entries.async_entries("mcp"), [existing])
+                    self.assertEqual(existing.unique_id, message.uuid)
+            finally:
+                await hass.async_stop()
 
 
 class OnboardingContracts(unittest.IsolatedAsyncioTestCase):

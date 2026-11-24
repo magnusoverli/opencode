@@ -40,7 +40,7 @@ try {
     coreHost: "127.0.0.1", corePort: 0, ipcPort: 0 });
   // Host networking reaches only this fixture's loopback listener. No real HA
   // config, secrets or provider credentials are mounted into the test container.
-  const versions = channel === "beta" ? ["2026.10.0b0", "2026.11.1"] : ["2026.10.0b0"];
+  const versions = ["2026.10.0b0", "2026.11.3"];
   for (const version of versions) {
     console.log(`Testing ${channel} companion against HA ${version}`);
     const child = spawn("docker", ["run", "--rm", "--network", "host", "--entrypoint", "python",

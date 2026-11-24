@@ -963,7 +963,7 @@ The bridge adapts itself to what your Home Assistant actually serves:
 
 - **Endpoint policy.** `home_assistant` uses only `/api/mcp`. Newly selected Assist/custom APIs use only their keyed endpoint and never fall back to a broader catalogue. A preserved legacy custom API can retain its old fallback when keyed endpoints are not served, logging the reason and periodically retrying the keyed endpoint. Unknown API errors are surfaced, not replaced. Use **Native tool selection**, not a new endpoint-mode environment override.
 - **Tool schema repair.** Before Home Assistant 2026.8, `GetLiveContext` used a schema that strict MCP clients could not compile, leading to `extra keys not allowed @ data['__unparsedToolInput']` ([home-assistant/core#176762](https://github.com/home-assistant/core/issues/176762), fixed by [#176814](https://github.com/home-assistant/core/pull/176814)). The bridge repairs that legacy unprefixed tool only. Modern and custom schemas, including required parameters and intentionally unconstrained unions, pass through unchanged. Set `HA_NATIVE_MCP_SANITIZE_SCHEMAS` to `0` to disable the repair.
-- **Malformed-message guard.** Every message is validated as JSON-RPC 2.0 before it is forwarded, because malformed POSTs to `/api/mcp` have been reported to crash Home Assistant Core ([home-assistant/core#176734](https://github.com/home-assistant/core/issues/176734)). This one is **not fixed in 2026.8** — the upstream fix is still open — so the guard applies on every version.
+- **Malformed-message guard.** The bridge validates JSON-RPC 2.0 messages locally on every Core version. [Core #176734](https://github.com/home-assistant/core/issues/176734) was closed, and [PR #176782](https://github.com/home-assistant/core/pull/176782) was closed without merging. Neither establishes a confirmed crash or a release that fixed one.
 
 Run `get_agent_capabilities` to see what the running instance supports; it reports the detected version, the endpoint status, and any known upstream limitations that apply to it. OpenCode's regular `homeassistant` MCP server remains the supported tool surface either way.
 
@@ -1125,6 +1125,12 @@ credential copying, callback configuration, or visit to a setup page is required
 Publication begins automatically after service readiness, even if the installed
 Core does not yet support discovery. A supporting Core version is still needed
 to show the discovery confirmation.
+
+With [Supervisor 2026.11.0](https://github.com/home-assistant/supervisor/pull/7426)
+or newer, restarting the add-on while Core is running reannounces the ready
+endpoint, even if its URL has not changed. If the integration is unconfigured,
+look for the confirmation again in **Devices & services**. If it is already
+configured, Core keeps the existing entry; no second confirmation is needed.
 
 No MCP badge or link is added to the app UI. The optional administrator status
 page remains at `/ha-mcp/` beneath the app's authenticated Ingress base URL; it is

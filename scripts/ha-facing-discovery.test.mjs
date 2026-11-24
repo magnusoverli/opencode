@@ -72,6 +72,24 @@ for (const channel of ["ha_opencode", "ha_opencode_beta"]) {
     }
   });
 
+  test(`${channel}: app restart reannounces an unchanged URL despite a persisted discovery UUID`, async (t) => {
+    const f = await fixture(t);
+    f.state.ready = true;
+    await f.publisher.tick();
+    const saved = f.read();
+    const restarted = createDiscoveryPublisher(f.options);
+    f.state.ready = false;
+    assert.equal(await restarted.tick(), false);
+    assert.deepEqual(f.read(), saved);
+    f.state.ready = true;
+    assert.equal(await restarted.tick(), true);
+    const [first, second] = f.state.calls;
+    assert.equal(f.state.calls.length, 2);
+    assert.equal(first.method, "POST");
+    assert.deepEqual(second, first);
+    assert.deepEqual(f.read(), saved);
+  });
+
   test(`${channel}: OAuth status uses discovery readiness, not auth mode as a provisioning signal`, async (t) => {
     const f = await fixture(t);
     f.state.authMode = "oauth";
