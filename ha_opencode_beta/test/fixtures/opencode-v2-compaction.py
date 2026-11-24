@@ -27,6 +27,7 @@ def expect_mismatch(callback):
         callback()
     except MIGRATOR.MigrationError as error:
         assert error.code == "message_projection_mismatch", error.code
+        return error
     else:
         raise AssertionError("corrupted compaction was accepted")
 
@@ -128,7 +129,7 @@ def qualify(binary, version):
                     metadata_assistant = assistant
                     connection.execute("DELETE FROM part WHERE message_id=?", (assistant,))
                     for suffix, part in (
-                        ("Z", {"type": "tool", "tool": "fixture", "callID": "call",
+                        ("Z", {"type": "tool", "tool": "todowrite", "callID": "call",
                                "state": {"status": "pending", "input": {}, "raw": ""}, "metadata": {"fixture": {"n": 3}}}),
                         ("A", {"type": "reasoning", "text": "thinking", "time": {"start": 2}, "metadata": {}}),
                         ("a", {"type": "text", "text": "answer", "metadata": {"fixture": {"n": 1}}}),
@@ -136,6 +137,20 @@ def qualify(binary, version):
                         connection.execute("INSERT INTO part VALUES (?,?,?,?,?,?)", (
                             "prt_000000000001" + suffix + "a" * 13, assistant, session, 1, 2, json.dumps(part),
                         ))
+                if index == 0:
+                    # #230: an assistant with no text part still causes the
+                    # converter to append a system row after the last compaction.
+                    # Exercise every notice clause, in non-canonical tool order.
+                    tool_message = "msg_000000000005aaaaaaaaaaaaaa"
+                    tool_session = session
+                    data = json.loads(connection.execute("SELECT data FROM message WHERE id=?", (assistant,)).fetchone()[0])
+                    data["time"] = {"created": 5, "completed": 6}
+                    connection.execute("INSERT INTO message VALUES (?,?,?,?,?)", (tool_message, session, 5, 6, json.dumps(data)))
+                    for n, tool in enumerate(("todowrite", "write", "task", "edit", "skill", "apply_patch", "read", "bash")):
+                        part_id = f"prt_230_{n}"
+                        part = {"type": "tool", "tool": tool, "callID": part_id,
+                                "state": {"status": "pending", "input": {}, "raw": ""}}
+                        connection.execute("INSERT INTO part VALUES (?,?,?,?,?,?)", (part_id, tool_message, session, 5, 6, json.dumps(part)))
                 expected[compact] = {
                     "status": "completed", "reason": "auto" if auto else "manual", "summary": "summary",
                     **({"metadata": {"recent": "[User]: question\n\n[Assistant]: answer"}} if retained else {}),
@@ -166,12 +181,24 @@ def qualify(binary, version):
         result = MIGRATOR.prepare(args(destination))
         assert result["status"] == "activated"
         assert result["target"]["session_count"] == 4
-        assert result["target"]["message_count"] == 12
-        assert result["target"]["validated_content_part_count"] == 14
+        assert result["target"]["message_count"] == 14
+        assert result["target"]["validated_content_part_count"] == 22
         assert fingerprint(source_database) == before
         target_database = destination / "generations" / result["generation"] / "data/opencode/opencode.db"
         target = sqlite3.connect(target_database)
         try:
+            # Only the post-compaction calls generate a notice. The todowrite
+            # in the other session preceded compaction and must not generate one.
+            [(sid, seq, notice)] = target.execute("SELECT session_id,seq,data FROM session_message WHERE type='system'")
+            assert sid == tool_session and seq == 4
+            changed = {**json.loads(notice), "text": "private corrupted notice"}
+            target.execute("UPDATE session_message SET data=? WHERE type='system'", (json.dumps(changed),))
+            target.commit()
+            error = expect_mismatch(lambda: MIGRATOR.validate_session_projection(source_database, target_database))
+            assert error.fields == ("data.text",)
+            assert "projected_type=system" in error.details and "message_seq=4" in error.details
+            target.execute("UPDATE session_message SET data=? WHERE type='system'", (notice,))
+            target.commit()
             raw, = target.execute("SELECT data FROM session_message WHERE id=?", (metadata_assistant,)).fetchone()
             assistant_data = json.loads(raw)
             content = assistant_data["content"]
@@ -237,7 +264,7 @@ def qualify(binary, version):
                 target.commit()
         finally:
             target.close()
-        assert MIGRATOR.validate_session_projection(source_database, target_database) == (4, 12, 14)
+        assert MIGRATOR.validate_session_projection(source_database, target_database) == (4, 14, 22)
 
         # Simulate a validation failure before activation, then retry from the
         # unchanged V1 data. A failed migration journal must not block recovery.
