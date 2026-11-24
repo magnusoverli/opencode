@@ -10,7 +10,7 @@ HTTPS without a reverse proxy. LAN access is off by default.
 
 Beta **3.5.4b2** fixes a V1 history migration that could stop with `message_projection_mismatch (fields: data.text)` when OpenCode generated a notice about a legacy `todowrite` call ([#230](https://github.com/magnusoverli/opencode/issues/230)). Keep the original history intact; the corrected validator checks it on startup.
 
-This beta pins OpenCode `2.4.0`, OpenChamber `2.8.0`, and HAB `1.10.0`, retaining
+This beta pins OpenCode `2.4.1`, OpenChamber `2.8.0`, and HAB `1.10.0`, retaining
 stable's desktop/mobile workspace recovery and live PPQ
 private-model discovery. It now includes stable 3.5.0's Zigporter compatibility,
 HAB registry-cache and project-upgrade fixes. Beta keeps its own app identity and persistent storage; installing

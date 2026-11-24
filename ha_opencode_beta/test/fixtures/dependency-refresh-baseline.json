@@ -5,7 +5,7 @@
   ],
   "Dockerfile": [
     "cba8661df0c4b840d67d90bd3b4028570a8ff8618f0336e76efbe96d8155dc04",
-    "f89d0fe59c088962e0561e4e19305cb6c5e08856897cf7b69e9b2720049cfcbc"
+    "3b93309f21710733669d5d6b115d57ed0795c89c777f47f9e9841b75d131e6f6"
   ],
   "rootfs/opt/ha-lsp-server/package.json": [
     "f329feec25f5f86cc92cc3503a3cc845ac4ca79f43b2cbbc23afe7dd6367c181",
@@ -81,11 +81,11 @@
   ],
   "rootfs/opt/opencode-v2-homeassistant/package-lock.json": [
     "8d191a9303586a8f8394dac3b39ad98e074fd9e26830704edad9c4ff68ac3ed0",
-    "580dc28bb9bc4149400b5527e676cf6f8c472d525e5a395e6c079d90cd42862c"
+    "1b9bb566b6dd395068aacecceb87bdd05b88a0d82f0dd93bfe0991cd3d24f222"
   ],
   "rootfs/opt/opencode-v2-homeassistant/package.json": [
     "8f5ad54605eeef77bba01fbb0f4154b198300adf74ffbe2f4b91a7d063858c42",
-    "9c39e57dfd8109391a454725429226cc102719432a4d148f83fe48d29578a005"
+    "3ebc328ee6b73d43b661320cc5abfc532e688fbb284c6c847a89101273e36104"
   ],
   "rootfs/opt/ppq-private-runtime/package-lock.json": [
     "c4892c8ddcbda6e90016dd171156dcc2c1cd09fd06a2e4888aa769462e098405",
@@ -97,6 +97,6 @@
   ],
   "rootfs/usr/local/bin/opencode-v2-migrate.py": [
     "7ec515fe95a3093bea0208ac54829dd0eff359052340739cc084a79ea72c063e",
-    "c0177c27b62a9080ef927d764e0d310bff4c6d75ed98342330403bbd35ef3b62"
+    "8497a9fb9454dd3588d010485ea6b869be528573d8c669f63ad38291dd6aaa48"
   ]
 }

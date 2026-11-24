@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Update the OpenCode CLI and plugin to **2.4.1**. Installations on 2.4.0 upgrade using the existing copy-on-write history validation.
+
 ## 3.5.4b2
 
 - Fix V1 history validation when OpenCode generates a system notice about `todowrite` after the last compaction. A remaining message mismatch now identifies the projected V2 row type and a hashed message ID without logging its contents ([#230](https://github.com/magnusoverli/opencode/issues/230)).
