@@ -2,7 +2,8 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-Beta **3.5.4b0** builds on stable **3.5.3** and adds [multiple reverse-proxy addresses](#multiple-reverse-proxy-addresses) for the API and OpenChamber ([#221](https://github.com/magnusoverli/opencode/issues/221)).
+Beta **3.5.5b0** starts from [stable **3.5.4**](https://github.com/magnusoverli/opencode/releases/tag/v3.5.4).
+It retains [multiple reverse-proxy addresses](#multiple-reverse-proxy-addresses) for the API and OpenChamber. Updating from **3.5.4b3** requires no configuration changes.
 Beta **3.5.3b1** improved terminal reconnection, OpenChamber asset caching,
 access to migrated conversations, and reporting when pinned decision notes do
 not fit. It retains [direct desktop HTTP](#direct-desktop-http-no-proxy) and

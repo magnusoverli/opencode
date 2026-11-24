@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.5b0
+
+- Start the 3.5.5 beta series from [stable 3.5.4](https://github.com/magnusoverli/opencode/releases/tag/v3.5.4). The runtime is unchanged from 3.5.4b3: OpenCode 2.4.1, OpenChamber 2.8.0 and HAB 1.10.0. Existing beta users can update in place; no configuration change is needed.
+
 ## 3.5.4b3
 
 - Update the OpenCode CLI and plugin to **2.4.1**. Installations on 2.4.0 upgrade using the existing copy-on-write history validation.
