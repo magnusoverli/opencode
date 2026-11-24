@@ -8,8 +8,8 @@
     "verify:versions": "node scripts/verify-versions.js"
   },
   "dependencies": {
-    "@opencode/cli": "2.4.0",
-    "@opencode/plugin": "2.4.0",
+    "@opencode/cli": "2.4.1",
+    "@opencode/plugin": "2.4.1",
     "prettier": "3.10.1",
     "vscode-jsonrpc": "10.0.1",
     "yaml": "2.9.1"
@@ -26,9 +26,11 @@
     "opencode-release-previous": "npm:@opencode/cli@2.1.2",
     "opencode-stable-previous": "npm:@opencode/cli@2.1.4",
     "opencode-beta-release-previous": "npm:@opencode/cli@2.2.5",
-    "opencode-353-previous": "npm:@opencode/cli@2.3.0"
+    "opencode-353-previous": "npm:@opencode/cli@2.3.0",
+    "opencode-354b2-previous": "npm:@opencode/cli@2.4.0"
   },
   "allowScripts": {
+    "@opencode/cli@2.4.1": true,
     "@opencode/cli@2.4.0": true,
     "@opencode/cli@2.3.0": true,
     "@opencode/cli@2.0.22": true,
