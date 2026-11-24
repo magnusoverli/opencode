@@ -23,7 +23,7 @@
  * - Configure in OpenCode via opencode.json lsp settings
  */
 
-import lsp from "vscode-languageserver/node.js";
+import lsp from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import yaml from "yaml";
 import { fileURLToPath, pathToFileURL } from "url";

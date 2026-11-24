@@ -41,7 +41,7 @@ class LegacyData(unittest.TestCase):
         (self.root / "v2/current").write_text(current)
         (self.active / "generation.json").write_text(json.dumps({
             "format": legacy.migration_module().FORMAT, "generation": current,
-            "status": "validated", "target_version": "2.3.0",
+            "status": "validated", "target_version": "2.4.1",
         }))
 
     def review(self):

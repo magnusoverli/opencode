@@ -3,6 +3,17 @@
 Your Home Assistant configuration assistant, powered by OpenCode V2. Use the
 terminal or OpenChamber web workspace with one shared, app-managed backend.
 
+## Upgrading to 3.5.4
+
+Stable **3.5.4** promotes **3.5.4b3**. Take a Home Assistant backup, then
+update the existing **OpenCode** add-on in place. The upgrade from 3.5.3
+validates a copy of your history before switching to OpenCode **2.4.1**.
+For rollback, restore the pre-upgrade backup. Stable and beta keep separate data.
+
+OpenChamber is now **2.8.0** and HAB is **1.10.0**. Existing LAN configurations
+need no changes; [multiple reverse-proxy addresses](#multiple-reverse-proxy-addresses)
+are optional.
+
 ## Upgrading to 3.5.3
 
 Stable **3.5.3** promotes **3.5.3b2**. Back up and update your existing
@@ -382,9 +393,12 @@ migration journal to force startup.
 `message_projection_mismatch` means a converted message did not match the validator's
 expectation. In 3.5.2, preserved provider metadata or mixed-case part IDs could
 trigger a false alarm ([#228](https://github.com/magnusoverli/opencode/issues/228)).
-Keep a backup and update the same stable add-on to 3.5.3 or later. If the error
-persists, share the field path, `session_hash` and zero-based `message_seq` from
-the new log. No conversation contents or database are needed.
+3.5.4 fixes another false alarm involving a generated `todowrite` notice
+([#230](https://github.com/magnusoverli/opencode/issues/230)). Keep the V1
+history intact and update the same app. If validation still stops, share the
+field path, `session_hash`, zero-based `message_seq`, and any `projected_type`
+and `message_hash`. The sequence refers to the converted timeline, not a V1 row.
+No conversation contents or database are needed.
 
 **Current limitations:** user-added custom skills may survive restart without
 appearing in the V2 skill catalog; shipped Home Assistant skills are available.
@@ -1010,8 +1024,8 @@ tools to inspect and transform that file before a whole-config dashboard write;
 never save a reconstruction from the preview. Files older than 24 hours are
 pruned on subsequent exports, and a container restart clears them.
 
-The app bundles **hab 1.8.0**, pinned to source
-`f200a763798bc2a305c7fe0fad58dc0946e07861`. `hab_run` accepts literal `args`
+The app bundles **hab 1.10.0**, pinned to source
+`7c2883b7cca0d57db87eea82ed7e8dfefcbcceb2`. `hab_run` accepts literal `args`
 arrays and legacy `command` strings, uses native compact schemas by default,
 and preserves their payload/output contracts and schema identities. Search with
 `["schema","--index","--search","dashboard patch","--limit","10"]` and follow
@@ -1324,6 +1338,23 @@ directly: forwarded headers are refused. If routing rewrites the desktop's
 source IP, the check sees that address instead; use a source-preserving LAN
 route. Leave `server_direct_subnet` empty to use the existing proxy mode.
 OpenChamber LAN still needs its own HTTPS reverse proxy.
+
+### Multiple reverse-proxy addresses
+
+Each reverse-proxied frontend accepts up to seven additional exact HTTPS
+origins (no paths). For example:
+
+```yaml
+openchamber_public_url: "https://ha.example.ts.net:4097"
+openchamber_public_url_aliases:
+  - "https://oc.example.com"
+```
+
+Use `server_public_url_aliases` for the API and leave it empty in direct-subnet
+mode. Each proxy must preserve the public `Host`, overwrite the forwarded
+protocol and client IP, and be listed in `lan_trusted_proxies`. Aliases do
+not grant cross-origin access. Sign in separately at each hostname and redeem
+API pairing links at the address where they were issued.
 
 ## OpenChamber LAN Web UI
 

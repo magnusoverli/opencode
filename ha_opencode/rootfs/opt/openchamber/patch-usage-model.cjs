@@ -17,19 +17,20 @@ function patchUsageModel(root) {
   // OpenChamber 2.1 reads the selected credentials from the running OpenCode
   // API. Its upstream reader replaces our database/legacy-auth compatibility
   // patch; the image contract verifies refresh, disconnect and failed reads.
-  const quota = "packages/web/server/lib/quota/providers/codex.js";
+  const quota = "packages/web/server/lib/quota/providers/codex.ts";
   edit(quota, "Session expired — please re-authenticate with OpenAI",
     "OpenAI usage authorization expired. Send a message to refresh your OpenCode sign-in, then refresh Usage. Reconnect OpenAI if chat also fails.");
 
-  const config = "packages/ui/src/stores/useConfigStore.ts";
-  const source = fs.readFileSync(path.join(root, config), "utf8").replace(/\r\n/g, "\n");
-  const start = "                applyDefaultModelAgentSelection: (options) => {";
-  const end = "                applyOpenCodeConfigDefaults: (directory, source = \"syncConfig\", config) => {";
-  if (source.split(start).length !== 2 || source.split(end).length !== 2) throw new Error("Unexpected preview model-selection boundary");
-  const before = source.slice(source.indexOf(start), source.indexOf(end));
-  let after = replaceOnce(before, "                    const {\n                        agentName: resolvedAgentName,",
-    "                    let {\n                        agentName: resolvedAgentName,", config);
-  after = replaceOnce(after, "                    set((state) => {", `                    // New chats inherit the last-used model stored by the composer.
+  const config = "packages/ui/src/stores/config/defaultSelection.ts";
+  const source = replaceOnce(fs.readFileSync(path.join(root, config), "utf8").replace(/\r\n/g, "\n"),
+    "    isStaleAutoSelection,\n", "    isStaleAutoSelection,\n    hasProviderModel,\n", config);
+  const start = "    applyDefaultModelAgentSelection: (options) => {";
+  const end = "\n    },";
+  if (source.split(start).length !== 2 || source.indexOf(end, source.indexOf(start)) === -1) throw new Error("Unexpected preview model-selection boundary");
+  const before = source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  let after = replaceOnce(before, "        const {\n            agentName: resolvedAgentName,",
+    "        let {\n            agentName: resolvedAgentName,", config);
+  after = replaceOnce(after, "        set((state) => {", `                    // New chats inherit the last-used model stored by the composer.
                     // Missing/removed models fall back to the normal default cascade.
                     const last = useSelectionStore.getState().lastUsedProvider;
                     const remembered = last && hasProviderModel(providers, last.providerID, last.modelID);

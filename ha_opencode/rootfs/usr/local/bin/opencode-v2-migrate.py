@@ -30,8 +30,8 @@ FORMAT = "ha-opencode-v2-migration/v1"
 GENERATION_RE = re.compile(r"^[a-f0-9]{32}$")
 # Shipped beta generations whose native V2 schema is covered by the upgrade
 # fixture. Unknown builds and downgrades must not open a user's database.
-V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242", "2.0.13", "2.0.22", "2.0.26", "2.1.2", "2.1.4", "2.2.5"}
-V2_UPGRADE_TARGET = "2.3.0"
+V2_UPGRADE_SOURCES = {"0.0.0-beta-18684", "0.0.0-beta-19242", "2.0.13", "2.0.22", "2.0.26", "2.1.2", "2.1.4", "2.2.5", "2.3.0", "2.4.0"}
+V2_UPGRADE_TARGET = "2.4.1"
 MAX_DATABASE_BYTES = 32 * 1024 * 1024 * 1024
 LEGACY_WORKSPACE = "/homeassistant"
 MANAGED_WORKSPACE = "/run/opencode-v2/workspace"
@@ -553,11 +553,13 @@ def message_data_field(expected: dict, actual: dict) -> str:
     return "data"
 
 
-def message_mismatch(session_id: str, sequence: int, field: str) -> MigrationError:
+def message_mismatch(projected: dict, field: str) -> MigrationError:
+    # Use expected V2 identity, never a candidate payload or V1 timestamp rank.
     return MigrationError(
         "message_projection_mismatch", fields=(field,),
-        details=(f"session_hash={hashlib.sha256(session_id.encode()).hexdigest()[:12]}",
-                 f"message_seq={sequence}"),
+        details=(f"session_hash={hashlib.sha256(projected['session_id'].encode()).hexdigest()[:12]}",
+                 f"message_seq={projected['seq']}", f"projected_type={projected['type']}",
+                 f"message_hash={hashlib.sha256(projected['id'].encode()).hexdigest()[:12]}"),
     )
 
 
@@ -746,9 +748,9 @@ def legacy_tool_notice(messages: list[dict]) -> str | None:
     if "skill" in called:
         parts.append("The `skill` tool now takes `id` instead of `name`.")
     if len(removed) == 1:
-        parts.append(f"The `{removed[0]}` tool is no longer available and must not be called.")
+        parts.append(f"The `{removed[0]}` tool is no longer available by default. Only call it if it is in your tool list.")
     elif removed:
-        parts.append(f"The following tools are no longer available and must not be called: {', '.join(f'`{name}`' for name in removed)}.")
+        parts.append(f"The following tools are no longer available by default. Only call them if they are in your tool list: {', '.join(f'`{name}`' for name in removed)}.")
     return "\n\n".join(("The available tools have changed.", *parts)) if parts else None
 
 
@@ -1212,13 +1214,13 @@ def validate_session_projection(
                 for field, value in (("session_id", target_session), ("type", target_type),
                                      ("seq", sequence), ("time_created", created), ("time_updated", updated)):
                     if value != wanted[field]:
-                        raise message_mismatch(session_id, wanted["seq"], field)
+                        raise message_mismatch(wanted, field)
                 target_data = decode_object(raw_target, "invalid_target_message")
                 for field in ("id", "type"):
                     if field in target_data:
-                        raise message_mismatch(session_id, wanted["seq"], f"data.{field}")
+                        raise message_mismatch(wanted, f"data.{field}")
                 if not json_equal(wanted["data"], target_data):
-                    raise message_mismatch(session_id, wanted["seq"], message_data_field(wanted["data"], target_data))
+                    raise message_mismatch(wanted, message_data_field(wanted["data"], target_data))
         if processed_messages != int(source.execute("SELECT count(*) FROM message").fetchone()[0]):
             raise MigrationError("invalid_source_message")
         if processed_parts != int(source.execute("SELECT count(*) FROM part").fetchone()[0]):

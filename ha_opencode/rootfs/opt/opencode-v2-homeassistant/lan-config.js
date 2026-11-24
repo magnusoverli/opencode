@@ -8,6 +8,8 @@ class LanOptionsError extends Error {}
 
 function parseOrigin(value, field, allowHttp) {
   try {
+    // Require a literal origin, not a URL that WHATWG silently repairs (e.g. /x/..).
+    if (typeof value !== "string" || !/^https?:\/\/[^/?#@\\\s*,%]+\/?$/i.test(value) || /[\x00-\x20\x7f]/.test(value)) throw new Error();
     const url = new URL(value);
     if (!(url.protocol === "https:" || (allowHttp && url.protocol === "http:")) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error();
     return url.origin;
@@ -53,10 +55,28 @@ export function parseLanOptions(options) {
     if (isIP(host) !== 4 || !clients.check(host, "ipv4")) problems.add("server_public_url must use the HA host's IPv4 address inside server_direct_subnet");
   }
   const uiOrigin = uiEnabled ? origin(options.openchamber_public_url, "openchamber_public_url") : null;
+  function aliases(field, primary, directApi = false) {
+    const values = options[field] === undefined ? [] : options[field];
+    if (!Array.isArray(values) || values.length > 7) {
+      problems.add(`${field} must be a list of at most 7 additional HTTPS origins`);
+      return [];
+    }
+    if (directApi && values.length) problems.add(`${field} requires reverse-proxy mode`);
+    const seen = new Set([primary]);
+    return values.map((value, index) => {
+      const entry = `${field}[${index}]`;
+      const canonical = origin(value, entry);
+      if (canonical && seen.has(canonical)) problems.add(`${entry} duplicates a configured origin`);
+      seen.add(canonical);
+      return canonical;
+    });
+  }
+  const apiAliases = apiEnabled ? aliases("server_public_url_aliases", apiOrigin, direct) : [];
+  const uiAliases = uiEnabled ? aliases("openchamber_public_url_aliases", uiOrigin) : [];
   const corsOrigins = apiEnabled && validList ? origins.map((value) => origin(value, "cors_origins")) : [];
   if (problems.size) throw new LanOptionsError([...problems].join("\n"));
   return {
-    apiEnabled, uiEnabled, password, proxies, apiOrigin, uiOrigin, corsOrigins,
+    apiEnabled, uiEnabled, password, proxies, apiOrigin, uiOrigin, apiAliases, uiAliases, corsOrigins,
     directSubnet: direct ? subnet : null,
     nativeApps: uiEnabled && nativeApps,
     desktopApps: apiEnabled && desktopApps,

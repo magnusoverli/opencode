@@ -23,7 +23,7 @@ def seed():
     (root / "v2/current").write_text(active.name)
     (active / "generation.json").write_text(json.dumps({
         "format": legacy.migration_module().FORMAT, "generation": active.name,
-        "status": "validated", "target_version": "2.3.0",
+        "status": "validated", "target_version": "2.4.1",
     }))
     expected = {}
     for name in ("aged", "young", "changed", "unrecorded"):

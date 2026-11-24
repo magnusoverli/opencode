@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.5.4
+
+- Promote **3.5.4b3** to stable with OpenCode CLI/plugin **2.4.1**, OpenChamber **2.8.0** and HAB **1.10.0**. Back up first, then update the existing stable add-on in place. The upgrade validates a copy of the previous runtime’s history.
+- Fix V1 history migration rejecting a generated notice about a legacy `todowrite` call. If validation still stops, the log identifies the projected row type and hashed message ID without exposing its contents ([#230](https://github.com/magnusoverli/opencode/issues/230)).
+- Use multiple HTTPS reverse-proxy addresses for OpenChamber or the API. Each frontend supports up to seven aliases and keeps its own origin checks; existing URLs continue to work ([#221](https://github.com/magnusoverli/opencode/issues/221)).
+- Refresh the build toolchain and lock the MCP and language-server dependencies. Agent guidance now covers HAB 1.10’s command families, including Supervisor apps, backups, host and network administration.
+
 ## 3.5.3
 
 - Promote beta **3.5.3b2** to stable. OpenCode 2.3.0, OpenChamber 2.7.2 and HAB 1.8.0 are unchanged.

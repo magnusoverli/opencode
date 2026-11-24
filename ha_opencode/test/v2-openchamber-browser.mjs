@@ -146,7 +146,7 @@ try {
   });
   let backend = startBackend();
   const client = OpenCode.make({ baseUrl: 'http://127.0.0.1:4100', headers });
-  await wait(async () => (await client.server.info()).version === '2.3.0', 'backend startup');
+  await wait(async () => (await client.server.info()).version === '2.4.1', 'backend startup');
   const credentials = await client.credential.create({ integrationID: 'fixture', value: { type: 'key', key: 'fixture-persisted-key' } });
   await mkdir(`${root}/ui`);
   // Exercise the existing-installation settings migration as well as a new chat.
@@ -283,14 +283,14 @@ try {
   assert.ok(modelCalls > 0);
   assert.deepEqual(errors, []);
   assert.deepEqual(escaped, []);
-  const auth = await import('/opt/openchamber-preview/packages/web/server/lib/opencode/auth.js');
+  const auth = await import('/opt/openchamber-preview/packages/web/build/server/lib/opencode/auth.js');
   auth.configureOpenCodeCredentials(auth.openCodeCredentialSource({ buildOpenCodeUrl: p => `http://127.0.0.1:4100${p}`, getOpenCodeAuthHeaders: () => headers }));
   assert.equal((await auth.readOpenCodeCredentials()).fixture.key, 'fixture-persisted-key');
   await stop(ui);
   assert.equal((await client.session.get({ sessionID: id })).id, id, 'Stopping UI must leave backend/history running');
   await stop(backend);
   backend = startBackend();
-  await wait(async () => (await client.server.info()).version === '2.3.0', 'backend restart');
+  await wait(async () => (await client.server.info()).version === '2.4.1', 'backend restart');
   ui = startUi();
   await wait(async () => (await fetch('http://127.0.0.1:3010/health')).ok, 'UI restart');
   assert.equal((await client.session.get({ sessionID: id })).id, id);
@@ -311,7 +311,7 @@ try {
   await rm(`${runtime}/workspace`, { recursive: true });
   await stop(backend);
   backend = startBackend();
-  await wait(async () => (await client.server.info()).version === '2.3.0', 'missing-workspace backend restart');
+  await wait(async () => (await client.server.info()).version === '2.4.1', 'missing-workspace backend restart');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-testid="workspace-recovery"]', { timeout: 30000 }).catch(async error => {
     console.error('Workspace recovery diagnostics:', JSON.stringify({

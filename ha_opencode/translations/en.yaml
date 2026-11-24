@@ -121,6 +121,14 @@ configuration:
     name: "OpenChamber public HTTPS origin"
     description: "External HTTPS origin for the web frontend, for example https://chat.example.com. No path. Required when OpenChamber LAN is enabled."
 
+  server_public_url_aliases:
+    name: "Additional OpenCode API addresses"
+    description: "Up to seven extra HTTPS origins served by trusted reverse proxies. Not available in direct-subnet mode. Does not grant browser CORS access."
+
+  openchamber_public_url_aliases:
+    name: "Additional OpenChamber web addresses"
+    description: "Up to seven extra HTTPS origins for the same web UI, for example a second trusted reverse proxy. Sign in separately at each hostname."
+
   cors_origins:
     name: "LAN server CORS origins"
     description: "Additional exact HTTPS browser origins allowed to call the authenticated LAN API. No wildcards. Empty allows only the API's own origin; non-browser authenticated clients do not need an entry."

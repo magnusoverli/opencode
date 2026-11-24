@@ -960,22 +960,27 @@ describe("openchamber ingress proxy: response forwarding", () => {
     const browser = await require("../rootfs/opt/ha-mcp-server/node_modules/puppeteer-core")
       .launch({ executablePath, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
     t.after(() => browser.close());
-    const page = await browser.newPage();
-    const network = await page.createCDPSession();
-    await network.send("Network.enable");
-    const assets = new Set();
+    // Observe HTTP on the wire: CDP extra-info events can arrive before their
+    // request IDs are registered. Both visits share the browser's disk cache.
     const statuses = [];
-    network.on("Network.requestWillBeSent", e => {
-      if (e.request.url.endsWith(asset)) assets.add(e.requestId);
+    const wire = http.createServer((req, res) => {
+      const forwarded = http.request({ hostname: "127.0.0.1", port: proxyPort,
+        path: req.url, method: req.method, headers: req.headers }, upstream => {
+        if (req.url === INGRESS_PATH + asset) statuses.push(upstream.statusCode);
+        res.writeHead(upstream.statusCode, upstream.headers);
+        upstream.pipe(res);
+      });
+      forwarded.on("error", error => res.destroy(error));
+      req.pipe(forwarded);
     });
-    network.on("Network.responseReceivedExtraInfo", e => {
-      if (assets.has(e.requestId)) statuses.push(e.statusCode);
-    });
-    const url = `http://127.0.0.1:${proxyPort}${INGRESS_PATH}/`;
+    await listen(wire, 0);
+    t.after(() => close(wire));
+    const url = `http://127.0.0.1:${wire.address().port}${INGRESS_PATH}/`;
     for (let i = 0; i < 2; i++) {
+      const page = await browser.newPage();
       await page.goto(url);
       assert.equal(await page.evaluate(() => window.loadedIcon), `${INGRESS_PATH}/assets/icon.svg`);
-      await page.goto("about:blank");
+      await page.close();
     }
     assert.deepEqual(statuses, [200, 304]);
   });

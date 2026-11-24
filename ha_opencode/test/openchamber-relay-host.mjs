@@ -13,10 +13,10 @@ const upstream = process.env.OPENCHAMBER_TEST_ROOT || "/opt/openchamber-preview"
 const web = path.join(upstream, "packages/web");
 const require = createRequire(path.join(web, "package.json"));
 const { WebSocketServer } = require("ws");
-const { createRelayService } = await import(pathToFileURL(path.join(web, "server/lib/relay/service.js")));
-const { createRelayKeyStore } = await import(pathToFileURL(path.join(web, "server/lib/relay/key-store.js")));
-const { deriveServerId } = await import(pathToFileURL(path.join(web, "server/lib/relay/signing-key.js")));
-const { createRemoteClientAuthRuntime } = await import(pathToFileURL(path.join(web, "server/lib/client-auth/remote-clients.js")));
+const { createRelayService } = await import(pathToFileURL(path.join(web, "build/server/lib/relay/service.js")));
+const { createRelayKeyStore } = await import(pathToFileURL(path.join(web, "build/server/lib/relay/key-store.js")));
+const { deriveServerId } = await import(pathToFileURL(path.join(web, "build/server/lib/relay/signing-key.js")));
+const { createRemoteClientAuthRuntime } = await import(pathToFileURL(path.join(web, "build/server/lib/client-auth/remote-clients.js")));
 
 for (const lan of [false, true]) {
   test(`passive relay restart preserves the ${lan ? "activation-scoped LAN" : "persistent Ingress-only"} authentication contract`, { timeout: 15000 }, async () => {
@@ -55,8 +55,11 @@ for (const lan of [false, true]) {
         const service = createRelayService({
           crypto, allowPassiveHost, relayKeyStore,
           readSettingsFromDiskMigrated: readSettings,
-          readSettingsStrict: readSettings,
-          writeSettingsToDisk: writeSettings,
+          updateSettingsFromDisk: async (mutate) => {
+            const next = await mutate(await readSettings());
+            await writeSettings(next);
+            return next;
+          },
           getLocalPort: () => 1,
           hasRelayDemand: () => clients.hasActiveRelayClients(),
           logger: { warn() {} },

@@ -9,14 +9,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.31.0",
-    "puppeteer-core": "25.13.0",
-    "ws": "^8.22.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "puppeteer-core": "25.18.1",
+    "ws": "^8.23.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "vitest": "^3.1.1"
+    "vitest": "^5.1.1"
   },
   "engines": {
     "node": ">=22.12.0"

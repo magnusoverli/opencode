@@ -8,10 +8,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 
-// The shared CI command also runs this consumer/security suite against stable.
-const root = process.env.HA_DEPENDENCY_TEST_ADDON === "ha_opencode"
-  ? new URL("../../ha_opencode/rootfs/opt/opencode-v2-homeassistant/", import.meta.url)
-  : new URL("../rootfs/opt/opencode-v2-homeassistant/", import.meta.url);
+const root = new URL("../rootfs/opt/opencode-v2-homeassistant/", import.meta.url);
 const require = createRequire(new URL("package.json", root));
 
 async function fixture(t) {
@@ -23,7 +20,8 @@ async function fixture(t) {
 test("all locked glob/minimatch instances use the reviewed security fixes", () => {
   const manifest = JSON.parse(fs.readFileSync(new URL("package.json", root)));
   const lock = JSON.parse(fs.readFileSync(new URL("package-lock.json", root)));
-  for (const [name, version] of Object.entries({ glob: "14.0.2", minimatch: "11.0.1" })) {
+  const pins = { glob: "14.0.6", minimatch: "11.0.9" };
+  for (const [name, version] of Object.entries(pins)) {
     assert.equal(manifest.overrides[name], version);
     const entries = Object.entries(lock.packages).filter(([path]) => path.endsWith(`/node_modules/${name}`) || path === `node_modules/${name}`);
     assert.ok(entries.length > 0);
@@ -122,8 +120,8 @@ test("minimatch bounds globparts amplification at optimization level two", () =>
     import assert from 'node:assert/strict';
     import { Minimatch } from ${JSON.stringify(pathToFileURL(entry).href)};
     const pattern = 'a/**/../'.repeat(18) + 'b/c';
-    const matcher = new Minimatch(pattern, { optimizationLevel: 2, braceExpandMax: 32 });
-    assert.ok(matcher.globParts.length <= 32);
+    const compile = () => new Minimatch(pattern, { optimizationLevel: 2, braceExpandMax: 32 });
+    assert.throws(compile, { name: 'RangeError', message: /too many patterns/ });
   `], { encoding: "utf8", timeout: 3000 });
   assert.equal(result.status, 0, result.stderr || String(result.error));
 });

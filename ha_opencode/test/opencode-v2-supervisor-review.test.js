@@ -120,7 +120,7 @@ for (const codemode of [false, true]) test(`pinned runtime reports reader tools 
       try { await client.server.info({ signal: AbortSignal.timeout(500) }); ready = true; break; } catch { await sleep(50); }
     }
     assert.ok(ready, "isolated pinned backend must start");
-    assert.equal((await client.server.info()).version, "2.3.0");
+    assert.equal((await client.server.info()).version, "2.4.1");
     let connected = false;
     for (let i = 0; i < 100; i++) {
       if ((await client.mcp.list()).data.some(item => item.name === "homeassistant" && item.status.status === "connected")) {
