@@ -576,7 +576,7 @@ with tempfile.TemporaryDirectory(prefix="opencode-v2-validation-") as temporary:
             "The `subagent` tool takes `agent` instead of `subagent_type` and `sessionID` instead of `task_id`.",
             "The following tools now take `path` instead of `filePath`: `read`, `edit`, `write`.",
             "The `skill` tool now takes `id` instead of `name`.",
-            "The `todowrite` tool is no longer available and must not be called.",
+            "The `todowrite` tool is no longer available by default. Only call it if it is in your tool list.",
         ))
         assert MIGRATOR.legacy_tool_notice([
             {"type": "assistant", "data": {"content": [{"type": "tool", "name": "bash"}]}},
@@ -714,6 +714,7 @@ with tempfile.TemporaryDirectory(prefix="opencode-v2-validation-") as temporary:
             assert error.fields == (f"data.content[{idx}].native",)
             assert error.details == (
                 f"session_hash={MIGRATOR.hashlib.sha256(tool_session.encode()).hexdigest()[:12]}", "message_seq=1",
+                "projected_type=assistant", f"message_hash={MIGRATOR.hashlib.sha256(assistant_id.encode()).hexdigest()[:12]}",
             )
             set_target_data(target, assistant_id, assistant_target)
 

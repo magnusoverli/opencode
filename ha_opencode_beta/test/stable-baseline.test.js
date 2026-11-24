@@ -62,8 +62,10 @@ test("beta carries every shared stable runtime/build file except reviewed diverg
 
 test("beta preserves stable project-upgrade repair and HAB cache integration", () => {
   const migration = "rootfs/usr/local/bin/opencode-v2-migrate.py";
-  assert.equal(beta(migration), stable(migration).replace('"2.1.4", "2.2.5"}', '"2.1.4", "2.2.5", "2.3.0"}')
-    .replace('V2_UPGRADE_TARGET = "2.3.0"', 'V2_UPGRADE_TARGET = "2.4.0"'));
+  // The full migrator is hash-checked above. Independently preserve stable's
+  // project repair while allowing beta-specific V1 message projections.
+  const projectRepair = text => text.match(/^def restore_project_maintenance\([\s\S]*?(?=^def )/m)[0];
+  assert.equal(projectRepair(beta(migration)), projectRepair(stable(migration)));
   const server = "rootfs/opt/ha-mcp-server/index.js";
   const normalizeHabCard = text => text.replace(/(name: "hab_run",\n +title: "[^"]+",\n +description: )"[^\n]+",/, '$1"<version-specific guidance>",');
   assert.equal(normalizeHabCard(beta(server)), normalizeHabCard(patternChannel(stable(server))));
