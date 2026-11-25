@@ -1,7 +1,7 @@
 ---
 name: "OpenCode Beta"
 description: "Beta channel for OpenCode - AI coding agent for Home Assistant. May contain experimental features."
-version: "3.5.5b0"
+version: "3.5.5b1"
 slug: "ha_opencode_beta"
 image: "ghcr.io/magnusoverli/ha_opencode_beta"
 url: "https://github.com/magnusoverli/opencode"
@@ -258,22 +258,29 @@ schema:
   external_mcp_config: str?
   user_hooks_enabled: bool
 
-# Exclude caches from backups
+# Stop writers while Supervisor copies the database, WAL and other app state.
+backup: cold
+# Supervisor matches against full paths, including nested package directories.
+# Anchor to the private data root (repository and local installs have a prefixed
+# slug) so files like a user's skill/context or package/hooks survive restore.
 backup_exclude:
-  - ".npm/*"
-  - ".npm-global/*"
-  - ".cache/*"
-  - ".local/share/opencode/cache/*"
-  - ".env_vars"
-  - ".env_vars_discovered"
-  - "evaluations/*"
+  - "data/*_ha_opencode_beta/.npm/*"
+  - "data/*_ha_opencode_beta/.cache/*"
+  - "data/*_ha_opencode_beta/.local/share/opencode/cache/*"
+  - "data/*_ha_opencode_beta/.env_vars"
+  - "data/*_ha_opencode_beta/.env_vars_discovered"
+  - "data/*_ha_opencode_beta/evaluations/*"
+  # OpenChamber promotes extracted models out of staging. Keep completed
+  # voices/models, cached complete archives and user-installed .npm-global.
+  - "data/*_ha_opencode_beta/.config/openchamber/speech-models/.downloads/*.tmp-[0-9]*"
+  - "data/*_ha_opencode_beta/.config/openchamber/speech-models/.staging-*-[0-9]*"
   # Generated home context is rebuilt at every start; restoring a stale copy
   # would describe a different installation.
-  - "context/*"
+  - "data/*_ha_opencode_beta/context/*"
   # V2 migration candidates are disposable and may contain transient plaintext
   # copies. Only an activated V2 generation belongs in a backup.
-  - "v2/work/*"
-  - "v2/cache/*"
+  - "data/*_ha_opencode_beta/v2/work/*"
+  - "data/*_ha_opencode_beta/v2/cache/*"
   # Startup-hook output. Hooks run with the Supervisor token and any keys the
   # user configured, so whatever they print must not travel in a backup.
-  - "hooks/*"
+  - "data/*_ha_opencode_beta/hooks/*"

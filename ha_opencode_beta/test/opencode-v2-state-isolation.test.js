@@ -377,7 +377,7 @@ describe("OpenCode V2 state isolation", () => {
   });
 
   it("excludes migration work and cache from Home Assistant backups", () => {
-    assert.match(config, /^  - "v2\/work\/\*"$/m);
-    assert.match(config, /^  - "v2\/cache\/\*"$/m);
+    assert.match(config, /^  - "data\/\*_ha_opencode_beta\/v2\/work\/\*"$/m);
+    assert.match(config, /^  - "data\/\*_ha_opencode_beta\/v2\/cache\/\*"$/m);
   });
 });
