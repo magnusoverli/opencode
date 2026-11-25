@@ -586,6 +586,16 @@ OpenCode mounts `/addons` and `/addon_configs` for Home Assistant add-on develop
 
 Treat `/addon_configs` as sensitive because it may contain configuration data for other add-ons.
 
+## Docker Container Inspection
+
+**Docker container inspection (port-collision diagnosis)**
+
+OpenCode can inspect Docker container port bindings, read container state, and execute commands in other containers when needed for port-collision diagnosis and add-on troubleshooting.
+
+**Requires Protection Mode off:** Go to **Settings → Add-ons → OpenCode → Info tab** and disable Protection Mode. This is a one-time step. Without it, Docker API access is silently inactive — no error is shown.
+
+> ⚠️ Disabling Protection Mode grants OpenCode access to the Docker socket. This allows it to inspect and exec into any container on the system. Only disable it if you want OpenCode to perform Docker-level diagnostics.
+
 ## Sensitive File Protection
 
 By default (**Restrict access to sensitive files** = `true`), the add-on adds an OpenCode `permission.read` rule that blocks the AI's file-**read** tool from opening secret/credential files — `secrets.yaml` (any path ending in `secrets.yaml`), the `.storage/` and `.cloud/` directories, the `ssl/` directory, and any `*.key`/`*.pem` files — so their contents can't be pulled into the model's context. Everything else stays readable, and the agent can still edit normal config that *references* secrets via `!secret`. The Home Assistant MCP tools are unaffected; they read live state through the API.

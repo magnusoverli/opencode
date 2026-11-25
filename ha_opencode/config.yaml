@@ -33,10 +33,14 @@ map:
   - type: all_app_configs
     read_only: false
     path: /addon_configs
+  - share:rw
+  - backup:rw
+  - media:rw
+  - ssl:rw
 
 # API access - needed for logs, addon discovery, and ingress session creation
 hassio_api: true
-hassio_role: admin
+hassio_role: manager
 homeassistant_api: true
 discovery:
   - mcp
