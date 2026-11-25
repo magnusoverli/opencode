@@ -1,7 +1,7 @@
 ---
 name: "OpenCode Beta"
 description: "Beta channel for OpenCode - AI coding agent for Home Assistant. May contain experimental features."
-version: "3.5.5b1"
+version: "3.5.5b2"
 slug: "ha_opencode_beta"
 image: "ghcr.io/magnusoverli/ha_opencode_beta"
 url: "https://github.com/magnusoverli/opencode"
@@ -274,6 +274,9 @@ backup_exclude:
   # voices/models, cached complete archives and user-installed .npm-global.
   - "data/*_ha_opencode_beta/.config/openchamber/speech-models/.downloads/*.tmp-[0-9]*"
   - "data/*_ha_opencode_beta/.config/openchamber/speech-models/.staging-*-[0-9]*"
+  # Supervisor copies restored files as root. Exclude the directory itself,
+  # not just its contents, so the unprivileged CLI can recreate its own log.
+  - "data/*_ha_opencode_beta/opencode-tui/data/opencode/log"
   # Generated home context is rebuilt at every start; restoring a stale copy
   # would describe a different installation.
   - "data/*_ha_opencode_beta/context/*"
