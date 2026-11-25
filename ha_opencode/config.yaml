@@ -36,7 +36,7 @@ map:
 
 # API access - needed for logs, addon discovery, and ingress session creation
 hassio_api: true
-hassio_role: manager
+hassio_role: admin
 homeassistant_api: true
 discovery:
   - mcp
@@ -45,6 +45,7 @@ discovery:
 # Security and hardware access - keep permissions minimal
 host_network: false
 privileged: []
+docker_api: true
 apparmor: true
 # Static Supervisor hardware mappings. Keep default-off; users can opt into
 # specific serial devices via the serial_devices option below.
