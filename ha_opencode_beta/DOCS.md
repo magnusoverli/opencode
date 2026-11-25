@@ -2,7 +2,7 @@
 
 This is the **beta channel** for the OpenCode add-on. It contains experimental features and fixes that are being validated before inclusion in the stable release.
 
-**Backups from 3.5.5b1:** Supervisor stops the beta app for its part of the backup and restarts it if it was running. Finish active requests first. Installed voices and speech models, user-installed npm packages, skills, app settings and conversation history travel with the backup. Temporary speech downloads and extraction directories do not. To include files you set up under `/homeassistant`, include Home Assistant configuration in the backup as well.
+**Backups from 3.5.5b1:** Supervisor stops the beta app for its part of the backup and restarts it if it was running. Finish active requests first. Installed voices and speech models, user-installed npm packages, skills, app settings and conversation history travel with the backup. Temporary speech downloads and extraction directories do not. From **3.5.5b2**, the CLI recreates its diagnostic log after restore; its preferences are still backed up. To include files you set up under `/homeassistant`, include Home Assistant configuration in the backup as well.
 
 If an update backup fails at `finishing_file`, the failure is while Supervisor closes the archive on its destination. Check free space and the **default backup storage** used by Supervisor for updates. If it is a network mount, try a local default with enough free space, keeping backup enabled, and keep a separate off-host copy. Preserving installed models means the archive can still be large. The first update **to** this version uses the previously installed version's backup policy.
 

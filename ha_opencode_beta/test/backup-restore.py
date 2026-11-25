@@ -43,11 +43,13 @@ def main():
         f"{speech}/.downloads/voice.tar.bz2", ".config/openchamber/settings.json",
         ".config/opencode/skills/my-skill/context/guide.md",
         ".npm-global/lib/node_modules/user-package/hooks/setup.js",
+        "opencode-tui/config/opencode/cli.json", "opencode-tui/state/opencode/model.json",
         "v2/current", "options.json",
     ]
     skip = [
         f"{speech}/.downloads/voice.tar.bz2.tmp-1234",
         f"{speech}/.staging-voice-1234/model.onnx",
+        "opencode-tui/data/opencode/log/opencode.log",
         "hooks/last-run.log", ".env_vars", ".env_vars_discovered",
         "context/generated.md", "v2/work/candidate/partial.db", "v2/cache/file",
     ]
@@ -76,6 +78,7 @@ def main():
                 assert (source / name).read_bytes() == (data / name).read_bytes(), name
             for name in skip:
                 assert not (data / name).exists(), name
+            assert not (data / "opencode-tui/data/opencode/log").exists()
             db = sqlite3.connect((data / db_path).as_uri() + "?mode=ro", uri=True)
             try:
                 assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)

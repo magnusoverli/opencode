@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.5b2
+
+- Keep the CLI usable after restoring a new backup. Supervisor 2026.11.0 restores the CLI's generated log directory as root-owned; OpenCode Beta now leaves that directory out so the CLI recreates it under its own account. Client preferences, sessions and installed speech models remain in the backup ([#236](https://github.com/magnusoverli/opencode/issues/236)).
+
 ## 3.5.5b1
 
 - Supervisor now stops OpenCode Beta while copying its data, then restarts it if it was running. Backups preserve installed speech models, user-installed npm packages, settings and history. Only unfinished speech downloads and extraction staging are newly excluded ([#236](https://github.com/magnusoverli/opencode/issues/236)).
