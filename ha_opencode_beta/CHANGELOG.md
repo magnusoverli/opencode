@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.5b1
+
+- Supervisor now stops OpenCode Beta while copying its data, then restarts it if it was running. Backups preserve installed speech models, user-installed npm packages, settings and history. Only unfinished speech downloads and extraction staging are newly excluded ([#236](https://github.com/magnusoverli/opencode/issues/236)).
+- If an update backup times out at `finishing_file`, check Supervisor's **default backup storage**. Selecting a different agent for a manual backup does not change the update destination. This beta does not change storage timeouts or the policy used by an older installation before updating.
+- Include the Home Assistant 2026.11.3 native MCP reporting and discovery contract corrections from [#235](https://github.com/magnusoverli/opencode/pull/235).
+
 ## 3.5.5b0
 
 - Start the 3.5.5 beta series from [stable 3.5.4](https://github.com/magnusoverli/opencode/releases/tag/v3.5.4). The runtime is unchanged from 3.5.4b3: OpenCode 2.4.1, OpenChamber 2.8.0 and HAB 1.10.0. Existing beta users can update in place; no configuration change is needed.
