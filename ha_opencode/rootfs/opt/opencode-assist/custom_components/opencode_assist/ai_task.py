@@ -26,7 +26,7 @@ class OpenCodeTask(ai_task.AITaskEntity, OpenCodeEntity):
         if task.structure:
             schema = probatio.to_openapi(task.structure, custom_serializer=llm.selector_serializer, openapi_version="3.1.0")
             extra = "\nReturn only a JSON object matching this schema, without Markdown: " + json.dumps(schema)
-        await self.async_run_chat(chat_log, extra)
+        await self.async_run_chat(chat_log, extra, request_origin="ai_task")
         last = chat_log.content[-1]
         if not isinstance(last, conversation.AssistantContent) or last.content is None:
             raise HomeAssistantError("OpenCode returned no answer")

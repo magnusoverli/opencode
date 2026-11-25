@@ -34,6 +34,16 @@ def history_payload(chat_log):
     return "\n\n".join(system), messages
 
 
+def conversation_request_origin(user_input):
+    """Classify only origins established by Home Assistant conversation metadata."""
+    if not hasattr(user_input, "satellite_id"):
+        return "unknown"
+    satellite_id = user_input.satellite_id
+    if isinstance(satellite_id, str) and satellite_id:
+        return "voice"
+    return "unknown"
+
+
 class OpenCodeEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
@@ -44,7 +54,7 @@ class OpenCodeEntity(Entity):
         self._attr_unique_id = subentry.subentry_id
         self._attr_name = subentry.title
 
-    async def async_run_chat(self, chat_log, extra_prompt=""):
+    async def async_run_chat(self, chat_log, extra_prompt="", *, request_origin="unknown"):
         client = self.entry.runtime_data.client
         system, messages = history_payload(chat_log)
         provider, model = self.subentry.data[CONF_MODEL].split("/", 1)
@@ -61,7 +71,7 @@ class OpenCodeEntity(Entity):
         async def deltas():
             nonlocal request_id
             yield {"role": "assistant"}
-            async with aclosing(client.stream(payload)) as stream:
+            async with aclosing(client.stream(payload, request_origin=request_origin)) as stream:
                 async for event in stream:
                     match event.get("type"):
                         case "request":

@@ -425,12 +425,14 @@ RUN --mount=type=bind,source=test/v2-boundary-fixture.sh,target=/tmp/v2-boundary
 RUN --mount=type=bind,source=test,target=/tmp/ha-assist/test,readonly \
     ln -s / /tmp/ha-assist/rootfs \
     && PYTHONDONTWRITEBYTECODE=1 python3 /tmp/ha-assist/test/assist-install.test.py \
+    && PYTHONDONTWRITEBYTECODE=1 python3 /tmp/ha-assist/test/opencode-v2-assist-client.test.py \
     && timeout --signal=TERM --kill-after=10s 120s node --test \
         /tmp/ha-assist/test/opencode-v2-assist-adapter.test.js \
         /tmp/ha-assist/test/opencode-v2-assist-discovery.test.js \
         /tmp/ha-assist/test/opencode-v2-assist-notification.test.js \
         /tmp/ha-assist/test/opencode-v2-assist-lifecycle.test.js \
-        /tmp/ha-assist/test/opencode-v2-assist-service.test.js
+        /tmp/ha-assist/test/opencode-v2-assist-service.test.js \
+        /tmp/ha-assist/test/opencode-v2-assist-readiness.test.js
 
 RUN --mount=type=bind,source=test,target=/tmp/mcp-startup/test,readonly \
     ln -s / /tmp/mcp-startup/rootfs \
